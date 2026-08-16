@@ -1,0 +1,973 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum Role {
+  AGENT_PUBLISHER
+  AGENT_ADVERTISER
+  PUBLISHER
+  ADVERTISER
+  PARTNER
+  ADMIN
+}
+
+enum OtpPurpose {
+  LOGIN
+  REGISTER
+  PUBLISHER_VERIFY
+}
+
+// ─── User (base identity, all roles) ─────────────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  mobile       String   @unique
+  name         String?
+  email        String?  @unique
+  passwordHash String?
+  avatarUrl    String?
+  language     String   @default("en")
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  roles          UserRole[]
+  otps           Otp[]
+  refreshTokens  RefreshToken[]
+  passwordResetTokens PasswordResetToken[]
+  activityLogs   ActivityLog[]
+  qrScans        QrScan[]
+  notifications            Notification[]
+  notificationPreferences  NotificationPreference[]
+  supportTickets           SupportTicket[]
+  ticketMessages           TicketMessage[]
+  bankAccounts             BankAccount[]
+  uploadedFiles            UploadedFile[]
+
+  // Agent-specific profile (null if not an agent)
+  agentProfile     AgentProfile?
+  // Publisher-specific profile (null if not a publisher)
+  publisherProfile Publisher?
+  placedOrders     Order[]       @relation("AdvertiserOrders")
+
+  // Ported from legacy app
+  advertiserKyc    AdvertiserKyc?
+  employeeProfile  Employee?
+  userKyc          UserKyc?
+  advertisements   Advertisement[]
+  onboardingSubmissions OnboardingSubmission[] @relation("OnboardingSubject")
+}
+
+// ─── UserRole (a user can hold multiple roles) ────────────────────────────────
+
+model UserRole {
+  id        String   @id @default(cuid())
+  userId    String
+  role      Role
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, role])
+  @@index([userId])
+}
+
+// ─── AgentProfile ─────────────────────────────────────────────────────────────
+
+model AgentProfile {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  city          String?
+  state         String?
+  referralCode  String   @unique @default(cuid())
+  tier          String   @default("BRONZE")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user             User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orders           Order[]
+  publishers       Publisher[]
+  listings         Listing[]
+  transactions     Transaction[]
+  agentMilestones  AgentMilestone[]
+  orderMilestones  OrderMilestone[]
+  agentAssignments OrderAgentAssignment[]
+}
+
+// ─── OTP ──────────────────────────────────────────────────────────────────────
+
+model Otp {
+  id          String     @id @default(cuid())
+  userId      String
+  // Exactly one of mobile/email is set, depending on delivery channel (SMS vs Resend).
+  mobile      String?
+  email       String?
+  purpose     OtpPurpose @default(LOGIN)
+  // Stored as bcrypt hash
+  codeHash    String
+  attempts    Int        @default(0)
+  expiresAt   DateTime
+  verifiedAt  DateTime?
+  createdAt   DateTime   @default(now())
+
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([mobile, purpose])
+  @@index([email, purpose])
+}
+
+// ─── Order Lifecycle ──────────────────────────────────────────────────────────
+
+enum OrderStatus {
+  DRAFT
+  PENDING_PUBLISHER
+  PUBLISHER_REJECTED
+  PENDING_PRINT
+  SELF_INSTALL
+  PENDING_AGENT
+  AGENT_REJECTED
+  SLOT_PROPOSED
+  SLOT_CONFIRMED
+  IN_PROGRESS
+  PENDING_OTP
+  PENDING_APPROVAL
+  COMPLETED
+  CANCELLED
+}
+
+enum AssetType {
+  BILLBOARD
+  TRANSIT
+  INDOOR
+  DIGITAL
+}
+
+model Site {
+  id          String     @id @default(cuid())
+  name        String
+  address     String
+  latitude    Float
+  longitude   Float
+  assetType   AssetType
+  publisherId String?
+  qrCodeId    String?    @unique
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  publisher   Publisher? @relation(fields: [publisherId], references: [id])
+}
+
+model Order {
+  id            String      @id @default(cuid())
+  advertiserId  String
+  listingId     String
+  agentId       String?
+  status        OrderStatus @default(DRAFT)
+  campaignName  String?
+  designUrl     String?
+  budget        Float?
+  startDate     DateTime?
+  endDate       DateTime?
+  notes         String?
+  publisherAcceptedAt      DateTime?
+  publisherRejectedAt      DateTime?
+  publisherTimerExpiry     DateTime?
+  publisherRejectionReason String?
+  meetingPlace  String?
+  slotProposedAt  DateTime?
+  slotTime        DateTime?
+  slotConfirmedAt DateTime?
+  slotCounterCount Int     @default(0)
+  agentRejectionCount Int  @default(0)
+  agentEscalated  Boolean  @default(false)
+  completionOtp       String?
+  completionOtpPlain  String?
+  completionOtpExpiry DateTime?
+  printReadyAt    DateTime?
+  selfInstallCollectPhotoUrl    String?
+  selfInstallConditionPhotoUrls String[]
+  selfInstallInstallPhotoUrl    String?
+  selfInstallCheckedInAt        DateTime?
+  adminApprovedAt DateTime?
+  // Ported from legacy app: optional link to a reusable Advertisement creative
+  advertisementId String?
+  advertisement   Advertisement? @relation("AdvertisementOrders", fields: [advertisementId], references: [id])
+  agentLatitude         Float?
+  agentLongitude        Float?
+  agentLocationUpdatedAt DateTime?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  advertiser    User              @relation("AdvertiserOrders", fields: [advertiserId], references: [id])
+  listing       Listing           @relation(fields: [listingId], references: [id])
+  agent         AgentProfile?     @relation(fields: [agentId], references: [id])
+  agentAssignments OrderAgentAssignment[]
+  checkIn       CheckIn?
+  verification  SiteVerification?
+  milestones    OrderMilestone[]
+}
+
+enum AssignmentStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+model OrderAgentAssignment {
+  id               String           @id @default(cuid())
+  orderId          String
+  agentId          String
+  status           AssignmentStatus @default(PENDING)
+  rejectionReason  String?
+  assignedAt       DateTime         @default(now())
+  respondedAt      DateTime?
+
+  order  Order        @relation(fields: [orderId], references: [id])
+  agent  AgentProfile @relation(fields: [agentId], references: [id])
+
+  @@index([orderId])
+  @@index([agentId])
+}
+
+model CheckIn {
+  id          String   @id @default(cuid())
+  orderId     String   @unique
+  latitude    Float
+  longitude   Float
+  distanceM   Float    // distance from site in metres
+  checkedInAt DateTime @default(now())
+
+  order       Order    @relation(fields: [orderId], references: [id])
+}
+
+model SiteVerification {
+  id              String   @id @default(cuid())
+  orderId         String   @unique
+  wideAngleUrl    String?
+  closeUpUrl      String?
+  landmarkUrl     String?
+  qrScanned       Boolean  @default(false)
+  checklistPassed Boolean  @default(false)
+  notes           String?
+  verifiedAt      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  order           Order    @relation(fields: [orderId], references: [id])
+}
+
+// ─── QR Code ──────────────────────────────────────────────────────────────────
+
+enum QrType {
+  SITE        // Physical ad space — triggers onboarding or order check-in
+  AD          // Running ad placement — periodic health check
+  AGENT       // Agent referral QR
+  ORDER       // Specific order QR
+  PUBLISHER   // Publisher identity QR — generated by publisher app, scanned by agent to start onboarding
+}
+
+model QrCode {
+  id          String    @id @default(cuid())
+  type        QrType
+  // The signed token embedded in the QR image
+  token       String    @unique
+  // Role(s) that are allowed to act on this QR (empty = any authenticated user can view)
+  allowedRoles Role[]
+  // Polymorphic reference — points to siteId, adPlacementId, agentProfileId, or orderId
+  refId       String
+  metadata    Json?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  scans       QrScan[]
+}
+
+model QrScan {
+  id          String    @id @default(cuid())
+  qrId        String
+  scannedById String
+  // GPS at time of scan
+  latitude    Float?
+  longitude   Float?
+  // Role the user was acting as when they scanned
+  role        Role?
+  // What action was taken as a result
+  action      String?
+  createdAt   DateTime  @default(now())
+
+  qr          QrCode    @relation(fields: [qrId], references: [id])
+  scannedBy   User      @relation(fields: [scannedById], references: [id])
+
+  @@index([qrId])
+  @@index([scannedById])
+}
+
+// ─── Publisher & KYC ─────────────────────────────────────────────────────────
+
+enum PublisherType {
+  INDIVIDUAL
+  BUSINESS
+  NGO
+  POLITICAL
+}
+
+enum KycStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum OnboardingStatus {
+  PENDING_ONBOARDING  // Registered in user app, QR generated, waiting for agent
+  IN_ONBOARDING       // Agent scanned QR, onboarding in progress
+  ONBOARDING_COMPLETE // Agent completed all steps, publisher dashboard unlocked
+  ONBOARDING_CANCELLED // Agent cancelled OR 48hr timeout after scan
+}
+
+enum OnboardingSubmissionStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum OrderMilestoneType {
+  SURVEY
+  CREATIVE_COLLECTION
+  INSTALLATION
+  VERIFICATION
+  HEALTH_CHECK
+  CUSTOM
+}
+
+enum OrderMilestoneStatus {
+  PENDING
+  DISPATCHED
+  IN_PROGRESS
+  COMPLETED
+  SKIPPED
+}
+
+model Publisher {
+  id                String           @id @default(cuid())
+  userId            String?          @unique  // user app login (User.id with role PUBLISHER)
+  agentId           String?                   // AgentProfile.id — null until agent scans QR
+  name              String
+  mobile            String           @unique
+  email             String?
+  type              PublisherType    @default(INDIVIDUAL)
+  city              String?
+  state             String?
+  kycStatus         KycStatus        @default(PENDING)
+  onboardingStatus  OnboardingStatus @default(PENDING_ONBOARDING)
+  claimedAt         DateTime?        // when agent scanned the QR
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  user              User?            @relation(fields: [userId], references: [id])
+  agent             AgentProfile?    @relation(fields: [agentId], references: [id])
+  kyc               PublisherKyc?
+  listings          Listing[]
+  sites             Site[]
+
+  @@index([agentId])
+  @@index([mobile])
+}
+
+model PublisherKyc {
+  id              String    @id @default(cuid())
+  publisherId     String    @unique
+  // Manual upload path
+  aadhaarFrontUrl String?
+  aadhaarBackUrl  String?
+  panFrontUrl     String?
+  panBackUrl      String?
+  gstUrl          String?
+  addressProofUrl String?
+  bankStatement   String?
+  // Business / NGO documents ported from legacy AdSpaceKyc
+  businessRegCertUrl       String?
+  directorIdUrl            String?
+  businessAddressProofUrl  String?
+  adAuthLetterUrl          String?
+  ngoRegCertUrl            String?
+  ngoAddressProofUrl       String?
+  ngoTaxExemptionCertUrl   String?
+  ngoOperationalOverviewUrl String?
+  // Digio path
+  digioRequestId  String?   // Digio's kycId returned on initiate
+  digioReferenceId String?  // our referenceId sent to Digio
+  digioStatus     String?   // raw status from Digio webhook (APPROVED/REJECTED/PENDING)
+  digioVerifiedAt DateTime?
+  digioPayload    Json?     // full webhook payload stored for audit
+  // Common
+  method          String    @default("MANUAL") // "MANUAL" | "DIGIO"
+  status          KycStatus @default(PENDING)
+  rejectionReason String?
+  submittedAt     DateTime?
+  reviewedAt      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  publisher       Publisher @relation(fields: [publisherId], references: [id], onDelete: Cascade)
+}
+
+// ─── Listings ─────────────────────────────────────────────────────────────────
+
+enum ListingStatus {
+  DRAFT
+  PENDING_REVIEW
+  ACTIVE
+  REJECTED
+  INACTIVE
+}
+
+enum ListingCategory {
+  INDOOR
+  OUTDOOR
+  TRANSIT
+  MEDIA
+}
+
+model Listing {
+  id            String          @id @default(cuid())
+  publisherId   String
+  agentId       String
+  title         String
+  category      ListingCategory
+  subType       String?
+  description   String?
+  address       String
+  city          String?
+  latitude      Float?
+  longitude     Float?
+  size          String?
+  monthlyPrice  Float
+  pricingModel  String          @default("fixed")
+  availableNow  Boolean         @default(true)
+  status        ListingStatus   @default(DRAFT)
+  planId        String?
+  agentCanInstall Boolean       @default(true)
+  qrToken       String          @unique @default(cuid())
+  plan          MilestonePlan? @relation(fields: [planId], references: [id])
+  rejectionReason String?
+  publishedAt   DateTime?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  publisher     Publisher       @relation(fields: [publisherId], references: [id])
+  agent         AgentProfile    @relation(fields: [agentId], references: [id])
+  photos        ListingPhoto[]
+  orders        Order[]
+}
+
+model ListingPhoto {
+  id          String   @id @default(cuid())
+  listingId   String
+  url         String
+  type        String   @default("main")
+  createdAt   DateTime @default(now())
+
+  listing     Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@index([listingId])
+}
+
+// ─── Earnings & Payouts ───────────────────────────────────────────────────────
+
+enum TransactionType {
+  ORDER_COMPLETION
+  BONUS
+  REFERRAL
+  PAYOUT
+  ADJUSTMENT
+}
+
+model Transaction {
+  id          String          @id @default(cuid())
+  agentId     String
+  type        TransactionType
+  title       String
+  amount      Float           // positive = credit, negative = debit
+  orderId     String?
+  status      String          @default("COMPLETED")
+  createdAt   DateTime        @default(now())
+
+  agent       AgentProfile    @relation(fields: [agentId], references: [id])
+
+  @@index([agentId])
+}
+
+// ─── Milestones ───────────────────────────────────────────────────────────────
+
+enum MilestoneType {
+  ONBOARDING
+  REVENUE
+  ACTIVITY
+  QUALITY
+}
+
+model MilestoneTemplate {
+  id          String        @id @default(cuid())
+  type        MilestoneType
+  title       String
+  description String
+  target      Int
+  rewardAmount Float        @default(0)
+  sortOrder   Int           @default(0)
+  isActive    Boolean       @default(true)
+  createdAt   DateTime      @default(now())
+
+  agentMilestones AgentMilestone[]
+}
+
+model AgentMilestone {
+  id          String            @id @default(cuid())
+  agentId     String
+  templateId  String
+  progress    Int               @default(0)
+  completedAt DateTime?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  agent       AgentProfile      @relation(fields: [agentId], references: [id])
+  template    MilestoneTemplate @relation(fields: [templateId], references: [id])
+
+  @@unique([agentId, templateId])
+  @@index([agentId])
+}
+
+// ─── Notifications ────────────────────────────────────────────────────────────
+
+enum NotificationType {
+  BOOKING
+  PAYOUT
+  KYC
+  MESSAGE
+  SYSTEM
+  ORDER
+}
+
+model Notification {
+  id              String           @id @default(cuid())
+  userId          String
+  type            NotificationType
+  title           String
+  subtitle        String?
+  message         String
+  suggestedAction String?
+  relatedId       String?
+  read            Boolean          @default(false)
+  createdAt       DateTime         @default(now())
+
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model NotificationPreference {
+  id      String           @id @default(cuid())
+  userId  String
+  type    NotificationType
+  enabled Boolean          @default(true)
+
+  user    User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, type])
+  @@index([userId])
+}
+
+// ─── Support Tickets ─────────────────────────────────────────────────────────
+
+enum TicketStatus {
+  OPEN
+  CLOSED
+}
+
+model SupportTicket {
+  id          String       @id @default(cuid())
+  userId      String
+  title       String
+  category    String       @default("other")
+  description String
+  status      TicketStatus @default(OPEN)
+  relatedOrderId String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  user        User         @relation(fields: [userId], references: [id])
+  messages    TicketMessage[]
+
+  @@index([userId])
+}
+
+model TicketMessage {
+  id          String        @id @default(cuid())
+  ticketId    String
+  authorId    String
+  authorName  String
+  message     String
+  createdAt   DateTime      @default(now())
+
+  ticket      SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  author      User          @relation(fields: [authorId], references: [id])
+
+  @@index([ticketId])
+}
+
+// ─── Training Resources ───────────────────────────────────────────────────────
+
+model TrainingResource {
+  id          String   @id @default(cuid())
+  title       String
+  category    String
+  duration    String?
+  subtitle    String?
+  topic       String?
+  status      String?
+  statusVariant String?
+  videoUrl    String?
+  documentUrl String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ─── Bank Accounts ────────────────────────────────────────────────────────────
+
+model BankAccount {
+  id            String   @id @default(cuid())
+  userId        String
+  accountHolder String
+  bankName      String
+  accountNumber String
+  ifscCode      String
+  isDefault     Boolean  @default(false)
+  isVerified    Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ─── Uploaded Files ───────────────────────────────────────────────────────────
+
+model UploadedFile {
+  id          String   @id @default(cuid())
+  userId      String
+  url         String
+  filename    String
+  mimeType    String
+  sizeBytes   Int
+  purpose     String   // e.g. "KYC", "LISTING_PHOTO", "VERIFICATION"
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ─── RefreshToken ─────────────────────────────────────────────────────────────
+
+model RefreshToken {
+  id          String   @id @default(cuid())
+  userId      String
+  // Stored as SHA-256 hash of the actual token
+  tokenHash   String   @unique
+  userAgent   String?
+  ipAddress   String?
+  lastUsedAt  DateTime?
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ─── PasswordResetToken ───────────────────────────────────────────────────────
+
+model PasswordResetToken {
+  id          String    @id @default(cuid())
+  userId      String
+  // Stored as SHA-256 hash of the actual token sent to the user
+  tokenHash   String    @unique
+  expiresAt   DateTime
+  usedAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ─── ActivityLog ──────────────────────────────────────────────────────────────
+
+model ActivityLog {
+  id        String   @id @default(cuid())
+  userId    String
+  action    String
+  metadata  Json?
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+// ─── App Configuration ────────────────────────────────────────────────────────
+
+model AppConfig {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+// ─── Order Milestone System ───────────────────────────────────────────────────
+
+model OrderMilestoneTemplate {
+  id                    String             @id @default(cuid())
+  title                 String
+  description           String?
+  type                  OrderMilestoneType
+  requirements          Json               // MilestoneRequirement[]
+  estimatedDurationMins Int?
+  isActive              Boolean            @default(true)
+  createdAt             DateTime           @default(now())
+  updatedAt             DateTime           @updatedAt
+
+  planItems       MilestonePlanItem[]
+  orderMilestones OrderMilestone[]
+}
+
+model MilestonePlan {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  items           MilestonePlanItem[]
+  listings        Listing[]
+  orderMilestones OrderMilestone[]
+}
+
+model MilestonePlanItem {
+  id         String                 @id @default(cuid())
+  planId     String
+  templateId String
+  order      Int
+  isOptional Boolean                @default(false)
+
+  plan     MilestonePlan          @relation(fields: [planId], references: [id], onDelete: Cascade)
+  template OrderMilestoneTemplate @relation(fields: [templateId], references: [id])
+
+  @@unique([planId, order])
+  @@index([planId])
+}
+
+model OrderMilestone {
+  id              String               @id @default(cuid())
+  orderId         String
+  templateId      String
+  planId          String?
+  assignedAgentId String?
+  status          OrderMilestoneStatus @default(PENDING)
+  order           Int
+  isOptional      Boolean              @default(false)
+  dueDate         DateTime?
+  notes           String?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  orderRecord    Order                  @relation(fields: [orderId], references: [id])
+  template       OrderMilestoneTemplate @relation(fields: [templateId], references: [id])
+  plan           MilestonePlan?         @relation(fields: [planId], references: [id])
+  assignedAgent  AgentProfile?          @relation(fields: [assignedAgentId], references: [id])
+  evidence       OrderMilestoneEvidence[]
+
+  @@unique([orderId, order])
+  @@index([orderId, order])
+  @@index([assignedAgentId, status, dueDate])
+  @@index([planId])
+}
+
+model OrderMilestoneEvidence {
+  id          String   @id @default(cuid())
+  milestoneId String
+  kind        String
+  label       String?
+  value       String
+  createdAt   DateTime @default(now())
+
+  milestone OrderMilestone @relation(fields: [milestoneId], references: [id], onDelete: Cascade)
+
+  @@index([milestoneId])
+}
+
+// ─── Ported from legacy app: Advertiser KYC, Employee, RoleConfig, Advertisement, User self-KYC ──
+
+enum AdvertisementStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+model AdvertiserKyc {
+  id             String    @id @default(cuid())
+  advertiserId   String    @unique
+  kycType        String    @default("INDIVIDUAL") // "INDIVIDUAL" | "COMMERCIAL" | "NGO" | "AGENCY"
+  nationalIdUrl              String?
+  panCardUrl                 String?
+  utilityBillUrl              String?
+  drivingLicenseUrl           String?
+  commercialIncCertUrl        String?
+  commercialAssociationArticleUrl String?
+  commercialPanIdUrl          String?
+  commercialGstCertUrl        String?
+  ngoRegCertUrl                String?
+  ngo80gCertUrl                String?
+  ngoFcraRegUrl                String?
+  agencyAuthLetterUrl          String?
+  agencyGovtIdUrl              String?
+  status         KycStatus @default(PENDING)
+  rejectionReason String?
+  submittedAt    DateTime?
+  reviewedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  advertiser     User      @relation(fields: [advertiserId], references: [id], onDelete: Cascade)
+}
+
+model Employee {
+  id             String    @id @default(cuid())
+  userId         String    @unique
+  department     String?
+  designation    String?
+  isActive       Boolean   @default(true)
+  passportPhotoUrl             String?
+  referenceLetterUrl           String?
+  ndaAgreementUrl               String?
+  nonCompeteAgreementUrl        String?
+  class10MarksheetUrl           String?
+  class12MarksheetUrl           String?
+  graduationMarksheetUrl        String?
+  postGraduationMarksheetUrl    String?
+  form2NominationUrl            String?
+  form6aUrl                     String?
+  esiFormUrl                    String?
+  form2FamilyDeclarationUrl     String?
+  form6EmployeeRegistrationUrl  String?
+  salaryAccountLetterUrl        String?
+  salarySlipUrls                String[] @default([])
+  complianceFormUrls            String[] @default([])
+  epfFormUrls                   String[] @default([])
+  gratuityFormUrls              String[] @default([])
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model RoleConfig {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  permissions String[] @default([])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Advertisement {
+  id           String              @id @default(cuid())
+  advertiserId String
+  title        String
+  description  String?
+  photoUrls    String[]            @default([])
+  status       AdvertisementStatus @default(DRAFT)
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  advertiser   User    @relation(fields: [advertiserId], references: [id], onDelete: Cascade)
+  orders       Order[] @relation("AdvertisementOrders")
+
+  @@index([advertiserId])
+}
+
+model UserKyc {
+  id              String    @id @default(cuid())
+  userId          String    @unique
+  selfVideoUrl    String?
+  status          KycStatus @default(PENDING)
+  rejectionReason String?
+  submittedAt     DateTime?
+  reviewedAt      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  user            User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// Flow Editor-managed onboarding templates and captured submissions
+model OnboardingFlowTemplate {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  userType    String
+  name        String
+  description String?
+  version     Int      @default(1)
+  steps       Json
+  schema      Json
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  submissions OnboardingSubmission[]
+
+  @@index([userType, isActive])
+}
+
+model OnboardingSubmission {
+  id             String                     @id @default(cuid())
+  flowTemplateId String?
+  userId         String?
+  userType       String
+  accountType    String?
+  status         OnboardingSubmissionStatus @default(SUBMITTED)
+  data           Json
+  submittedById  String?
+  reviewedById   String?
+  reviewedAt     DateTime?
+  rejectionReason String?
+  createdAt      DateTime                   @default(now())
+  updatedAt      DateTime                   @updatedAt
+
+  flowTemplate OnboardingFlowTemplate? @relation(fields: [flowTemplateId], references: [id], onDelete: SetNull)
+  user         User?                    @relation("OnboardingSubject", fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([flowTemplateId])
+  @@index([userId])
+  @@index([userType, status])
+  @@index([createdAt])
+}
