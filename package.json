@@ -11,7 +11,13 @@
     "build": "tsc",
     "postbuild": "node scripts/copy-prisma-client.cjs",
     "start": "node dist/server.js",
-    "seed:config": "tsx src/scripts/seedConfig.ts"
+    "seed:config": "tsx src/scripts/seedConfig.ts",
+    "typecheck": "tsc -p tsconfig.test.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "routes:snapshot": "tsx scripts/route-inventory.ts --write",
+    "arch": "depcruise src --config .dependency-cruiser.cjs && eslint .",
+    "lint": "eslint ."
   },
   "keywords": [],
   "author": "",
@@ -49,12 +55,19 @@
     "seed": "node -r ./node_modules/tsx/dist/cjs/index.cjs prisma/seed.ts"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.9.1",
     "@types/node": "^25.9.1",
+    "@types/supertest": "^7.2.1",
+    "dependency-cruiser": "^18.2.0",
+    "eslint": "^10.9.1",
     "prisma": "^7.9.1",
+    "supertest": "^7.2.2",
     "ts-node": "^10.9.2",
-    "tsx": "^4.22.3"
+    "tsx": "^4.22.3",
+    "typescript-eslint": "^8.68.0",
+    "vitest": "^4.1.11"
   },
   "allowScripts": {
     "esbuild@0.28.1": true,
