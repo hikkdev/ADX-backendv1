@@ -1,27 +1,30 @@
 import { Router } from 'express';
-import {
-  sendOtpHandler,
-  verifyOtpHandler,
-  sendOtpEmailHandler,
-  verifyOtpEmailHandler,
-  refreshTokenHandler,
-  logoutHandler,
-  publisherSendOtpHandler,
-  publisherVerifyOtpHandler,
-  loginPasswordHandler,
-  forgotPasswordHandler,
-  resetPasswordHandler,
-  changePasswordHandler,
-} from '../controllers/auth';
-import { asyncHandler } from '../shared/http';
-import { authenticate } from '../shared/auth';
-import { verifyCaptcha } from '../shared/security';
+import { asyncHandler } from '../../shared/http';
+import { authenticate } from '../../shared/auth';
+import { verifyCaptcha } from '../../shared/security';
 import {
   passwordAuthLimiter,
   otpRequestLimiter,
   otpVerifyLimiter,
   refreshLimiter,
-} from '../shared/security';
+} from '../../shared/security';
+import {
+  sendOtpHandler,
+  verifyOtpHandler,
+  sendOtpEmailHandler,
+  verifyOtpEmailHandler,
+} from './otp/otp.controller';
+import { refreshTokenHandler, logoutHandler } from './tokens/tokens.controller';
+import {
+  loginPasswordHandler,
+  forgotPasswordHandler,
+  resetPasswordHandler,
+  changePasswordHandler,
+} from './password/password.controller';
+import {
+  publisherSendOtpHandler,
+  publisherVerifyOtpHandler,
+} from './publisher/publisher-auth.controller';
 
 export const authRouter = Router();
 

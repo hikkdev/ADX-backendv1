@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { ApiError } from '../shared/errors';
 import { prisma } from '../shared/database';
-import { normalizeMobile } from '../services/otp.service';
+import { normalizeMobile } from '../modules/auth';
 import { logActivity } from '../shared/audit';
 import { Prisma, type OnboardingSubmissionStatus, type Role } from '../shared/database';
 

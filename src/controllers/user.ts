@@ -3,9 +3,9 @@ import { z } from 'zod';
 import { ApiError } from '../shared/errors';
 import { upperEnum } from '../shared/validation';
 import { prisma } from '../shared/database';
-import { listActiveSessions, revokeSessionById } from '../services/token.service';
+import { listActiveSessions, revokeSessionById } from '../modules/auth';
 import { listActivity as listActivityLogs, logActivity } from '../shared/audit';
-import { normalizeMobile } from '../services/otp.service';
+import { normalizeMobile } from '../modules/auth';
 import type { Role } from '../shared/database';
 
 export async function getMe(req: Request, res: Response): Promise<void> {

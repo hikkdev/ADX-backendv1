@@ -1,9 +1,9 @@
-import { redis } from '../shared/cache';
-import { ApiError } from '../shared/errors';
+import { redis } from '../../../shared/cache';
+import { ApiError } from '../../../shared/errors';
 
 // Account-scoped lockout, independent of passwordAuthLimiter's per-IP limit
-// in rateLimit.ts — that one is blind to the same account being brute-forced
-// from many different IPs.
+// in shared/security — that one is blind to the same account being
+// brute-forced from many different IPs.
 const FAIL_LIMIT = 5;
 const FAIL_WINDOW_SECONDS = 15 * 60;
 const LOCK_SECONDS = 15 * 60;

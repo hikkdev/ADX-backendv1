@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { healthHandler } from './health';
-import { authRouter } from '../routes/auth';
+import { authRouter } from '../modules/auth';
 import { userRouter } from '../routes/user';
 import { qrRouter } from '../routes/qr';
 import { orderRouter } from '../routes/order';

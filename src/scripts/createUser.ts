@@ -12,7 +12,7 @@
  */
 import '../config/load-env';
 import { prisma } from '../shared/database';
-import { hashPassword } from '../services/password.service';
+import { hashPassword } from '../modules/auth';
 import type { Role } from '../shared/database';
 
 async function main(): Promise<void> {

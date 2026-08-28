@@ -1,19 +1,19 @@
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
-import { prisma } from '../shared/database';
-import { redis } from '../shared/cache';
-import { env } from '../config/env';
-import { ApiError } from '../shared/errors';
-import { logger } from '../shared/logging';
-import { sendSms } from '../shared/sms';
-import { sendViaResend } from '../shared/email';
-import type { OtpPurpose } from '../shared/database';
+import { redis } from '../../../shared/cache';
+import { env } from '../../../config/env';
+import { ApiError } from '../../../shared/errors';
+import { logger } from '../../../shared/logging';
+import { sendSms } from '../../../shared/sms';
+import { sendViaResend } from '../../../shared/email';
+import type { OtpPurpose } from '../../../shared/database';
+import { prismaOtpRepository as repository } from './prisma-otp.repository';
 
 const OTP_TTL_MINUTES = 10;
 const MAX_ATTEMPTS = 5;
 
 // Per-recipient send throttle, independent of the per-IP limiter in
-// rateLimit.ts — without this, an attacker rotating IPs could still
+// shared/security — without this, an attacker rotating IPs could still
 // SMS/email-bomb one specific number/address, since each OTP's 5-guess cap
 // (below) resets every time a fresh code is requested.
 const OTP_SEND_LIMIT = 3;
@@ -51,17 +51,13 @@ function isDevLoginMobileAllowed(mobile: string): boolean {
   return allowedMobiles.includes(mobile);
 }
 
-async function createDevLoginUser(mobile: string) {
-  logger.info('Creating dev login user from allowlist', { mobile });
-
-  return prisma.user.create({
-    data: {
-      mobile,
-      name: `Dev Login ${mobile.slice(-4)}`,
-      roles: { create: { role: 'AGENT_PUBLISHER' } },
-      agentProfile: { create: {} },
-    },
-  });
+function printDevOtp(recipient: string, code: string, purpose: string): void {
+  if (env.NODE_ENV === 'production') return;
+  console.warn('\n+--------------------------------------+');
+  console.warn(`| OTP for ${recipient.padEnd(27)} |`);
+  console.warn(`| Code: ${code} (${purpose.padEnd(8)})          |`);
+  console.warn(`| Expires in ${String(OTP_TTL_MINUTES).padEnd(2)} minutes              |`);
+  console.warn('+--------------------------------------+\n');
 }
 
 type SendOtpResult = {
@@ -70,62 +66,47 @@ type SendOtpResult = {
 
 export async function sendOtp(mobile: string, purpose: OtpPurpose = 'LOGIN'): Promise<SendOtpResult> {
   mobile = normalizeMobile(mobile);
-  let user = await prisma.user.findUnique({ where: { mobile } });
+  let user = await repository.findUserByMobile(mobile);
 
   if (purpose === 'REGISTER') {
     if (user) {
       throw new ApiError(409, 'CONFLICT', 'An account with this number already exists. Please log in instead.');
     }
     // Create the user record now so the OTP can reference it.
-    const newUser = await prisma.user.create({
-      data: {
-        mobile,
-        roles: { create: { role: 'PUBLISHER' } },
-      },
-    });
-    return _sendOtpForUser(newUser.id, mobile, purpose);
+    const newUser = await repository.createPublisherUser(mobile);
+    return sendOtpForUser(newUser.id, mobile, purpose);
   }
 
   if (!user && purpose === 'LOGIN' && isDevLoginMobileAllowed(mobile)) {
-    user = await createDevLoginUser(mobile);
+    logger.info('Creating dev login user from allowlist', { mobile });
+    user = await repository.createDevLoginUser(mobile);
   }
 
   if (!user) {
     // Don't reveal whether this number has an account — respond the same
     // way a real send would. verifyOtp fails identically either way, so this
     // can't be used to enumerate registered numbers (same trade-off already
-    // used by forgotPasswordHandler in controllers/auth.ts).
+    // used by the forgot-password handler).
     logger.info('OTP requested for unregistered mobile', { mobile, purpose });
     return {};
   }
 
-  return _sendOtpForUser(user.id, mobile, purpose);
+  return sendOtpForUser(user.id, mobile, purpose);
 }
 
-async function _sendOtpForUser(userId: string, mobile: string, purpose: OtpPurpose): Promise<SendOtpResult> {
+async function sendOtpForUser(userId: string, mobile: string, purpose: OtpPurpose): Promise<SendOtpResult> {
   await enforceOtpSendLimit(mobile);
   logger.info('OTP generation started', { userId, mobile, purpose });
 
-  await prisma.otp.updateMany({
-    where: { mobile, purpose, verifiedAt: null },
-    data: { expiresAt: new Date() },
-  });
+  await repository.expireOutstandingByMobile(mobile, purpose);
 
   const code = generateOtp();
   const codeHash = await bcrypt.hash(code, 10);
   const expiresAt = new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000);
 
-  await prisma.otp.create({
-    data: { userId, mobile, purpose, codeHash, expiresAt },
-  });
+  await repository.createForMobile({ userId, mobile, purpose, codeHash, expiresAt });
 
-  if (env.NODE_ENV !== 'production') {
-    console.warn('\n+--------------------------------------+');
-    console.warn(`| OTP for ${mobile.padEnd(27)} |`);
-    console.warn(`| Code: ${code} (${purpose.padEnd(8)})          |`);
-    console.warn(`| Expires in ${String(OTP_TTL_MINUTES).padEnd(2)} minutes              |`);
-    console.warn('+--------------------------------------+\n');
-  }
+  printDevOtp(mobile, code, purpose);
 
   await sendSms(mobile, `Your ADX OTP is ${code}. Valid for ${OTP_TTL_MINUTES} minutes. Do not share this with anyone.`);
   logger.info('OTP dispatch completed', { userId, mobile, purpose, expiresAt });
@@ -137,7 +118,7 @@ async function _sendOtpForUser(userId: string, mobile: string, purpose: OtpPurpo
 // above, for accounts that already have an email on file. LOGIN only: unlike
 // mobile OTP there's no self-registration path via email.
 export async function sendEmailOtp(email: string): Promise<SendOtpResult> {
-  const user = await prisma.user.findUnique({ where: { email } });
+  const user = await repository.findUserByEmail(email);
 
   if (!user) {
     // Same enumeration trade-off as sendOtp above.
@@ -148,26 +129,15 @@ export async function sendEmailOtp(email: string): Promise<SendOtpResult> {
   await enforceOtpSendLimit(email);
   logger.info('Email OTP generation started', { userId: user.id, email });
 
-  await prisma.otp.updateMany({
-    where: { email, purpose: 'LOGIN', verifiedAt: null },
-    data: { expiresAt: new Date() },
-  });
+  await repository.expireOutstandingByEmail(email);
 
   const code = generateOtp();
   const codeHash = await bcrypt.hash(code, 10);
   const expiresAt = new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000);
 
-  await prisma.otp.create({
-    data: { userId: user.id, email, purpose: 'LOGIN', codeHash, expiresAt },
-  });
+  await repository.createForEmail({ userId: user.id, email, codeHash, expiresAt });
 
-  if (env.NODE_ENV !== 'production') {
-    console.warn('\n+--------------------------------------+');
-    console.warn(`| OTP for ${email.padEnd(27)} |`);
-    console.warn(`| Code: ${code} (LOGIN)          |`);
-    console.warn(`| Expires in ${String(OTP_TTL_MINUTES).padEnd(2)} minutes              |`);
-    console.warn('+--------------------------------------+\n');
-  }
+  printDevOtp(email, code, 'LOGIN');
 
   await sendViaResend(
     email,
@@ -182,15 +152,7 @@ export async function sendEmailOtp(email: string): Promise<SendOtpResult> {
 export async function verifyEmailOtp(email: string, code: string): Promise<string> {
   logger.info('Email OTP verification started', { email });
 
-  const otp = await prisma.otp.findFirst({
-    where: {
-      email,
-      purpose: 'LOGIN',
-      verifiedAt: null,
-      expiresAt: { gt: new Date() },
-    },
-    orderBy: { createdAt: 'desc' },
-  });
+  const otp = await repository.findLatestUnverifiedByEmail(email);
 
   if (!otp) {
     logger.warn('Email OTP verification failed: not found or expired', { email });
@@ -202,21 +164,13 @@ export async function verifyEmailOtp(email: string, code: string): Promise<strin
     throw new Error('Too many incorrect attempts');
   }
 
-  const isValid = await bcrypt.compare(code, otp.codeHash);
-
-  if (!isValid) {
-    await prisma.otp.update({
-      where: { id: otp.id },
-      data: { attempts: { increment: 1 } },
-    });
+  if (!(await bcrypt.compare(code, otp.codeHash))) {
+    await repository.incrementAttempts(otp.id);
     logger.warn('Email OTP verification failed: invalid code', { email });
     throw new Error('Invalid OTP');
   }
 
-  await prisma.otp.update({
-    where: { id: otp.id },
-    data: { verifiedAt: new Date() },
-  });
+  await repository.markVerified(otp.id);
 
   logger.info('Email OTP verification completed', { email, userId: otp.userId });
   return otp.userId;
@@ -230,15 +184,7 @@ export async function verifyOtp(
   mobile = normalizeMobile(mobile);
   logger.info('OTP verification started', { mobile, purpose });
 
-  const otp = await prisma.otp.findFirst({
-    where: {
-      mobile,
-      purpose,
-      verifiedAt: null,
-      expiresAt: { gt: new Date() },
-    },
-    orderBy: { createdAt: 'desc' },
-  });
+  const otp = await repository.findLatestUnverifiedByMobile(mobile, purpose);
 
   if (!otp) {
     logger.warn('OTP verification failed: not found or expired', { mobile, purpose });
@@ -250,21 +196,13 @@ export async function verifyOtp(
     throw new Error('Too many incorrect attempts');
   }
 
-  const isValid = await bcrypt.compare(code, otp.codeHash);
-
-  if (!isValid) {
-    await prisma.otp.update({
-      where: { id: otp.id },
-      data: { attempts: { increment: 1 } },
-    });
+  if (!(await bcrypt.compare(code, otp.codeHash))) {
+    await repository.incrementAttempts(otp.id);
     logger.warn('OTP verification failed: invalid code', { mobile, purpose });
     throw new Error('Invalid OTP');
   }
 
-  await prisma.otp.update({
-    where: { id: otp.id },
-    data: { verifiedAt: new Date() },
-  });
+  await repository.markVerified(otp.id);
 
   logger.info('OTP verification completed', { mobile, purpose, userId: otp.userId });
   return otp.userId;
