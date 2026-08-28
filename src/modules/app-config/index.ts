@@ -7,3 +7,6 @@
  */
 export { configRouter } from './app-config.routes';
 export { APP_ENUMS } from './app-enums';
+
+/** Used by `order-milestones` to pick a default plan for a listing category. */
+export { getCategoryPlanId } from './app-config.service';

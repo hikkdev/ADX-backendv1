@@ -43,6 +43,11 @@ export async function getAgentWithUser(agentId: string) {
   return repository.findWithUser(agentId);
 }
 
+/** Whether an agent profile id exists — used before assigning work to it. */
+export async function agentExists(agentId: string): Promise<boolean> {
+  return repository.exists(agentId);
+}
+
 export async function findAssignableAgent(excludeIds: string[]) {
   return repository.findAssignable(excludeIds);
 }

@@ -74,3 +74,8 @@ export async function getListingWithPublisher(listingId: string) {
 export async function setListingAvailability(listingId: string, availableNow: boolean) {
   await repository.setAvailability(listingId, availableNow);
 }
+
+/** Plain listing lookup, used by `order-milestones` to resolve a plan. */
+export async function getListingById(listingId: string) {
+  return repository.findById(listingId);
+}

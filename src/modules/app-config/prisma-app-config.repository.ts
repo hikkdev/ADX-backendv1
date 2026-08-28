@@ -6,6 +6,10 @@ export const prismaAppConfigRepository: AppConfigRepository = {
     return prisma.appConfig.findUnique({ where: { key: CONFIG_KEY } });
   },
 
+  findByKey(key: string) {
+    return prisma.appConfig.findUnique({ where: { key } });
+  },
+
   save(value: object) {
     return prisma.appConfig.upsert({
       where: { key: CONFIG_KEY },

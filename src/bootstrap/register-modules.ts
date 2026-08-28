@@ -13,11 +13,11 @@ import {
 import { earningsRouter } from '../modules/earnings';
 import { notificationRouter } from '../modules/notifications';
 import { supportRouter } from '../modules/support';
-import { milestoneTemplateRouter, milestonePlanRouter, orderMilestoneRouter, agentMilestoneRouter } from '../routes/orderMilestone';
+import { milestoneTemplateRouter, milestonePlanRouter, orderMilestoneRouter, agentMilestoneRouter } from '../modules/order-milestones';
 import { bankingRouter } from '../modules/banking';
 import { uploadRouter } from '../modules/uploads';
 import { integrationsRouter } from '../modules/integrations';
-import { onboardingRouter } from '../routes/onboarding';
+import { onboardingRouter } from '../modules/onboarding';
 import { configRouter } from '../modules/app-config';
 import { asyncHandler } from '../shared/http';
 // Ported from legacy app

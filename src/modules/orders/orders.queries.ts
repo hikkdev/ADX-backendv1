@@ -5,6 +5,15 @@ export async function getOrderById(orderId: string) {
   return repository.findDetail(orderId);
 }
 
+/**
+ * The slice of an order other modules reason about — its status (for
+ * finalised-order guards), its agent and its listing. Used by
+ * `order-milestones`.
+ */
+export async function getOrderSummary(orderId: string) {
+  return repository.findSummary(orderId);
+}
+
 export async function getOrdersForAdvertiser(advertiserId: string) {
   return repository.findForAdvertiser(advertiserId);
 }

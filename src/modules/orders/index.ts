@@ -14,6 +14,9 @@
  */
 export { orderRouter } from './orders.routes';
 
+/** Used by `order-milestones` to guard against acting on a finalised order. */
+export { getOrderSummary } from './orders.queries';
+
 /** Used by jobs/publisher-timer. */
 export { findPublisherTimerExpired } from './orders.queries';
 export { shortId } from './orders.notify';

@@ -1,4 +1,5 @@
 import { APP_ENUMS } from './app-enums';
+import { CATEGORY_PLANS_KEY } from './app-config.repository';
 import { prismaAppConfigRepository as repository } from './prisma-app-config.repository';
 
 /**
@@ -18,4 +19,17 @@ export async function getAppConfig(): Promise<object> {
 export async function saveAppConfig(value: object) {
   const row = await repository.save(value);
   return row.value;
+}
+
+/**
+ * Default milestone plan for a listing category, from the `categoryPlans`
+ * config row. Returns null when unset or malformed rather than throwing —
+ * milestone auto-assignment treats "no plan" as "nothing to do".
+ */
+export async function getCategoryPlanId(category: string): Promise<string | null> {
+  const row = await repository.findByKey(CATEGORY_PLANS_KEY);
+  const value = row?.value;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const candidate = (value as Record<string, unknown>)[category];
+  return typeof candidate === 'string' ? candidate : null;
 }

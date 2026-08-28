@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import { asyncHandler } from '../../shared/http';
+import { authenticate, requireRole } from '../../shared/auth';
 import {
   createTemplateHandler,
   listTemplatesHandler,
@@ -17,9 +19,7 @@ import {
   getMilestoneDetailHandler,
   startMilestoneHandler,
   completeMilestoneHandler,
-} from '../controllers/orderMilestone';
-import { asyncHandler } from '../shared/http';
-import { authenticate, requireRole } from '../shared/auth';
+} from './order-milestones.controller';
 
 export const milestoneTemplateRouter = Router();
 milestoneTemplateRouter.use(authenticate);
@@ -38,6 +38,7 @@ milestonePlanRouter.get('/:id', asyncHandler(getPlanHandler));
 milestonePlanRouter.patch('/:id', requireRole('ADMIN'), asyncHandler(updatePlanHandler));
 milestonePlanRouter.put('/:id/items', requireRole('ADMIN'), asyncHandler(replacePlanItemsHandler));
 
+// mergeParams so :orderId from the mount path reaches these handlers.
 export const orderMilestoneRouter = Router({ mergeParams: true });
 orderMilestoneRouter.use(authenticate);
 
@@ -49,6 +50,7 @@ orderMilestoneRouter.delete('/:milestoneId', requireRole('ADMIN'), asyncHandler(
 export const agentMilestoneRouter = Router();
 agentMilestoneRouter.use(authenticate);
 agentMilestoneRouter.use(requireRole('AGENT_PUBLISHER', 'AGENT_ADVERTISER'));
+
 agentMilestoneRouter.get('/', asyncHandler(getAgentMilestonesHandler));
 agentMilestoneRouter.get('/:milestoneId', asyncHandler(getMilestoneDetailHandler));
 agentMilestoneRouter.post('/:milestoneId/start', asyncHandler(startMilestoneHandler));

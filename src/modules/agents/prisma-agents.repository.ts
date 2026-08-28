@@ -48,6 +48,10 @@ export const prismaAgentsRepository: AgentsRepository = {
     });
   },
 
+  async exists(id: string) {
+    return (await prisma.agentProfile.findUnique({ where: { id }, select: { id: true } })) !== null;
+  },
+
   findByUserId(userId: string) {
     return prisma.agentProfile.findUnique({ where: { userId } });
   },

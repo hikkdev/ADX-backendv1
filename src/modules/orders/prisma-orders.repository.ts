@@ -26,6 +26,13 @@ export const prismaOrdersRepository: OrdersRepository = {
     return prisma.order.findUnique({ where: { id: orderId } });
   },
 
+  findSummary(orderId: string) {
+    return prisma.order.findUnique({
+      where: { id: orderId },
+      select: { id: true, status: true, agentId: true, listingId: true },
+    });
+  },
+
   findWithPublisher(orderId: string) {
     return prisma.order.findUnique({ where: { id: orderId }, include: withPublisher }) as never;
   },

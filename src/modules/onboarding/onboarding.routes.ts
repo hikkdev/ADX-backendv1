@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import { asyncHandler } from '../../shared/http';
+import { authenticate, requireRole } from '../../shared/auth';
 import {
   createOnboardingSubmission,
   deleteOnboardingSubmission,
@@ -9,12 +11,11 @@ import {
   updateOnboardingSubmission,
   updateOnboardingSubmissionStatus,
   upsertFlowTemplate,
-} from '../controllers/onboarding';
-import { asyncHandler } from '../shared/http';
-import { authenticate, requireRole } from '../shared/auth';
+} from './onboarding.controller';
 
 export const onboardingRouter = Router();
 
+// The whole module is admin-only: these endpoints provision user accounts.
 onboardingRouter.use(authenticate);
 onboardingRouter.use(requireRole('ADMIN'));
 

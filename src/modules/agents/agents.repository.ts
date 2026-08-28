@@ -13,6 +13,7 @@ export interface AgentsRepository {
     offset: number,
   ): Promise<{ items: AgentProfile[]; total: number }>;
   findById(id: string): Promise<AgentProfile | null>;
+  exists(id: string): Promise<boolean>;
   findByUserId(userId: string): Promise<AgentProfile | null>;
   /** Agent plus the user id to notify. */
   findWithUser(agentId: string): Promise<{ id: string; userId: string } | null>;

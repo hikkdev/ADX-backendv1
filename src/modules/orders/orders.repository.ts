@@ -35,6 +35,10 @@ export type VerificationPatch = Partial<{
 export interface OrdersRepository {
   create(data: NewOrder): Promise<Order>;
   findById(orderId: string): Promise<Order | null>;
+  /** Just the fields other modules need to reason about an order. */
+  findSummary(
+    orderId: string,
+  ): Promise<{ id: string; status: string; agentId: string | null; listingId: string } | null>;
   findWithPublisher(orderId: string): Promise<OrderWithPublisher | null>;
   /** The full aggregate the order detail endpoint returns. */
   findDetail(orderId: string): Promise<unknown | null>;
