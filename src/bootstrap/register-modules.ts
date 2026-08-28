@@ -6,10 +6,9 @@ import { qrRouter } from '../routes/qr';
 import { orderRouter } from '../routes/order';
 import { similarListingsHandler } from '../controllers/order';
 import { publisherRouter, listingRouter } from '../routes/publisher';
-import { earningsRouter } from '../routes/earnings';
+import { earningsRouter } from '../modules/earnings';
 import { notificationRouter } from '../modules/notifications';
 import { supportRouter } from '../modules/support';
-import { milestoneRouter, trainingRouter } from '../routes/milestone';
 import { milestoneTemplateRouter, milestonePlanRouter, orderMilestoneRouter, agentMilestoneRouter } from '../routes/orderMilestone';
 import { bankingRouter } from '../modules/banking';
 import { uploadRouter } from '../modules/uploads';
@@ -23,7 +22,7 @@ import { employeeRouter } from '../modules/employees';
 import { rolesConfigRouter } from '../modules/access-control';
 import { advertiserKycRouter, userKycRouter } from '../modules/kyc';
 import { advertisementRouter } from '../modules/advertisements';
-import { agentRouter } from '../routes/agent';
+import { agentRouter, milestoneRouter, trainingRouter } from '../modules/agents';
 
 export const apiRouter = Router();
 

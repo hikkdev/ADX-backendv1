@@ -1,10 +1,10 @@
 import { Router } from 'express';
+import { asyncHandler } from '../../../shared/http';
+import { authenticate, requireRole } from '../../../shared/auth';
 import {
   getMilestonesHandler, createMilestoneTemplateHandler,
   getTrainingHandler, createTrainingHandler,
-} from '../controllers/milestone';
-import { asyncHandler } from '../shared/http';
-import { authenticate, requireRole } from '../shared/auth';
+} from './agent-milestones.controller';
 
 export const milestoneRouter = Router();
 milestoneRouter.use(authenticate);

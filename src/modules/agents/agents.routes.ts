@@ -1,7 +1,7 @@
 import { Router } from 'express';
-import { getAllAgentsHandler, getAgentByIdHandler } from '../controllers/agent';
-import { asyncHandler } from '../shared/http';
-import { authenticate, requireRole } from '../shared/auth';
+import { asyncHandler } from '../../shared/http';
+import { authenticate, requireRole } from '../../shared/auth';
+import { getAllAgentsHandler, getAgentByIdHandler } from './agents.controller';
 
 export const agentRouter = Router();
 agentRouter.use(authenticate);
