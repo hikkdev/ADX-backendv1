@@ -1,5 +1,5 @@
 import { prisma } from '../shared/database';
-import { createNotification } from './notification.service';
+import { createNotification } from '../modules/notifications';
 import { logger } from '../shared/logging';
 
 export async function autoAssignAgent(orderId: string) {

@@ -1,6 +1,6 @@
 import { prisma } from '../shared/database';
 import bcrypt from 'bcryptjs';
-import { createNotification } from './notification.service';
+import { createNotification } from '../modules/notifications';
 import { autoAssignAgent } from './orderAssignment.service';
 import { logger } from '../shared/logging';
 

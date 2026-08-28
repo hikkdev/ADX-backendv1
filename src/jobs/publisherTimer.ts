@@ -1,6 +1,6 @@
 import { prisma } from '../shared/database';
 import { redis } from '../shared/cache';
-import { createNotification } from '../services/notification.service';
+import { createNotification } from '../modules/notifications';
 import { logger } from '../shared/logging';
 
 const TAG = 'publisherTimerJob';

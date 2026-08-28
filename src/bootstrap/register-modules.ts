@@ -7,7 +7,7 @@ import { orderRouter } from '../routes/order';
 import { similarListingsHandler } from '../controllers/order';
 import { publisherRouter, listingRouter } from '../routes/publisher';
 import { earningsRouter } from '../routes/earnings';
-import { notificationRouter } from '../routes/notification';
+import { notificationRouter } from '../modules/notifications';
 import { supportRouter } from '../routes/support';
 import { milestoneRouter, trainingRouter } from '../routes/milestone';
 import { milestoneTemplateRouter, milestonePlanRouter, orderMilestoneRouter, agentMilestoneRouter } from '../routes/orderMilestone';
