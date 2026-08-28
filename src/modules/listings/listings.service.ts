@@ -59,3 +59,18 @@ export async function assertAgentAssignable(agentId: string, isAdmin: boolean): 
   }
   return agentId;
 }
+
+/**
+ * Reads and writes the `orders` module needs on a listing.
+ *
+ * Order progression flips `availableNow` — occupied when a slot is confirmed,
+ * free again on cancellation or campaign end. Exposed here so orders never
+ * writes to the Listing table itself.
+ */
+export async function getListingWithPublisher(listingId: string) {
+  return repository.findWithPublisher(listingId);
+}
+
+export async function setListingAvailability(listingId: string, availableNow: boolean) {
+  await repository.setAvailability(listingId, availableNow);
+}

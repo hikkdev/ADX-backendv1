@@ -20,4 +20,7 @@ export { milestoneRouter, trainingRouter } from './milestones/agent-milestones.r
  */
 export { requireAgentProfile, findAgentProfile } from './agents.service';
 
+/** Directory lookups `orders` needs for assignment and notification. */
+export { getAgentWithUser, findAssignableAgent } from './agents.service';
+
 export { incrementMilestoneProgress } from './milestones/agent-milestones.service';

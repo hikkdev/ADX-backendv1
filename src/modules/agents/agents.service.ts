@@ -34,3 +34,15 @@ export async function requireAgentProfile(userId: string): Promise<AgentProfile>
 export async function findAgentProfile(userId: string): Promise<AgentProfile | null> {
   return repository.findByUserId(userId);
 }
+
+/**
+ * Directory lookups the `orders` module needs for assignment and notification,
+ * so it never queries AgentProfile itself.
+ */
+export async function getAgentWithUser(agentId: string) {
+  return repository.findWithUser(agentId);
+}
+
+export async function findAssignableAgent(excludeIds: string[]) {
+  return repository.findAssignable(excludeIds);
+}

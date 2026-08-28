@@ -35,6 +35,7 @@ export interface UsersRepository {
     roles: Role[];
   }): Promise<User>;
   findAnyAdminRole(): Promise<{ userId: string } | null>;
+  findAdminUserIds(): Promise<{ userId: string }[]>;
   grantAdmin(userId: string): Promise<unknown>;
   grantRole(userId: string, role: Role): Promise<unknown>;
   ensureAgentProfile(userId: string): Promise<unknown>;

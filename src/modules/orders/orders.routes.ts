@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import { asyncHandler } from '../shared/http';
-import { authenticate, requireRole } from '../shared/auth';
+import { asyncHandler } from '../../shared/http';
+import { authenticate, requireRole } from '../../shared/auth';
 import {
   placeOrderHandler, getAllOrdersHandler, getMyOrdersHandler, getOrderByIdHandler,
   publisherAcceptHandler, publisherRejectHandler,
@@ -12,12 +12,15 @@ import {
   approveOrderHandler, cancelOrderHandler, endCampaignHandler,
   selfInstallCollectPrintsHandler, selfInstallCaptureConditionHandler,
   selfInstallCheckInHandler, selfInstallCaptureInstallationHandler,
+} from './orders.controller';
+import {
   agentCheckInHandler, updateLocationHandler, agentLocationHandler,
-} from '../controllers/order';
+} from './tracking/tracking.controller';
 
 export const orderRouter = Router();
 orderRouter.use(authenticate);
 
+// `/my` must stay ahead of `/:id`, or it would be read as an order id.
 orderRouter.get('/my', asyncHandler(getMyOrdersHandler));
 orderRouter.get('/:id', asyncHandler(getOrderByIdHandler));
 

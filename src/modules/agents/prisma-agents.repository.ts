@@ -51,4 +51,22 @@ export const prismaAgentsRepository: AgentsRepository = {
   findByUserId(userId: string) {
     return prisma.agentProfile.findUnique({ where: { userId } });
   },
+
+  async findWithUser(agentId: string) {
+    const agent = await prisma.agentProfile.findUnique({
+      where: { id: agentId },
+      include: { user: true },
+    });
+    return agent?.user ? { id: agent.id, userId: agent.user.id } : null;
+  },
+
+  findAssignable(excludeIds: string[]) {
+    return prisma.agentProfile.findFirst({
+      where: {
+        id: { notIn: excludeIds },
+        user: { isActive: true, roles: { some: { role: 'AGENT_PUBLISHER' } } },
+      },
+      select: { id: true },
+    });
+  },
 };

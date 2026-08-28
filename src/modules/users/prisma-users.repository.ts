@@ -188,6 +188,10 @@ export const prismaUsersRepository: UsersRepository = {
     return prisma.userRole.findFirst({ where: { role: 'ADMIN' } });
   },
 
+  findAdminUserIds() {
+    return prisma.userRole.findMany({ where: { role: 'ADMIN' }, select: { userId: true } });
+  },
+
   grantAdmin(userId: string) {
     return prisma.userRole.create({ data: { userId, role: 'ADMIN' } });
   },

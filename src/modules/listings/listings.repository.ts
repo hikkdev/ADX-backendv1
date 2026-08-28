@@ -27,6 +27,11 @@ export type ListingPatch = Partial<{
   status: ListingStatus;
 }>;
 
+/** The joins the orders module needs when placing and progressing an order. */
+export type ListingWithPublisher = Listing & {
+  publisher: { id: string; userId: string | null; agentId: string | null } | null;
+};
+
 export interface ListingsRepository {
   create(data: NewListing): Promise<Listing>;
   findForPublisher(publisherId: string): Promise<Listing[]>;
@@ -37,4 +42,7 @@ export interface ListingsRepository {
   /** Comparable active listings: same city and category, price within ±30%. */
   findSimilar(listing: Listing): Promise<Listing[]>;
   agentExists(agentId: string): Promise<boolean>;
+  /** Listing joined to its publisher and that publisher's user, for orders. */
+  findWithPublisher(listingId: string): Promise<ListingWithPublisher | null>;
+  setAvailability(listingId: string, availableNow: boolean): Promise<unknown>;
 }

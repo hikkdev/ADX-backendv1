@@ -1,7 +1,8 @@
-import { prisma } from '../shared/database';
 import { redis } from '../shared/cache';
-import { createNotification } from '../modules/notifications';
 import { logger } from '../shared/logging';
+import { createNotification } from '../modules/notifications';
+import { findPublisherTimerExpired, shortId } from '../modules/orders';
+import { listAdminUserIds } from '../modules/users';
 
 const TAG = 'publisherTimerJob';
 const INTERVAL_MS = 60 * 1000;
@@ -25,13 +26,7 @@ export function startPublisherTimerJob(): void {
       // Only match orders whose timer expired within the last tick window so we
       // notify once per order rather than on every tick until the publisher responds.
       const windowStart = new Date(now.getTime() - INTERVAL_MS);
-      const expiredOrders = await prisma.order.findMany({
-        where: {
-          status: 'PENDING_PUBLISHER',
-          publisherTimerExpiry: { gte: windowStart, lt: now },
-        },
-        select: { id: true },
-      });
+      const expiredOrders = await findPublisherTimerExpired(windowStart, now);
 
       logger.info('Publisher timer tick', {
         tag: TAG,
@@ -41,17 +36,15 @@ export function startPublisherTimerJob(): void {
 
       if (expiredOrders.length === 0) return;
 
-      const admins = await prisma.userRole.findMany({ where: { role: 'ADMIN' } });
+      const adminIds = await listAdminUserIds();
 
       for (const order of expiredOrders) {
-        const shortId = order.id.slice(-6).toUpperCase();
-
-        admins.map((ur) =>
+        adminIds.map((userId) =>
           createNotification({
-            userId: ur.userId,
+            userId,
             type: 'ORDER',
             title: 'Publisher no response',
-            message: `Order ${shortId} has had no publisher response within 30 minutes. Please follow up.`,
+            message: `Order ${shortId(order.id)} has had no publisher response within 30 minutes. Please follow up.`,
             relatedId: order.id,
           }).catch(() => {}),
         );

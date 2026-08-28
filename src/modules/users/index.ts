@@ -12,3 +12,6 @@ export { userRouter } from './users.routes';
  * `support` (reply author labels) and `employees` (existence check).
  */
 export { getUserDisplayName, userExists } from './users.service';
+
+/** Admin recipients for platform alerts — used by `orders` and jobs. */
+export { listAdminUserIds } from './users.service';

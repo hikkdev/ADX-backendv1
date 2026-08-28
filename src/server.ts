@@ -2,7 +2,7 @@ import { app } from './app';
 import { env } from './config/env';
 import { logger } from './shared/logging';
 import { registerGracefulShutdown } from './bootstrap/graceful-shutdown';
-import { startPublisherTimerJob, publisherTimerInterval } from './jobs/publisherTimer';
+import { startPublisherTimerJob, publisherTimerInterval } from './jobs/publisher-timer.job';
 
 const server = app.listen(env.PORT, () => {
   logger.info('ADX backend running', { port: env.PORT, env: env.NODE_ENV });

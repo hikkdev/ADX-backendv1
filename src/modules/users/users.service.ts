@@ -132,3 +132,12 @@ export async function getUserDisplayName(userId: string): Promise<string | null>
 export async function userExists(userId: string): Promise<boolean> {
   return (await repository.findById(userId)) !== null;
 }
+
+/**
+ * Every admin's user id — the recipients for platform-wide alerts.
+ *
+ * Used by `orders` and the publisher-timer job so neither queries UserRole.
+ */
+export async function listAdminUserIds(): Promise<string[]> {
+  return (await repository.findAdminUserIds()).map((row) => row.userId);
+}

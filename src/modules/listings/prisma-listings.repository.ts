@@ -58,6 +58,17 @@ export const prismaListingsRepository: ListingsRepository = {
     });
   },
 
+  findWithPublisher(listingId: string) {
+    return prisma.listing.findUnique({
+      where: { id: listingId },
+      include: { publisher: { include: { user: true } } },
+    }) as never;
+  },
+
+  setAvailability(listingId: string, availableNow: boolean) {
+    return prisma.listing.update({ where: { id: listingId }, data: { availableNow } });
+  },
+
   async agentExists(agentId: string) {
     return (await prisma.agentProfile.findUnique({ where: { id: agentId } })) !== null;
   },

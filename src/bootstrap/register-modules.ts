@@ -3,7 +3,7 @@ import { healthHandler } from './health';
 import { authRouter } from '../modules/auth';
 import { userRouter } from '../modules/users';
 import { qrRouter } from '../modules/qr';
-import { orderRouter } from '../routes/order';
+import { orderRouter } from '../modules/orders';
 import { listingRouter, similarListingsHandler } from '../modules/listings';
 import {
   publisherRouter,
