@@ -31,7 +31,7 @@ export function authenticate(req: Request, _res: Response, next: NextFunction): 
 }
 
 export function requireRole(...roles: Role[]) {
-  return (req: Request, _res: Response, next: NextFunction): void => {
+  const guard = (req: Request, _res: Response, next: NextFunction): void => {
     const userRoles = req.user?.roles ?? [];
     const hasRole = roles.some((r) => userRoles.includes(r));
     if (!hasRole) {
@@ -39,6 +39,10 @@ export function requireRole(...roles: Role[]) {
     }
     next();
   };
+  // Name encodes the roles so the route-inventory snapshot records which
+  // roles guard each route, not just that some guard exists. Metadata only.
+  Object.defineProperty(guard, 'name', { value: `requireRole(${roles.join('|')})`, configurable: true });
+  return guard;
 }
 
 // Blocks PUBLISHER users from accessing protected routes until onboarding is complete.

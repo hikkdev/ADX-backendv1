@@ -35,7 +35,13 @@ export type AsyncRouteHandler = (
 ) => Promise<void>;
 
 export function asyncHandler(handler: AsyncRouteHandler) {
-  return (req: Request, res: Response, next: NextFunction): void => {
+  const wrapped = (req: Request, res: Response, next: NextFunction): void => {
     handler(req, res, next).catch(next);
   };
+  // Carry the wrapped handler's name onto the wrapper. Nothing at runtime
+  // reads it, but it makes the Express router stack self-describing, which is
+  // what lets scripts/route-inventory.ts pin each route to a named handler
+  // instead of an indistinguishable '<anon>'.
+  Object.defineProperty(wrapped, 'name', { value: handler.name, configurable: true });
+  return wrapped;
 }

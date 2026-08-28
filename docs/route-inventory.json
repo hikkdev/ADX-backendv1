@@ -1,0 +1,2106 @@
+{
+  "generatedBy": "scripts/route-inventory.ts",
+  "routeCount": 167,
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/api/v1/health",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "<anon>"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/config",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "getConfigHandler"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/config",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "<anon>",
+        "putConfigHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/send-otp",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "<anon>",
+        "verifyCaptcha",
+        "sendOtpHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/verify-otp",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "<anon>",
+        "verifyOtpHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/send-otp-email",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "<anon>",
+        "verifyCaptcha",
+        "sendOtpEmailHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/verify-otp-email",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "<anon>",
+        "verifyOtpEmailHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/refresh",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "<anon>",
+        "refreshTokenHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/logout",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "<anon>",
+        "logoutHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/login-password",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "<anon>",
+        "verifyCaptcha",
+        "loginPasswordHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/forgot-password",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "<anon>",
+        "verifyCaptcha",
+        "forgotPasswordHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/reset-password",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "<anon>",
+        "resetPasswordHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/change-password",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "changePasswordHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/publisher/send-otp",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "<anon>",
+        "verifyCaptcha",
+        "publisherSendOtpHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/publisher/verify-otp",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "<anon>",
+        "publisherVerifyOtpHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/users/bootstrap-admin",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "bootstrapAdmin"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/users/me",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "getMe"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/users/me",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "updateMe"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/users/me/sessions",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "listMySessions"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/users/me/sessions/:id",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "revokeMySession"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/users/me/activity",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "listMyActivity"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/users",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "getAllUsers"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/users",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "createUser"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/users/roles",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "assignRole"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/users/:id",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "updateUserByAdmin"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/users/:id",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "deleteUser"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/qr/:qrId/image.png",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "qrImagePngHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/qr/:qrId/image.svg",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "qrImageSvgHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/qr/resolve",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "resolveQrHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/qr",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "generateQrHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/qr/:qrId/scans",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "getQrScansHandler"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/qr/:qrId",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "deactivateQrHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/qr/:qrId",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "getQrHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/listings/:id/similar",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "similarListingsHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/orders/my",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "getMyOrdersHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/orders/:id",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "getOrderByIdHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/orders",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADVERTISER)",
+        "placeOrderHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/orders/:id/accept-publisher",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(PUBLISHER)",
+        "publisherAcceptHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/orders/:id/reject-publisher",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(PUBLISHER)",
+        "publisherRejectHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/orders/:id/confirm-slot",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(PUBLISHER)",
+        "confirmSlotHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/orders/:id/counter-slot",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(PUBLISHER)",
+        "counterSlotHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/orders/:id/self-install/collect-prints",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(PUBLISHER)",
+        "selfInstallCollectPrintsHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/orders/:id/self-install/capture-condition",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(PUBLISHER)",
+        "selfInstallCaptureConditionHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/orders/:id/self-install/checkin",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(PUBLISHER)",
+        "selfInstallCheckInHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/orders/:id/self-install/capture-installation",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(PUBLISHER)",
+        "selfInstallCaptureInstallationHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/orders/:id/accept-agent",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(AGENT_PUBLISHER)",
+        "agentAcceptHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/orders/:id/reject-agent",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(AGENT_PUBLISHER)",
+        "agentRejectHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/orders/:id/propose-slot",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(AGENT_PUBLISHER)",
+        "proposeSlotHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/orders/:id/collect-prints",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(AGENT_PUBLISHER)",
+        "collectPrintsHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/orders/:id/checkin",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(AGENT_PUBLISHER)",
+        "agentCheckInHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/orders/:id/capture-condition",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(AGENT_PUBLISHER)",
+        "captureConditionHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/orders/:id/reject-condition",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(AGENT_PUBLISHER)",
+        "rejectConditionHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/orders/:id/capture-installation",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(AGENT_PUBLISHER)",
+        "captureInstallationHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/orders/:id/request-otp",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(AGENT_PUBLISHER)",
+        "requestOtpHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/orders/:id/verify-otp",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(AGENT_PUBLISHER)",
+        "verifyOtpHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/orders/:id/update-location",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(AGENT_PUBLISHER)",
+        "updateLocationHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/orders/:id/agent-location",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(PUBLISHER)",
+        "agentLocationHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/orders",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "getAllOrdersHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/orders/:id/print-ready",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "printReadyHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/orders/:id/assign-agent",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "adminAssignAgentHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/orders/:id/approve",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "approveOrderHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/orders/:id/cancel",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "cancelOrderHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/orders/:id/end-campaign",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "endCampaignHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/publishers/register",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(PUBLISHER)",
+        "registerPublisherProfileHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/publishers/me",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(PUBLISHER)",
+        "getMyPublisherProfileHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/publishers/me/qr",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(PUBLISHER)",
+        "getMyOnboardingQrHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/publishers/me/cancel-onboarding",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(PUBLISHER)",
+        "cancelMyOnboardingHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/publishers",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "getPublishersHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/publishers",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(AGENT_PUBLISHER)",
+        "createPublisherHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/publishers/:publisherId",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "getPublisherHandler"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/publishers/:publisherId",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(AGENT_PUBLISHER)",
+        "updatePublisherHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/publishers/:publisherId/kyc",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(AGENT_PUBLISHER)",
+        "submitKycHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/publishers/:publisherId/kyc/review",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "reviewKycHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/publishers/:publisherId/kyc/digio/initiate",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(AGENT_PUBLISHER)",
+        "initiateDigioKycHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/publishers/:publisherId/kyc/digio/status",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "getDigioKycStatusHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/publishers/:publisherId/onboarding-status",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "getOnboardingStatusHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/publishers/:publisherId/cancel-onboarding",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(AGENT_PUBLISHER|ADMIN)",
+        "cancelOnboardingHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/publishers/:publisherId/complete-onboarding",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(AGENT_PUBLISHER|ADMIN)",
+        "completeOnboardingHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/publishers/:publisherId/listings",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "getListingsHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/listings",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "getAllListingsHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/listings",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(AGENT_PUBLISHER|ADMIN)",
+        "createListingHandler"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/listings/:listingId",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(AGENT_PUBLISHER|ADMIN)",
+        "updateListingHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/listings/:listingId/publish",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(AGENT_PUBLISHER|ADMIN)",
+        "publishListingHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/earnings/balance",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(AGENT_PUBLISHER|AGENT_ADVERTISER|ADMIN)",
+        "getBalanceHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/earnings/transactions",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(AGENT_PUBLISHER|AGENT_ADVERTISER|ADMIN)",
+        "getTransactionsHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/notifications",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "getNotificationsHandler"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/notifications/read-all",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "markAllReadHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/notifications/preferences",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "getPreferencesHandler"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/notifications/preferences",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "savePreferencesHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/notifications/:notificationId",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "getNotificationHandler"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/notifications/:notificationId/read",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "markReadHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/support/tickets",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "getTicketsHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/support/tickets",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "createTicketHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/support/tickets/:ticketId",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "getTicketHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/support/tickets/:ticketId/reply",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "addReplyHandler"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/support/tickets/:ticketId/status",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "updateTicketStatusHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/milestones",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "getMilestonesHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/milestones/templates",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "createMilestoneTemplateHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/milestone-templates",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "createTemplateHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/milestone-templates",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "listTemplatesHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/milestone-templates/:id",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "getTemplateHandler"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/milestone-templates/:id",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "updateTemplateHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/milestone-plans",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "createPlanHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/milestone-plans",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "listPlansHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/milestone-plans/:id",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "getPlanHandler"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/milestone-plans/:id",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "updatePlanHandler"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/milestone-plans/:id/items",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "replacePlanItemsHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/orders/:orderId/milestones",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "getOrderMilestonesHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/orders/:orderId/milestones",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "addMilestoneToOrderHandler"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/orders/:orderId/milestones/:milestoneId",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "updateOrderMilestoneHandler"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/orders/:orderId/milestones/:milestoneId",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "removeOrderMilestoneHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/agent/milestones",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(AGENT_PUBLISHER|AGENT_ADVERTISER)",
+        "getAgentMilestonesHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/agent/milestones/:milestoneId",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(AGENT_PUBLISHER|AGENT_ADVERTISER)",
+        "getMilestoneDetailHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/agent/milestones/:milestoneId/start",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(AGENT_PUBLISHER|AGENT_ADVERTISER)",
+        "startMilestoneHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/agent/milestones/:milestoneId/complete",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(AGENT_PUBLISHER|AGENT_ADVERTISER)",
+        "completeMilestoneHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/training",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "getTrainingHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/training",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "createTrainingHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/banking",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "getBankAccountsHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/banking",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "createBankAccountHandler"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/banking/:accountId",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "updateBankAccountHandler"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/banking/:accountId",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "deleteBankAccountHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/banking/:accountId/set-default",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "setDefaultBankAccountHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/upload",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "handleUploadMiddleware",
+        "uploadFileHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/integrations",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "getIntegrationsHandler"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/integrations",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "updateIntegrationsHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/onboarding/flow-templates",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "listFlowTemplates"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/onboarding/flow-templates/:key",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "getFlowTemplate"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/onboarding/flow-templates/:key",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "upsertFlowTemplate"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/onboarding/submissions",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "listOnboardingSubmissions"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/onboarding/submissions",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "createOnboardingSubmission"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/onboarding/submissions/:id",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "getOnboardingSubmission"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/onboarding/submissions/:id",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "updateOnboardingSubmission"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/onboarding/submissions/:id",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "deleteOnboardingSubmission"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/onboarding/submissions/:id/status",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "updateOnboardingSubmissionStatus"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/employees",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "createEmployeeHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/employees",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "getAllEmployeesHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/employees/:userId",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "selfOrAdmin",
+        "getEmployeeByUserIdHandler"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/employees/:userId",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "selfOrAdmin",
+        "updateEmployeeHandler"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/employees/:userId",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "deleteEmployeeHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/roles-config",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "createRoleConfigHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/roles-config",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "getAllRoleConfigsHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/roles-config/:id",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "getRoleConfigByIdHandler"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/roles-config/:id",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "updateRoleConfigHandler"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/roles-config/:id",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "deleteRoleConfigHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/advertiser-kyc",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "createAdvertiserKycHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/advertiser-kyc/me",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "getMyAdvertiserKycHandler"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/advertiser-kyc/me",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "updateAdvertiserKycHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/advertiser-kyc",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "getAllAdvertiserKycsHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/advertiser-kyc/:id",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "getAdvertiserKycByIdHandler"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/advertiser-kyc/:id",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "updateAdvertiserKycByIdHandler"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/advertiser-kyc/:id/review",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "reviewAdvertiserKycHandler"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/advertiser-kyc/:id",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "deleteAdvertiserKycHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/user-kyc",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "createUserKycHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/user-kyc/me",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "getMyUserKycHandler"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/user-kyc/me",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "deleteUserKycHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/user-kyc",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "getAllUserKycsHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/user-kyc/:id",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "getUserKycByIdHandler"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/user-kyc/:id/review",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "reviewUserKycHandler"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/user-kyc/:id",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "deleteUserKycByIdHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/advertisements",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "createAdvertisementHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/advertisements",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "getAllAdvertisementsHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/advertisements/:id",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "getAdvertisementByIdHandler"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/advertisements/:id",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "updateAdvertisementHandler"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/advertisements/:id",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "deleteAdvertisementHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/agents",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "getAllAgentsHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/agents/:id",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "getAgentByIdHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/webhooks/digio",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "digioWebhookHandler"
+      ]
+    }
+  ]
+}
