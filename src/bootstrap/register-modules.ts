@@ -20,8 +20,8 @@ import { getConfigHandler, putConfigHandler } from '../controllers/config';
 import { asyncHandler } from '../shared/http';
 import { authenticate, requireRole } from '../shared/auth';
 // Ported from legacy app
-import { employeeRouter } from '../routes/employee';
-import { rolesConfigRouter } from '../routes/rolesConfig';
+import { employeeRouter } from '../modules/employees';
+import { rolesConfigRouter } from '../modules/access-control';
 import { advertiserKycRouter } from '../routes/advertiserKyc';
 import { userKycRouter } from '../routes/userKyc';
 import { advertisementRouter } from '../modules/advertisements';
