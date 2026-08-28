@@ -1,4 +1,4 @@
-import 'dotenv/config';
+import './loadEnv';
 import { z } from 'zod';
 
 const envSchema = z.object({
@@ -53,6 +53,13 @@ const envSchema = z.object({
   RESEND_FROM_EMAIL: z.string().optional(),
   // Admin secret for internal tools (flow editor) — skips JWT auth for PUT /config
   ADMIN_SECRET: z.string().min(8).default('adx_admin_dev_secret'),
+  // Redis — shared rate-limit counters, integration-config cache, and the
+  // publisher-timer job lock, so all three stay correct across instances.
+  REDIS_URL: z.string().default('redis://localhost:6379'),
+  // Cloudflare Turnstile — verifies login/registration/password-reset
+  // requests aren't scripted. Optional: unset means captcha checks no-op,
+  // same graceful-degrade pattern as the other integration credentials below.
+  TURNSTILE_SECRET_KEY: z.string().optional(),
 });
 
 const parsedEnv = envSchema.safeParse(process.env);

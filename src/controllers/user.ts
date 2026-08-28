@@ -123,6 +123,7 @@ export async function getAllUsers(req: Request, res: Response): Promise<void> {
       email: u.email,
       language: u.language,
       isActive: u.isActive,
+      lastLoginAt: u.lastLoginAt,
       createdAt: u.createdAt,
       updatedAt: u.updatedAt,
       roles: u.roles.map((r) => r.role),

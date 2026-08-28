@@ -35,6 +35,10 @@ model User {
   avatarUrl    String?
   language     String   @default("en")
   isActive     Boolean  @default(true)
+  // Null until the account's first successful sign-in. Set by the login
+  // handlers only — token refresh renews a session rather than starting one,
+  // so it deliberately leaves this alone.
+  lastLoginAt  DateTime?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

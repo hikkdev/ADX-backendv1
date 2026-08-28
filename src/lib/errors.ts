@@ -7,6 +7,7 @@ export type ApiErrorCode =
   | 'NOT_FOUND'
   | 'VALIDATION_ERROR'
   | 'CONFLICT'
+  | 'TOO_MANY_REQUESTS'
   | 'NOT_IMPLEMENTED'
   | 'INTERNAL_ERROR'
   | 'EVIDENCE_INCOMPLETE'

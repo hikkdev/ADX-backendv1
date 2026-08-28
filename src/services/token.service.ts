@@ -2,6 +2,8 @@ import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { prisma } from '../lib/prisma';
 import { env } from '../config/env';
+import { logger } from '../lib/logger';
+import { logActivity } from './activityLog.service';
 import type { Role } from '../generated/prisma';
 
 export type AccessTokenPayload = {
@@ -61,7 +63,25 @@ export async function rotateRefreshToken(
 
   const existing = await prisma.refreshToken.findUnique({ where: { tokenHash } });
 
-  if (!existing || existing.revokedAt || existing.expiresAt < new Date()) {
+  if (!existing) {
+    throw new Error('Invalid or expired refresh token');
+  }
+
+  if (existing.revokedAt) {
+    // Rotation means each refresh token is single-use — seeing an already-
+    // revoked one presented again means the raw value leaked (e.g. it was
+    // stolen and both the attacker and the legitimate client tried to use
+    // it). Revoke the whole session family rather than just this token.
+    await revokeAllRefreshTokens(existing.userId);
+    logger.warn('Refresh token reuse detected — all sessions revoked', { userId: existing.userId });
+    await logActivity(existing.userId, 'REFRESH_TOKEN_REUSE_DETECTED', undefined, {
+      ipAddress: meta.ipAddress,
+      userAgent: meta.userAgent,
+    });
+    throw new Error('Invalid or expired refresh token');
+  }
+
+  if (existing.expiresAt < new Date()) {
     throw new Error('Invalid or expired refresh token');
   }
 

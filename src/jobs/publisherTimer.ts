@@ -1,14 +1,25 @@
 import { prisma } from '../lib/prisma';
+import { redis } from '../lib/redis';
 import { createNotification } from '../services/notification.service';
 import { logger } from '../lib/logger';
 
 const TAG = 'publisherTimerJob';
 const INTERVAL_MS = 60 * 1000;
+const LOCK_KEY = 'lock:publisher-timer-tick';
+// Shorter than INTERVAL_MS: if an instance dies mid-tick, the lock self-clears
+// before the next tick is due instead of stalling the job until it expires.
+const LOCK_TTL_MS = 45 * 1000;
 
 export let publisherTimerInterval: ReturnType<typeof setInterval> | null = null;
 
 export function startPublisherTimerJob(): void {
   publisherTimerInterval = setInterval(async () => {
+    // Every instance runs this interval, but only the one that wins the lock
+    // for a given minute actually processes it — otherwise N instances would
+    // each notify admins about the same expired order.
+    const acquired = await redis.set(LOCK_KEY, '1', 'PX', LOCK_TTL_MS, 'NX');
+    if (!acquired) return;
+
     try {
       const now = new Date();
       // Only match orders whose timer expired within the last tick window so we

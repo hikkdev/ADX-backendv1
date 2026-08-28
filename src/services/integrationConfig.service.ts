@@ -1,4 +1,5 @@
 import { prisma } from '../lib/prisma';
+import { redis } from '../lib/redis';
 import { env } from '../config/env';
 
 export interface SmsConfig { authKey?: string; templateId?: string }
@@ -26,16 +27,22 @@ export interface IntegrationsConfig {
 }
 
 const CONFIG_KEY = 'integrations';
+const CACHE_KEY = 'config:integrations';
+// Safety net in case a write's cache update is ever missed — not the primary
+// invalidation path (every write overwrites the cache directly below).
+const CACHE_TTL_SECONDS = 300;
 
-// Simple in-memory cache — invalidated on every write, so reads never need a
-// DB round-trip on the hot path (sending an SMS/email, uploading a file).
-let cache: IntegrationsConfig | null = null;
-
+// Cached in Redis rather than a module-level variable, so reads never need a
+// DB round-trip on the hot path (sending an SMS/email, uploading a file) and
+// a write on one instance is immediately visible to every other instance.
 async function loadConfig(): Promise<IntegrationsConfig> {
-  if (cache) return cache;
+  const cached = await redis.get(CACHE_KEY);
+  if (cached) return JSON.parse(cached) as IntegrationsConfig;
+
   const row = await prisma.appConfig.findUnique({ where: { key: CONFIG_KEY } });
-  cache = (row?.value as IntegrationsConfig | undefined) ?? {};
-  return cache;
+  const value = (row?.value as IntegrationsConfig | undefined) ?? {};
+  await redis.set(CACHE_KEY, JSON.stringify(value), 'EX', CACHE_TTL_SECONDS);
+  return value;
 }
 
 export async function getIntegrationsConfig(): Promise<IntegrationsConfig> {
@@ -71,7 +78,7 @@ export async function updateIntegrationsConfig(
     create: { key: CONFIG_KEY, value: next as any },
   });
 
-  cache = next;
+  await redis.set(CACHE_KEY, JSON.stringify(next), 'EX', CACHE_TTL_SECONDS);
   return next;
 }
 

@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma';
+import { redis } from '../lib/redis';
 import { env } from '../config/env';
 import { ApiError } from '../lib/errors';
 import { logger } from '../lib/logger';
@@ -10,6 +11,22 @@ import type { OtpPurpose } from '../generated/prisma';
 
 const OTP_TTL_MINUTES = 10;
 const MAX_ATTEMPTS = 5;
+
+// Per-recipient send throttle, independent of the per-IP limiter in
+// rateLimit.ts — without this, an attacker rotating IPs could still
+// SMS/email-bomb one specific number/address, since each OTP's 5-guess cap
+// (below) resets every time a fresh code is requested.
+const OTP_SEND_LIMIT = 3;
+const OTP_SEND_WINDOW_SECONDS = 10 * 60;
+
+async function enforceOtpSendLimit(recipient: string): Promise<void> {
+  const key = `otp-send:${recipient}`;
+  const count = await redis.incr(key);
+  if (count === 1) await redis.expire(key, OTP_SEND_WINDOW_SECONDS);
+  if (count > OTP_SEND_LIMIT) {
+    throw new ApiError(429, 'TOO_MANY_REQUESTS', 'Too many OTP requests for this number. Please try again later.');
+  }
+}
 
 // Canonicalize to +91XXXXXXXXXX regardless of what the client sends.
 export function normalizeMobile(mobile: string): string {
@@ -69,22 +86,24 @@ export async function sendOtp(mobile: string, purpose: OtpPurpose = 'LOGIN'): Pr
     return _sendOtpForUser(newUser.id, mobile, purpose);
   }
 
-  if (!user) {
-    if (purpose === 'LOGIN' && isDevLoginMobileAllowed(mobile)) {
-      user = await createDevLoginUser(mobile);
-    } else {
-      throw new ApiError(403, 'FORBIDDEN', 'No account found for this number. Contact your administrator.');
-    }
+  if (!user && purpose === 'LOGIN' && isDevLoginMobileAllowed(mobile)) {
+    user = await createDevLoginUser(mobile);
   }
 
   if (!user) {
-    throw new ApiError(403, 'FORBIDDEN', 'No account found for this number. Contact your administrator.');
+    // Don't reveal whether this number has an account — respond the same
+    // way a real send would. verifyOtp fails identically either way, so this
+    // can't be used to enumerate registered numbers (same trade-off already
+    // used by forgotPasswordHandler in controllers/auth.ts).
+    logger.info('OTP requested for unregistered mobile', { mobile, purpose });
+    return {};
   }
 
   return _sendOtpForUser(user.id, mobile, purpose);
 }
 
 async function _sendOtpForUser(userId: string, mobile: string, purpose: OtpPurpose): Promise<SendOtpResult> {
+  await enforceOtpSendLimit(mobile);
   logger.info('OTP generation started', { userId, mobile, purpose });
 
   await prisma.otp.updateMany({
@@ -121,9 +140,12 @@ export async function sendEmailOtp(email: string): Promise<SendOtpResult> {
   const user = await prisma.user.findUnique({ where: { email } });
 
   if (!user) {
-    throw new ApiError(403, 'FORBIDDEN', 'No account found for this email. Contact your administrator.');
+    // Same enumeration trade-off as sendOtp above.
+    logger.info('OTP requested for unregistered email', { email });
+    return {};
   }
 
+  await enforceOtpSendLimit(email);
   logger.info('Email OTP generation started', { userId: user.id, email });
 
   await prisma.otp.updateMany({

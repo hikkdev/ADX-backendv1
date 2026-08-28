@@ -13,12 +13,20 @@ import {
 import { hashPassword, verifyPassword, createPasswordResetToken, consumePasswordResetToken } from '../services/password.service';
 import { sendMail, passwordResetEmail } from '../services/mail.service';
 import { logActivity } from '../services/activityLog.service';
+import { assertAccountNotLocked, registerFailedLogin, clearFailedLogins } from '../services/loginSecurity.service';
 import { env } from '../config/env';
 import { prisma } from '../lib/prisma';
 import type { Role } from '../generated/prisma';
 
 function sessionMeta(req: Request): SessionMeta {
   return { userAgent: req.headers['user-agent'], ipAddress: req.ip };
+}
+
+// Stamps the moment a session was established. Called from the login handlers
+// only — refreshTokenHandler renews an existing session rather than starting a
+// new one, so it deliberately leaves lastLoginAt untouched.
+async function recordLogin(userId: string): Promise<void> {
+  await prisma.user.update({ where: { id: userId }, data: { lastLoginAt: new Date() } });
 }
 
 const sendOtpSchema = z.object({
@@ -85,6 +93,7 @@ export async function verifyOtpHandler(req: Request, res: Response): Promise<voi
   const accessToken = signAccessToken(userId, roles);
   const refreshToken = await createRefreshToken(userId, sessionMeta(req));
   await logActivity(userId, 'LOGIN_OTP', req);
+  await recordLogin(userId);
 
   res.json({
     success: true,
@@ -98,7 +107,7 @@ export async function verifyOtpHandler(req: Request, res: Response): Promise<voi
         email: user.email,
         language: user.language,
         avatarUrl: user.avatarUrl,
-        hasPassword: !!user.passwordHash,
+        hashPassword: !!user.passwordHash,
         roles,
         agentProfile: user.agentProfile,
         publisherProfile: user.publisherProfile,
@@ -146,6 +155,7 @@ export async function verifyOtpEmailHandler(req: Request, res: Response): Promis
   const accessToken = signAccessToken(userId, roles);
   const refreshToken = await createRefreshToken(userId, sessionMeta(req));
   await logActivity(userId, 'LOGIN_OTP_EMAIL', req);
+  await recordLogin(userId);
 
   res.json({
     success: true,
@@ -227,12 +237,16 @@ export async function loginPasswordHandler(req: Request, res: Response): Promise
 
   const { email, password } = parsed.data;
 
+  await assertAccountNotLocked(email);
+
   const user = await prisma.user.findUnique({
     where: { email },
     include: { roles: true, agentProfile: true, publisherProfile: { include: { kyc: true } } },
   });
 
   if (!user || !user.passwordHash || !(await verifyPassword(password, user.passwordHash))) {
+    await registerFailedLogin(email);
+    if (user) await logActivity(user.id, 'LOGIN_FAILED', req, { reason: 'invalid_password' });
     throw new ApiError(401, 'UNAUTHORIZED', 'Invalid email or password');
   }
 
@@ -240,10 +254,12 @@ export async function loginPasswordHandler(req: Request, res: Response): Promise
     throw new ApiError(401, 'UNAUTHORIZED', 'Account not active');
   }
 
+  await clearFailedLogins(email);
   const roles = user.roles.map((r) => r.role);
   const accessToken = signAccessToken(user.id, roles);
   const refreshToken = await createRefreshToken(user.id, sessionMeta(req));
   await logActivity(user.id, 'LOGIN_PASSWORD', req);
+  await recordLogin(user.id);
 
   res.json({
     success: true,
@@ -437,6 +453,7 @@ export async function publisherVerifyOtpHandler(req: Request, res: Response): Pr
   const roles = user.roles.map((r) => r.role) as Role[];
   const accessToken = signAccessToken(userId, roles);
   const refreshToken = await createRefreshToken(userId);
+  await recordLogin(userId);
 
   res.json({
     success: true,
