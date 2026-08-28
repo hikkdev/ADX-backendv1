@@ -992,7 +992,7 @@
         "urlencodedParser",
         "requestLogger",
         "authenticate",
-        "getListingsHandler"
+        "getPublisherListingsHandler"
       ]
     },
     {

@@ -1,19 +1,21 @@
 import { Router } from 'express';
+import { asyncHandler } from '../../shared/http';
+import { authenticate, requireRole } from '../../shared/auth';
 import {
   createPublisherHandler, getPublishersHandler, getPublisherHandler, updatePublisherHandler,
-  submitKycHandler, reviewKycHandler, getOnboardingStatusHandler,
-  createListingHandler, getListingsHandler, getAllListingsHandler, updateListingHandler, publishListingHandler,
+  submitKycHandler, reviewKycHandler, getOnboardingStatusHandler, getPublisherListingsHandler,
+} from './publishers.controller';
+import {
   registerPublisherProfileHandler, getMyPublisherProfileHandler, getMyOnboardingQrHandler,
   cancelMyOnboardingHandler, cancelOnboardingHandler, completeOnboardingHandler,
-} from '../controllers/publisher';
-import { initiateDigioKycHandler, getDigioKycStatusHandler } from '../controllers/digio';
-import { asyncHandler } from '../shared/http';
-import { authenticate, requireRole } from '../shared/auth';
+} from './onboarding/publisher-onboarding.controller';
+import { initiateDigioKycHandler, getDigioKycStatusHandler } from './kyc/digio.controller';
 
 export const publisherRouter = Router();
 publisherRouter.use(authenticate);
 
 // ── Publisher self-service (PUBLISHER role, user app) ──
+// These literal paths must stay ahead of the /:publisherId routes below.
 publisherRouter.post('/register', requireRole('PUBLISHER'), asyncHandler(registerPublisherProfileHandler));
 publisherRouter.get('/me', requireRole('PUBLISHER'), asyncHandler(getMyPublisherProfileHandler));
 publisherRouter.get('/me/qr', requireRole('PUBLISHER'), asyncHandler(getMyOnboardingQrHandler));
@@ -31,12 +33,4 @@ publisherRouter.get('/:publisherId/kyc/digio/status', asyncHandler(getDigioKycSt
 publisherRouter.get('/:publisherId/onboarding-status', asyncHandler(getOnboardingStatusHandler));
 publisherRouter.post('/:publisherId/cancel-onboarding', requireRole('AGENT_PUBLISHER', 'ADMIN'), asyncHandler(cancelOnboardingHandler));
 publisherRouter.post('/:publisherId/complete-onboarding', requireRole('AGENT_PUBLISHER', 'ADMIN'), asyncHandler(completeOnboardingHandler));
-publisherRouter.get('/:publisherId/listings', asyncHandler(getListingsHandler));
-
-export const listingRouter = Router();
-listingRouter.use(authenticate);
-
-listingRouter.get('/', requireRole('ADMIN'), asyncHandler(getAllListingsHandler));
-listingRouter.post('/', requireRole('AGENT_PUBLISHER', 'ADMIN'), asyncHandler(createListingHandler));
-listingRouter.patch('/:listingId', requireRole('AGENT_PUBLISHER', 'ADMIN'), asyncHandler(updateListingHandler));
-listingRouter.post('/:listingId/publish', requireRole('AGENT_PUBLISHER', 'ADMIN'), asyncHandler(publishListingHandler));
+publisherRouter.get('/:publisherId/listings', asyncHandler(getPublisherListingsHandler));

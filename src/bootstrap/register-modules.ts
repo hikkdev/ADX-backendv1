@@ -2,10 +2,14 @@ import { Router } from 'express';
 import { healthHandler } from './health';
 import { authRouter } from '../modules/auth';
 import { userRouter } from '../modules/users';
-import { qrRouter } from '../routes/qr';
+import { qrRouter } from '../modules/qr';
 import { orderRouter } from '../routes/order';
-import { similarListingsHandler } from '../controllers/order';
-import { publisherRouter, listingRouter } from '../routes/publisher';
+import { listingRouter, similarListingsHandler } from '../modules/listings';
+import {
+  publisherRouter,
+  digioWebhookHandler,
+  registerPublisherModule,
+} from '../modules/publishers';
 import { earningsRouter } from '../modules/earnings';
 import { notificationRouter } from '../modules/notifications';
 import { supportRouter } from '../modules/support';
@@ -14,7 +18,6 @@ import { bankingRouter } from '../modules/banking';
 import { uploadRouter } from '../modules/uploads';
 import { integrationsRouter } from '../modules/integrations';
 import { onboardingRouter } from '../routes/onboarding';
-import { digioWebhookHandler } from '../controllers/digio';
 import { configRouter } from '../modules/app-config';
 import { asyncHandler } from '../shared/http';
 // Ported from legacy app
@@ -23,6 +26,10 @@ import { rolesConfigRouter } from '../modules/access-control';
 import { advertiserKycRouter, userKycRouter } from '../modules/kyc';
 import { advertisementRouter } from '../modules/advertisements';
 import { agentRouter, milestoneRouter, trainingRouter } from '../modules/agents';
+
+// Supplies the QR module's PublisherOnboardingPort. Must run before any
+// request is served: scanning a publisher QR fails loudly without it.
+registerPublisherModule();
 
 export const apiRouter = Router();
 

@@ -1,7 +1,8 @@
-import { env } from '../config/env';
-import { prisma } from '../shared/database';
-import { logger } from '../shared/logging';
-import { getEffectiveKycConfig, type KycConfig } from '../shared/integrations';
+import { env } from '../../../config/env';
+import { logger } from '../../../shared/logging';
+import { getEffectiveKycConfig, type KycConfig } from '../../../shared/integrations';
+import { createNotification } from '../../notifications';
+import { prismaDigioRepository as repository } from './prisma-digio.repository';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -56,23 +57,12 @@ export async function initiateDigioKyc(
     logger.warn('Digio not configured — returning mock KYC initiation (dev only)');
     const mockKycId = `digio_mock_${publisherId}_${Date.now()}`;
 
-    await prisma.publisherKyc.upsert({
-      where: { publisherId },
-      update: {
-        method: 'DIGIO',
-        digioRequestId: mockKycId,
-        digioReferenceId: publisherId,
-        digioStatus: 'pending',
-        submittedAt: new Date(),
-      },
-      create: {
-        publisherId,
-        method: 'DIGIO',
-        digioRequestId: mockKycId,
-        digioReferenceId: publisherId,
-        digioStatus: 'pending',
-        submittedAt: new Date(),
-      },
+    await repository.upsertDigioKyc(publisherId, {
+      method: 'DIGIO',
+      digioRequestId: mockKycId,
+      digioReferenceId: publisherId,
+      digioStatus: 'pending',
+      submittedAt: new Date(),
     });
 
     const sdkBase = cfg.baseUrl!.replace('https://', 'https://');
@@ -111,23 +101,12 @@ export async function initiateDigioKyc(
 
   const data = await response.json() as DigiInitiateResponse;
 
-  await prisma.publisherKyc.upsert({
-    where: { publisherId },
-    update: {
-      method: 'DIGIO',
-      digioRequestId: data.id,
-      digioReferenceId: referenceId,
-      digioStatus: 'pending',
-      submittedAt: new Date(),
-    },
-    create: {
-      publisherId,
-      method: 'DIGIO',
-      digioRequestId: data.id,
-      digioReferenceId: referenceId,
-      digioStatus: 'pending',
-      submittedAt: new Date(),
-    },
+  await repository.upsertDigioKyc(publisherId, {
+    method: 'DIGIO',
+    digioRequestId: data.id,
+    digioReferenceId: referenceId,
+    digioStatus: 'pending',
+    submittedAt: new Date(),
   });
 
   return {
@@ -145,7 +124,7 @@ export async function handleDigioWebhook(payload: DigioWebhookPayload): Promise<
 
   logger.info('Digio webhook received', { kycId, status });
 
-  const kyc = await prisma.publisherKyc.findFirst({ where: { digioRequestId: kycId } });
+  const kyc = await repository.findByRequestId(kycId);
   if (!kyc) {
     logger.warn('Digio webhook: no KYC record found for kycId', { kycId });
     return;
@@ -154,38 +133,31 @@ export async function handleDigioWebhook(payload: DigioWebhookPayload): Promise<
   const isApproved = status === 'approved';
   const isRejected = status === 'rejected';
 
-  await prisma.publisherKyc.update({
-    where: { id: kyc.id },
-    data: {
-      digioStatus: status,
-      digioPayload: payload as any,
-      digioVerifiedAt: completed_at ? new Date(completed_at) : (isApproved ? new Date() : undefined),
-      status: isApproved ? 'VERIFIED' : isRejected ? 'REJECTED' : 'PENDING',
-      reviewedAt: isApproved || isRejected ? new Date() : undefined,
-      rejectionReason: isRejected ? (payload.message ?? 'KYC rejected by Digio') : undefined,
-    },
+  await repository.applyWebhook(kyc.id, {
+    digioStatus: status,
+    digioPayload: payload,
+    digioVerifiedAt: completed_at ? new Date(completed_at) : isApproved ? new Date() : undefined,
+    status: isApproved ? 'VERIFIED' : isRejected ? 'REJECTED' : 'PENDING',
+    reviewedAt: isApproved || isRejected ? new Date() : undefined,
+    rejectionReason: isRejected ? (payload.message ?? 'KYC rejected by Digio') : undefined,
   });
 
-  // Notify the publisher's agent
-  const publisher = await prisma.publisher.findUnique({
-    where: { id: kyc.publisherId },
-    include: { agent: { include: { user: true } } },
-  });
+  // Notify the publisher's claiming agent. Raised through the notifications
+  // module rather than writing the row here.
+  const publisher = await repository.findPublisherAgent(kyc.publisherId);
 
   if (publisher) {
-    await prisma.notification.create({
-      data: {
-        userId: publisher.agent!.userId,
-        type: 'KYC',
-        title: isApproved ? 'KYC Approved' : isRejected ? 'KYC Rejected' : 'KYC Update',
-        subtitle: publisher.name,
-        message: isApproved
-          ? `KYC for publisher ${publisher.name} has been verified via Digio.`
-          : isRejected
-          ? `KYC for publisher ${publisher.name} was rejected. ${payload.message ?? ''}`
-          : `KYC status updated to ${status} for ${publisher.name}.`,
-        relatedId: publisher.id,
-      },
+    await createNotification({
+      userId: publisher.agentUserId,
+      type: 'KYC',
+      title: isApproved ? 'KYC Approved' : isRejected ? 'KYC Rejected' : 'KYC Update',
+      subtitle: publisher.name,
+      message: isApproved
+        ? `KYC for publisher ${publisher.name} has been verified via Digio.`
+        : isRejected
+        ? `KYC for publisher ${publisher.name} was rejected. ${payload.message ?? ''}`
+        : `KYC status updated to ${status} for ${publisher.name}.`,
+      relatedId: publisher.id,
     });
   }
 }
@@ -198,7 +170,7 @@ export async function getDigioKycStatus(publisherId: string): Promise<{
   kycStatus: string;
   digioVerifiedAt: Date | null;
 } | null> {
-  const kyc = await prisma.publisherKyc.findUnique({ where: { publisherId } });
+  const kyc = await repository.findByPublisherId(publisherId);
   if (!kyc) return null;
   return {
     method: kyc.method,

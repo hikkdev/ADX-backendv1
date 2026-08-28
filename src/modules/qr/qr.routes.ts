@@ -1,11 +1,16 @@
 import { Router } from 'express';
-import { generateQrHandler, resolveQrHandler, getQrScansHandler, deactivateQrHandler, getQrHandler, qrImagePngHandler, qrImageSvgHandler } from '../controllers/qr';
-import { asyncHandler } from '../shared/http';
-import { authenticate, requireRole } from '../shared/auth';
+import { asyncHandler } from '../../shared/http';
+import { authenticate, requireRole } from '../../shared/auth';
+import {
+  generateQrHandler, resolveQrHandler, getQrScansHandler,
+  deactivateQrHandler, getQrHandler, qrImagePngHandler, qrImageSvgHandler,
+} from './qr.controller';
 
 export const qrRouter = Router();
 
-// QR image serving — public, no auth (loaded by Image component without auth headers)
+// QR image serving — public, no auth. An <img> tag cannot send an
+// Authorization header, so these must stay registered ABOVE the authenticate
+// layer below. Moving them down turns every rendered QR into a broken image.
 qrRouter.get('/:qrId/image.png', asyncHandler(qrImagePngHandler));
 qrRouter.get('/:qrId/image.svg', asyncHandler(qrImageSvgHandler));
 
