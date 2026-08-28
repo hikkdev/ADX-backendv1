@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import { asyncHandler } from '../../../shared/http';
+import { authenticate, requireRole } from '../../../shared/auth';
 import {
   createUserKycHandler,
   getMyUserKycHandler,
@@ -7,13 +9,12 @@ import {
   reviewUserKycHandler,
   deleteUserKycHandler,
   deleteUserKycByIdHandler,
-} from '../controllers/userKyc';
-import { asyncHandler } from '../shared/http';
-import { authenticate, requireRole } from '../shared/auth';
+} from './user-kyc.controller';
 
 export const userKycRouter = Router();
 userKycRouter.use(authenticate);
 
+// The /me paths must stay ahead of /:id.
 userKycRouter.post('/', asyncHandler(createUserKycHandler));
 userKycRouter.get('/me', asyncHandler(getMyUserKycHandler));
 userKycRouter.delete('/me', asyncHandler(deleteUserKycHandler));

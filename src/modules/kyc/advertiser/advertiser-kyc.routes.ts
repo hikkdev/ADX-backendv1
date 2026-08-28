@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import { asyncHandler } from '../../../shared/http';
+import { authenticate, requireRole } from '../../../shared/auth';
 import {
   createAdvertiserKycHandler,
   getMyAdvertiserKycHandler,
@@ -8,14 +10,12 @@ import {
   updateAdvertiserKycByIdHandler,
   reviewAdvertiserKycHandler,
   deleteAdvertiserKycHandler,
-} from '../controllers/advertiserKyc';
-import { asyncHandler } from '../shared/http';
-import { authenticate, requireRole } from '../shared/auth';
+} from './advertiser-kyc.controller';
 
 export const advertiserKycRouter = Router();
 advertiserKycRouter.use(authenticate);
 
-// Self-service (advertiser's own KYC)
+// Self-service (advertiser's own KYC). The /me paths must stay ahead of /:id.
 advertiserKycRouter.post('/', asyncHandler(createAdvertiserKycHandler));
 advertiserKycRouter.get('/me', asyncHandler(getMyAdvertiserKycHandler));
 advertiserKycRouter.put('/me', asyncHandler(updateAdvertiserKycHandler));

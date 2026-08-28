@@ -22,8 +22,7 @@ import { authenticate, requireRole } from '../shared/auth';
 // Ported from legacy app
 import { employeeRouter } from '../modules/employees';
 import { rolesConfigRouter } from '../modules/access-control';
-import { advertiserKycRouter } from '../routes/advertiserKyc';
-import { userKycRouter } from '../routes/userKyc';
+import { advertiserKycRouter, userKycRouter } from '../modules/kyc';
 import { advertisementRouter } from '../modules/advertisements';
 import { agentRouter } from '../routes/agent';
 
