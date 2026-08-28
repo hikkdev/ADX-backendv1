@@ -1,5 +1,5 @@
 import { prisma } from '../shared/database';
-import { APP_ENUMS } from '../constants/appEnums';
+import { APP_ENUMS } from '../modules/app-config';
 
 const ONBOARD_FLOW = {
   label: 'Onboarding',

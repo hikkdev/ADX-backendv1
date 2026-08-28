@@ -10,7 +10,7 @@
         "jsonParser",
         "urlencodedParser",
         "requestLogger",
-        "<anon>"
+        "healthHandler"
       ]
     },
     {
@@ -32,7 +32,7 @@
         "jsonParser",
         "urlencodedParser",
         "requestLogger",
-        "<anon>",
+        "adminSecretOrAdminRole",
         "putConfigHandler"
       ]
     },

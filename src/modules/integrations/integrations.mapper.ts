@@ -1,10 +1,13 @@
-import type { Request, Response } from 'express';
-import { z } from 'zod';
-import { ApiError } from '../shared/errors';
-import { env } from '../config/env';
-import { logActivity } from '../shared/audit';
-import { getIntegrationsConfig, updateIntegrationsConfig, type IntegrationsConfig } from '../shared/integrations';
+import { env } from '../../config/env';
+import type { IntegrationsConfig } from '../../shared/integrations';
 
+/**
+ * Builds the GET /integrations response.
+ *
+ * Every secret is masked here and nowhere else, so there is exactly one place
+ * to audit that a raw credential never leaves the server. Values fall back
+ * from the stored override to the matching .env setting.
+ */
 function maskSecret(value?: string | null): string | null {
   if (!value) return null;
   if (value.length <= 4) return '••••';
@@ -17,12 +20,8 @@ function maskDatabaseUrl(url: string): string {
 
 // GET /integrations — current effective config (DB override, falling back to
 // .env). Secrets are always masked; the raw value never leaves the server.
-export async function getIntegrationsHandler(_req: Request, res: Response): Promise<void> {
-  const cfg = await getIntegrationsConfig();
-
-  res.json({
-    success: true,
-    data: {
+export function toIntegrationsResponse(cfg: IntegrationsConfig) {
+  return {
       sms: {
         authKey: maskSecret(cfg.sms?.authKey ?? env.MSG91_AUTH_KEY),
         templateId: cfg.sms?.templateId ?? env.MSG91_TEMPLATE_ID ?? null,
@@ -89,83 +88,5 @@ export async function getIntegrationsHandler(_req: Request, res: Response): Prom
         adminSecret: 'configured',
         qrSecret: 'configured',
       },
-    },
-  });
-}
-
-const sectionSchema = z.enum(['sms', 'email', 'storage', 'kyc', 'twilio', 'resend', 'googleMaps', 'razorpay', 'stripe', 'branding']);
-
-const patchSchemas = {
-  sms: z.object({
-    authKey: z.string().optional(),
-    templateId: z.string().optional(),
-  }),
-  email: z.object({
-    host: z.string().optional(),
-    port: z.coerce.number().int().positive().optional(),
-    user: z.string().optional(),
-    password: z.string().optional(),
-    from: z.string().optional(),
-  }),
-  storage: z.object({
-    accountId: z.string().optional(),
-    accessKeyId: z.string().optional(),
-    secretAccessKey: z.string().optional(),
-    bucketName: z.string().optional(),
-    publicUrl: z.string().url().optional().or(z.literal('')),
-  }),
-  kyc: z.object({
-    clientId: z.string().optional(),
-    clientSecret: z.string().optional(),
-    baseUrl: z.string().url().optional(),
-  }),
-  twilio: z.object({
-    accountSid: z.string().optional(),
-    authToken: z.string().optional(),
-    phoneNumber: z.string().optional(),
-  }),
-  resend: z.object({
-    apiKey: z.string().optional(),
-    fromEmail: z.string().optional(),
-  }),
-  googleMaps: z.object({
-    apiKey: z.string().optional(),
-  }),
-  razorpay: z.object({
-    keyId: z.string().optional(),
-    keySecret: z.string().optional(),
-    webhookSecret: z.string().optional(),
-  }),
-  stripe: z.object({
-    publishableKey: z.string().optional(),
-    secretKey: z.string().optional(),
-    webhookSecret: z.string().optional(),
-  }),
-  branding: z.object({
-    platformName: z.string().nullable().optional(),
-    headerLogoUrl: z.string().url().nullable().optional().or(z.literal('')),
-    authLogoUrl: z.string().url().nullable().optional().or(z.literal('')),
-  }),
-} satisfies Record<keyof IntegrationsConfig, z.ZodTypeAny>;
-
-// PUT /integrations — body: { section: 'sms'|'email'|'storage'|'kyc'|'twilio'|'googleMaps'|'razorpay'|'stripe'|'branding', patch: {...} }
-// Any field omitted (or sent empty) from `patch` keeps its existing stored
-// value — since secrets are never sent back to the client, the form can't
-// round-trip the real value anyway, only a deliberately-entered new one.
-export async function updateIntegrationsHandler(req: Request, res: Response): Promise<void> {
-  const sectionParsed = sectionSchema.safeParse(req.body?.section);
-  if (!sectionParsed.success) {
-    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid or missing "section"', sectionParsed.error.flatten());
-  }
-
-  const section = sectionParsed.data;
-  const patchParsed = patchSchemas[section].safeParse(req.body?.patch ?? {});
-  if (!patchParsed.success) {
-    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid request', patchParsed.error.flatten());
-  }
-
-  await updateIntegrationsConfig(section, patchParsed.data);
-  await logActivity(req.user!.sub, 'INTEGRATION_CONFIG_UPDATED', req, { section, fields: Object.keys(patchParsed.data) });
-
-  res.json({ success: true, data: { message: `${section} configuration updated` } });
+  };
 }

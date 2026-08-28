@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { env } from '../config/env';
+import { healthHandler } from './health';
 import { authRouter } from '../routes/auth';
 import { userRouter } from '../routes/user';
 import { qrRouter } from '../routes/qr';
@@ -12,13 +12,12 @@ import { supportRouter } from '../modules/support';
 import { milestoneRouter, trainingRouter } from '../routes/milestone';
 import { milestoneTemplateRouter, milestonePlanRouter, orderMilestoneRouter, agentMilestoneRouter } from '../routes/orderMilestone';
 import { bankingRouter } from '../modules/banking';
-import { uploadRouter } from '../routes/upload';
-import { integrationsRouter } from '../routes/integrations';
+import { uploadRouter } from '../modules/uploads';
+import { integrationsRouter } from '../modules/integrations';
 import { onboardingRouter } from '../routes/onboarding';
 import { digioWebhookHandler } from '../controllers/digio';
-import { getConfigHandler, putConfigHandler } from '../controllers/config';
+import { configRouter } from '../modules/app-config';
 import { asyncHandler } from '../shared/http';
-import { authenticate, requireRole } from '../shared/auth';
 // Ported from legacy app
 import { employeeRouter } from '../modules/employees';
 import { rolesConfigRouter } from '../modules/access-control';
@@ -28,20 +27,12 @@ import { agentRouter } from '../routes/agent';
 
 export const apiRouter = Router();
 
-apiRouter.get('/health', (_req, res) => {
-  res.json({
-    success: true,
-    data: { status: 'ok', service: 'adx-backend', env: env.NODE_ENV, uptimeSeconds: Math.round(process.uptime()) },
-  });
-});
+apiRouter.get('/health', healthHandler);
 
-// Public config — GET is unauthenticated (agent app fetches on boot)
-// PUT accepts either ADMIN_SECRET header (flow editor) or JWT ADMIN role
-apiRouter.get('/config', asyncHandler(getConfigHandler));
-apiRouter.put('/config', (req, res, next) => {
-  if (req.headers['x-admin-secret'] === env.ADMIN_SECRET) return next();
-  return authenticate(req, res, () => requireRole('ADMIN')(req, res, next));
-}, asyncHandler(putConfigHandler));
+// GET is unauthenticated (the agent app fetches it on boot); PUT accepts either
+// the ADMIN_SECRET header (flow editor) or an ADMIN token — see
+// modules/app-config/app-config.policy.ts.
+apiRouter.use('/config', configRouter);
 
 apiRouter.use('/auth', authRouter);
 apiRouter.use('/users', userRouter);
