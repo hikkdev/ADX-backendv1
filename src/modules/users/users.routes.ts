@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import { asyncHandler } from '../../shared/http';
+import { authenticate, requireRole } from '../../shared/auth';
 import {
   getMe,
   updateMe,
@@ -11,13 +13,12 @@ import {
   listMySessions,
   revokeMySession,
   listMyActivity,
-} from '../controllers/user';
-import { asyncHandler } from '../shared/http';
-import { authenticate, requireRole } from '../shared/auth';
+} from './users.controller';
 
 export const userRouter = Router();
 
-// Bootstrap: no auth required — only works when zero admins exist
+// Bootstrap: no auth required — only works when zero admins exist. It must be
+// registered before the authenticate() layer below.
 userRouter.post('/bootstrap-admin', asyncHandler(bootstrapAdmin));
 
 userRouter.use(authenticate);

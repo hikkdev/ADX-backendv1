@@ -53,9 +53,4 @@ export const prismaSupportRepository: SupportRepository = {
   setStatus(ticketId: string, status: 'OPEN' | 'CLOSED') {
     return prisma.supportTicket.update({ where: { id: ticketId }, data: { status } });
   },
-
-  async findAuthorDisplayName(userId: string) {
-    const user = await prisma.user.findUnique({ where: { id: userId } });
-    return user?.name ?? user?.mobile ?? 'Agent';
-  },
 };

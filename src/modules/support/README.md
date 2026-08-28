@@ -32,7 +32,7 @@ All mounted at `/api/v1/support`, all `authenticate`d, all scoped to the caller.
 
 - `shared/http`, `shared/auth`, `shared/errors`, `shared/validation`,
   `shared/database` (repository only).
-- No other business module.
+- `users` — `getUserDisplayName`, for reply author labels.
 
 ## Invariants
 
@@ -45,13 +45,11 @@ All mounted at `/api/v1/support`, all `authenticate`d, all scoped to the caller.
 - The first message of each ticket is included in list responses (`take: 1`);
   the full thread only in single-ticket responses.
 
-## Known cross-boundary read
+## Cross-module dependency
 
-`findAuthorDisplayName` reads the `User` row to label a reply author
-(`name ?? mobile ?? 'Agent'`). `User` belongs to the `users` module. Support was
-migrated before `users`, so the query lives here for now; it should become a
-call to the `users` module's public lookup. Tracked in
-`docs/backend-modules.md`.
+Reply authors are labelled via `getUserDisplayName` from the `users` module's
+public index, falling back to `'Agent'` when the user has neither a name nor a
+mobile. Support does not query `User` itself.
 
 ## Tests
 

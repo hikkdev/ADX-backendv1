@@ -34,7 +34,7 @@ unlike the ownership checks in `banking` and `advertisements`.
 
 - `shared/http`, `shared/auth`, `shared/errors`, `shared/database` (repository
   only).
-- No other business module.
+- `users` — `userExists`, checked before creating an HR record.
 
 ## Invariants
 
@@ -47,12 +47,6 @@ unlike the ownership checks in `banking` and `advertisements`.
 - The list response puts `meta` as a **sibling** of `data`, not nested.
 - Document fields are URLs, not uploads: clients POST the file to `/upload`
   first and send the returned URL here.
-
-## Known cross-boundary read
-
-`userExists` reads the `User` row, which `users` owns. Employees was migrated
-before `users`, so the query lives here for now; it should become a call to the
-`users` module's public lookup. Tracked in `docs/backend-modules.md`.
 
 ## Tests
 

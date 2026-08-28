@@ -10,12 +10,4 @@ export interface SupportRepository {
   /** Creates the message and touches the ticket in one transaction. */
   addReply(data: NewReply): Promise<TicketMessage>;
   setStatus(ticketId: string, status: 'OPEN' | 'CLOSED'): Promise<SupportTicket>;
-  /**
-   * Display name for a reply author.
-   *
-   * Reads the User row, which the `users` module owns. Kept here because
-   * support was migrated first; see README for the planned inversion onto the
-   * users module's public lookup.
-   */
-  findAuthorDisplayName(userId: string): Promise<string>;
 }

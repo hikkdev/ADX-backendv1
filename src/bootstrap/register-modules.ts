@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { healthHandler } from './health';
 import { authRouter } from '../modules/auth';
-import { userRouter } from '../routes/user';
+import { userRouter } from '../modules/users';
 import { qrRouter } from '../routes/qr';
 import { orderRouter } from '../routes/order';
 import { similarListingsHandler } from '../controllers/order';

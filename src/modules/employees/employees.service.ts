@@ -1,4 +1,5 @@
 import { ApiError } from '../../shared/errors';
+import { userExists } from '../users';
 import { prismaEmployeeRepository as repository } from './prisma-employees.repository';
 import type { CreateEmployeeInput, UpdateEmployeeInput } from './employees.schema';
 
@@ -16,7 +17,7 @@ export async function getEmployeeByUserId(userId: string) {
 export async function createEmployee(data: CreateEmployeeInput) {
   // The user must exist before it can be given an employee record, and a user
   // may hold at most one.
-  if (!(await repository.userExists(data.userId))) {
+  if (!(await userExists(data.userId))) {
     throw new ApiError(404, 'NOT_FOUND', 'User not found');
   }
   if (await repository.findSummaryByUserId(data.userId)) {

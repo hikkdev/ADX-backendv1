@@ -1,4 +1,5 @@
 import { ApiError } from '../../shared/errors';
+import { getUserDisplayName } from '../users';
 import { prismaSupportRepository as repository } from './prisma-support.repository';
 import type { ListTicketsOptions, NewTicket } from './support.types';
 
@@ -34,7 +35,8 @@ export async function addReply(ticketId: string, authorId: string, message: stri
     throw new ApiError(403, 'FORBIDDEN', 'You do not have access to this ticket');
   }
 
-  const authorName = await repository.findAuthorDisplayName(authorId);
+  // 'Agent' is the fallback when the user has neither name nor mobile.
+  const authorName = (await getUserDisplayName(authorId)) ?? 'Agent';
   return repository.addReply({ ticketId, authorId, authorName, message });
 }
 

@@ -14,11 +14,4 @@ export interface EmployeeRepository {
   create(data: CreateEmployeeInput): Promise<Employee>;
   update(userId: string, data: UpdateEmployeeInput): Promise<Employee>;
   remove(userId: string): Promise<unknown>;
-  /**
-   * Whether the User row exists.
-   *
-   * Reads a table the `users` module owns; see README for the planned
-   * inversion onto that module's public lookup.
-   */
-  userExists(userId: string): Promise<boolean>;
 }

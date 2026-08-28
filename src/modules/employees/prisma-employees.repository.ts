@@ -37,8 +37,4 @@ export const prismaEmployeeRepository: EmployeeRepository = {
   remove(userId: string) {
     return prisma.employee.delete({ where: { userId } });
   },
-
-  async userExists(userId: string) {
-    return (await prisma.user.findUnique({ where: { id: userId } })) !== null;
-  },
 };
