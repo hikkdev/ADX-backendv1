@@ -1,10 +1,10 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
-import { ApiError } from '../lib/errors';
-import { prisma } from '../lib/prisma';
+import { ApiError } from '../shared/errors';
+import { prisma } from '../shared/database';
 import { normalizeMobile } from '../services/otp.service';
-import { logActivity } from '../services/activityLog.service';
-import { Prisma, type OnboardingSubmissionStatus, type Role } from '../generated/prisma';
+import { logActivity } from '../shared/audit';
+import { Prisma, type OnboardingSubmissionStatus, type Role } from '../shared/database';
 
 const userTypeSchema = z.enum(['PUBLISHER', 'ADVERTISER', 'PARTNER']);
 const submissionStatusSchema = z.enum(['DRAFT', 'SUBMITTED', 'UNDER_REVIEW', 'APPROVED', 'REJECTED', 'CANCELLED']);

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { getBalanceHandler, getTransactionsHandler } from '../controllers/earnings';
-import { asyncHandler } from '../lib/errors';
-import { authenticate, requireRole } from '../middleware/authenticate';
+import { asyncHandler } from '../shared/http';
+import { authenticate, requireRole } from '../shared/auth';
 
 export const earningsRouter = Router();
 earningsRouter.use(authenticate);

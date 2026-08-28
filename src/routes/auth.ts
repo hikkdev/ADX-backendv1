@@ -13,15 +13,15 @@ import {
   resetPasswordHandler,
   changePasswordHandler,
 } from '../controllers/auth';
-import { asyncHandler } from '../lib/errors';
-import { authenticate } from '../middleware/authenticate';
-import { verifyCaptcha } from '../middleware/captcha';
+import { asyncHandler } from '../shared/http';
+import { authenticate } from '../shared/auth';
+import { verifyCaptcha } from '../shared/security';
 import {
   passwordAuthLimiter,
   otpRequestLimiter,
   otpVerifyLimiter,
   refreshLimiter,
-} from '../middleware/rateLimit';
+} from '../shared/security';
 
 export const authRouter = Router();
 

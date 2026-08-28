@@ -6,8 +6,8 @@ import {
   deleteBankAccountHandler,
   setDefaultBankAccountHandler,
 } from '../controllers/banking';
-import { asyncHandler } from '../lib/errors';
-import { authenticate } from '../middleware/authenticate';
+import { asyncHandler } from '../shared/http';
+import { authenticate } from '../shared/auth';
 
 export const bankingRouter = Router();
 bankingRouter.use(authenticate);

@@ -1,7 +1,7 @@
 import crypto from 'crypto';
-import { prisma } from '../lib/prisma';
+import { prisma } from '../shared/database';
 import { env } from '../config/env';
-import type { QrType, Role } from '../generated/prisma';
+import type { QrType, Role } from '../shared/database';
 
 // QR tokens are HMAC-SHA256 signed payloads encoded as base64url
 // Format: base64url(JSON payload) + '.' + base64url(HMAC signature)

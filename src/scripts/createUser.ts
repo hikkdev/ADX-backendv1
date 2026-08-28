@@ -10,10 +10,10 @@
  * Re-running with the same email resets that account's password rather than
  * failing, so it doubles as a "I forgot the dev password" reset.
  */
-import '../config/loadEnv';
-import { prisma } from '../lib/prisma';
+import '../config/load-env';
+import { prisma } from '../shared/database';
 import { hashPassword } from '../services/password.service';
-import type { Role } from '../generated/prisma';
+import type { Role } from '../shared/database';
 
 async function main(): Promise<void> {
   const [email, password, mobile, role, name] = process.argv.slice(2);

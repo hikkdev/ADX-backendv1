@@ -1,12 +1,12 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
-import { ApiError } from '../lib/errors';
-import { upperEnum } from '../lib/zod';
+import { ApiError } from '../shared/errors';
+import { upperEnum } from '../shared/validation';
 import {
   getNotifications, getNotificationById, markRead, markAllRead,
 } from '../services/notification.service';
-import { prisma } from '../lib/prisma';
-import type { NotificationType } from '../generated/prisma';
+import { prisma } from '../shared/database';
+import type { NotificationType } from '../shared/database';
 
 export async function getNotificationsHandler(req: Request, res: Response): Promise<void> {
   const userId = req.user!.sub;

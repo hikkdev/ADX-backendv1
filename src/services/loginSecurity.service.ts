@@ -1,5 +1,5 @@
-import { redis } from '../lib/redis';
-import { ApiError } from '../lib/errors';
+import { redis } from '../shared/cache';
+import { ApiError } from '../shared/errors';
 
 // Account-scoped lockout, independent of passwordAuthLimiter's per-IP limit
 // in rateLimit.ts — that one is blind to the same account being brute-forced

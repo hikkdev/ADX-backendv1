@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import { asyncHandler } from '../lib/errors';
-import { authenticate, requireRole } from '../middleware/authenticate';
+import { asyncHandler } from '../shared/http';
+import { authenticate, requireRole } from '../shared/auth';
 import {
   placeOrderHandler, getAllOrdersHandler, getMyOrdersHandler, getOrderByIdHandler,
   publisherAcceptHandler, publisherRejectHandler,

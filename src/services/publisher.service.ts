@@ -1,5 +1,5 @@
-import { prisma } from '../lib/prisma';
-import type { PublisherType, KycStatus, ListingCategory, ListingStatus } from '../generated/prisma';
+import { prisma } from '../shared/database';
+import type { PublisherType, KycStatus, ListingCategory, ListingStatus } from '../shared/database';
 
 // ─── Publishers ───────────────────────────────────────────────────────────────
 

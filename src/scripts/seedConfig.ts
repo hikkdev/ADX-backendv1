@@ -1,4 +1,4 @@
-import { prisma } from '../lib/prisma';
+import { prisma } from '../shared/database';
 import { APP_ENUMS } from '../constants/appEnums';
 
 const ONBOARD_FLOW = {

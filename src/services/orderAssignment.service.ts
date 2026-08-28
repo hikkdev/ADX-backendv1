@@ -1,6 +1,6 @@
-import { prisma } from '../lib/prisma';
+import { prisma } from '../shared/database';
 import { createNotification } from './notification.service';
-import { logger } from '../lib/logger';
+import { logger } from '../shared/logging';
 
 export async function autoAssignAgent(orderId: string) {
   const order = await prisma.order.findUnique({

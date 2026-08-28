@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
-import { ApiError } from '../lib/errors';
-import { prisma } from '../lib/prisma';
+import { ApiError } from '../shared/errors';
+import { prisma } from '../shared/database';
 import {
   placeOrder, publisherAcceptOrder, publisherRejectOrder, markPrintReady,
   agentAcceptOrder, agentRejectOrder, agentProposeSlot,

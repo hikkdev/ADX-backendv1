@@ -7,8 +7,8 @@ import {
   cancelMyOnboardingHandler, cancelOnboardingHandler, completeOnboardingHandler,
 } from '../controllers/publisher';
 import { initiateDigioKycHandler, getDigioKycStatusHandler } from '../controllers/digio';
-import { asyncHandler } from '../lib/errors';
-import { authenticate, requireRole } from '../middleware/authenticate';
+import { asyncHandler } from '../shared/http';
+import { authenticate, requireRole } from '../shared/auth';
 
 export const publisherRouter = Router();
 publisherRouter.use(authenticate);

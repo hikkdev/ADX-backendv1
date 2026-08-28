@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
-import { ApiError } from '../lib/errors';
+import { ApiError } from '../shared/errors';
 import { sendOtp, verifyOtp, normalizeMobile, sendEmailOtp, verifyEmailOtp } from '../services/otp.service';
 import {
   signAccessToken,
@@ -11,12 +11,12 @@ import {
   type SessionMeta,
 } from '../services/token.service';
 import { hashPassword, verifyPassword, createPasswordResetToken, consumePasswordResetToken } from '../services/password.service';
-import { sendMail, passwordResetEmail } from '../services/mail.service';
-import { logActivity } from '../services/activityLog.service';
+import { sendMail, passwordResetEmail } from '../shared/email';
+import { logActivity } from '../shared/audit';
 import { assertAccountNotLocked, registerFailedLogin, clearFailedLogins } from '../services/loginSecurity.service';
 import { env } from '../config/env';
-import { prisma } from '../lib/prisma';
-import type { Role } from '../generated/prisma';
+import { prisma } from '../shared/database';
+import type { Role } from '../shared/database';
 
 function sessionMeta(req: Request): SessionMeta {
   return { userAgent: req.headers['user-agent'], ipAddress: req.ip };

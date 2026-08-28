@@ -1,12 +1,12 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
-import { ApiError } from '../lib/errors';
-import { upperEnum } from '../lib/zod';
-import { prisma } from '../lib/prisma';
+import { ApiError } from '../shared/errors';
+import { upperEnum } from '../shared/validation';
+import { prisma } from '../shared/database';
 import { listActiveSessions, revokeSessionById } from '../services/token.service';
-import { listActivity as listActivityLogs, logActivity } from '../services/activityLog.service';
+import { listActivity as listActivityLogs, logActivity } from '../shared/audit';
 import { normalizeMobile } from '../services/otp.service';
-import type { Role } from '../generated/prisma';
+import type { Role } from '../shared/database';
 
 export async function getMe(req: Request, res: Response): Promise<void> {
   const userId = req.user!.sub;

@@ -4,8 +4,8 @@ import {
   markReadHandler, markAllReadHandler,
   getPreferencesHandler, savePreferencesHandler,
 } from '../controllers/notification';
-import { asyncHandler } from '../lib/errors';
-import { authenticate } from '../middleware/authenticate';
+import { asyncHandler } from '../shared/http';
+import { authenticate } from '../shared/auth';
 
 export const notificationRouter = Router();
 notificationRouter.use(authenticate);

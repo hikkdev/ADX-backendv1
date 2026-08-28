@@ -6,8 +6,8 @@ import {
   updateRoleConfigHandler,
   deleteRoleConfigHandler,
 } from '../controllers/rolesConfig';
-import { asyncHandler } from '../lib/errors';
-import { authenticate, requireRole } from '../middleware/authenticate';
+import { asyncHandler } from '../shared/http';
+import { authenticate, requireRole } from '../shared/auth';
 
 export const rolesConfigRouter = Router();
 rolesConfigRouter.use(authenticate);

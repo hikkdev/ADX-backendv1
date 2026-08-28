@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { handleUploadMiddleware, uploadFileHandler } from '../controllers/upload';
-import { asyncHandler } from '../lib/errors';
-import { authenticate } from '../middleware/authenticate';
+import { asyncHandler } from '../shared/http';
+import { authenticate } from '../shared/auth';
 
 export const uploadRouter = Router();
 uploadRouter.use(authenticate);

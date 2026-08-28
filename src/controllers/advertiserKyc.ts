@@ -1,8 +1,8 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
-import { ApiError } from '../lib/errors';
-import { prisma } from '../lib/prisma';
-import { upperEnum } from '../lib/zod';
+import { ApiError } from '../shared/errors';
+import { prisma } from '../shared/database';
+import { upperEnum } from '../shared/validation';
 
 const documentFields = {
   nationalIdUrl: z.string().url().optional(),

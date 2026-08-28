@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express';
-import { prisma } from '../lib/prisma';
+import { prisma } from '../shared/database';
 import { APP_ENUMS } from '../constants/appEnums';
 
 const FALLBACK_CONFIG = {

@@ -1,13 +1,13 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
-import { upperEnum } from '../lib/zod';
-import { ApiError } from '../lib/errors';
-import { prisma } from '../lib/prisma';
+import { upperEnum } from '../shared/validation';
+import { ApiError } from '../shared/errors';
+import { prisma } from '../shared/database';
 import {
   getMilestonesForAgent, createMilestoneTemplate,
   getTrainingResources, createTrainingResource,
 } from '../services/milestone.service';
-import type { MilestoneType } from '../generated/prisma';
+import type { MilestoneType } from '../shared/database';
 
 export async function getMilestonesHandler(req: Request, res: Response): Promise<void> {
   const userId = req.user!.sub;

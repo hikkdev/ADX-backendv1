@@ -1,7 +1,7 @@
 import { env } from '../config/env';
-import { prisma } from '../lib/prisma';
-import { logger } from '../lib/logger';
-import { getEffectiveKycConfig, type KycConfig } from './integrationConfig.service';
+import { prisma } from '../shared/database';
+import { logger } from '../shared/logging';
+import { getEffectiveKycConfig, type KycConfig } from '../shared/integrations';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

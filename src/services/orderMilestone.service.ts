@@ -1,7 +1,7 @@
-import { prisma } from '../lib/prisma';
-import { ApiError } from '../lib/errors';
+import { prisma } from '../shared/database';
+import { ApiError } from '../shared/errors';
 import { z } from 'zod';
-import type { OrderMilestoneType, OrderMilestoneStatus } from '../generated/prisma';
+import type { OrderMilestoneType, OrderMilestoneStatus } from '../shared/database';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

@@ -9,8 +9,8 @@ import {
   reviewAdvertiserKycHandler,
   deleteAdvertiserKycHandler,
 } from '../controllers/advertiserKyc';
-import { asyncHandler } from '../lib/errors';
-import { authenticate, requireRole } from '../middleware/authenticate';
+import { asyncHandler } from '../shared/http';
+import { authenticate, requireRole } from '../shared/auth';
 
 export const advertiserKycRouter = Router();
 advertiserKycRouter.use(authenticate);

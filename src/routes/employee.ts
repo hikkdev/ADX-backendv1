@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import type { Request, Response, NextFunction } from 'express';
-import { ApiError } from '../lib/errors';
+import { ApiError } from '../shared/errors';
 import {
   createEmployeeHandler,
   getAllEmployeesHandler,
@@ -8,8 +8,8 @@ import {
   updateEmployeeHandler,
   deleteEmployeeHandler,
 } from '../controllers/employee';
-import { asyncHandler } from '../lib/errors';
-import { authenticate, requireRole } from '../middleware/authenticate';
+import { asyncHandler } from '../shared/http';
+import { authenticate, requireRole } from '../shared/auth';
 
 export const employeeRouter = Router();
 employeeRouter.use(authenticate);

@@ -1,9 +1,9 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
-import { ApiError } from '../lib/errors';
+import { ApiError } from '../shared/errors';
 import { env } from '../config/env';
-import { logActivity } from '../services/activityLog.service';
-import { getIntegrationsConfig, updateIntegrationsConfig, type IntegrationsConfig } from '../services/integrationConfig.service';
+import { logActivity } from '../shared/audit';
+import { getIntegrationsConfig, updateIntegrationsConfig, type IntegrationsConfig } from '../shared/integrations';
 
 function maskSecret(value?: string | null): string | null {
   if (!value) return null;

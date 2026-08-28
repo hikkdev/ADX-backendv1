@@ -8,8 +8,8 @@ import {
   deleteUserKycHandler,
   deleteUserKycByIdHandler,
 } from '../controllers/userKyc';
-import { asyncHandler } from '../lib/errors';
-import { authenticate, requireRole } from '../middleware/authenticate';
+import { asyncHandler } from '../shared/http';
+import { authenticate, requireRole } from '../shared/auth';
 
 export const userKycRouter = Router();
 userKycRouter.use(authenticate);

@@ -1,13 +1,13 @@
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
-import { prisma } from '../lib/prisma';
-import { redis } from '../lib/redis';
+import { prisma } from '../shared/database';
+import { redis } from '../shared/cache';
 import { env } from '../config/env';
-import { ApiError } from '../lib/errors';
-import { logger } from '../lib/logger';
-import { sendSms } from './sms.service';
-import { sendViaResend } from './resend.service';
-import type { OtpPurpose } from '../generated/prisma';
+import { ApiError } from '../shared/errors';
+import { logger } from '../shared/logging';
+import { sendSms } from '../shared/sms';
+import { sendViaResend } from '../shared/email';
+import type { OtpPurpose } from '../shared/database';
 
 const OTP_TTL_MINUTES = 10;
 const MAX_ATTEMPTS = 5;

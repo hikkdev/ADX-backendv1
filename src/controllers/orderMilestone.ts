@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
-import { ApiError } from '../lib/errors';
-import { upperEnum } from '../lib/zod';
+import { ApiError } from '../shared/errors';
+import { upperEnum } from '../shared/validation';
 import {
   createOrderMilestoneTemplate,
   listOrderMilestoneTemplates,
@@ -23,8 +23,8 @@ import {
   completeMilestone,
   type EvidenceInput,
 } from '../services/orderMilestone.service';
-import type { OrderMilestoneType } from '../generated/prisma';
-import { prisma } from '../lib/prisma';
+import type { OrderMilestoneType } from '../shared/database';
+import { prisma } from '../shared/database';
 
 const requirementSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('photo'), label: z.string().min(1) }),

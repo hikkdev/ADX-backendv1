@@ -1,8 +1,8 @@
-import { prisma } from '../lib/prisma';
+import { prisma } from '../shared/database';
 import bcrypt from 'bcryptjs';
 import { createNotification } from './notification.service';
 import { autoAssignAgent } from './orderAssignment.service';
-import { logger } from '../lib/logger';
+import { logger } from '../shared/logging';
 
 export async function placeOrder(data: {
   advertiserId: string;

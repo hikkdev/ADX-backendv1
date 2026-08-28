@@ -1,5 +1,5 @@
-import { prisma } from '../lib/prisma';
-import type { NotificationType } from '../generated/prisma';
+import { prisma } from '../shared/database';
+import type { NotificationType } from '../shared/database';
 
 export async function getNotifications(
   userId: string,

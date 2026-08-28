@@ -1,11 +1,11 @@
 import type { Request, Response } from 'express';
 import QRCode from 'qrcode';
 import { z } from 'zod';
-import { ApiError } from '../lib/errors';
-import { upperEnum } from '../lib/zod';
+import { ApiError } from '../shared/errors';
+import { upperEnum } from '../shared/validation';
 import { env } from '../config/env';
 import { generateQr, resolveQr, deactivateQr, getQrScans, getQrById } from '../services/qr.service';
-import type { QrType, Role } from '../generated/prisma';
+import type { QrType, Role } from '../shared/database';
 
 const generateSchema = z.object({
   type: upperEnum(['SITE', 'AD', 'AGENT', 'ORDER', 'PUBLISHER'] as const),

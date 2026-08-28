@@ -3,10 +3,10 @@ import path from 'path';
 import type { Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import { z } from 'zod';
-import { ApiError } from '../lib/errors';
-import { prisma } from '../lib/prisma';
+import { ApiError } from '../shared/errors';
+import { prisma } from '../shared/database';
 import { env } from '../config/env';
-import { uploadFile } from '../services/storage.service';
+import { uploadFile } from '../shared/storage';
 
 // Multer stores to a temp dir first; storage service then moves to final destination
 const TEMP_DIR = path.join(process.cwd(), 'uploads', 'tmp');

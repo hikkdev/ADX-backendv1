@@ -1,8 +1,8 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
-import { ApiError } from '../lib/errors';
-import { upperEnum } from '../lib/zod';
-import { prisma } from '../lib/prisma';
+import { ApiError } from '../shared/errors';
+import { upperEnum } from '../shared/validation';
+import { prisma } from '../shared/database';
 import { getTickets, getTicketById, createTicket, addReply, closeTicket, reopenTicket } from '../services/support.service';
 
 export async function getTicketsHandler(req: Request, res: Response): Promise<void> {

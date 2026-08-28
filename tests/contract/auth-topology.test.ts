@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { app } from '../../src/app';
 import inventory from '../../docs/route-inventory.json';
-import { ALL_ROLES, guardedRoles, tokenFor } from '../helpers/tokens';
+import { ALL_ROLES, guardedRoles, tokenFor } from '../../src/shared/testing';
 import type { RouteEntry } from '../../scripts/collect-routes';
 
 /**

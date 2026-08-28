@@ -1,5 +1,5 @@
-import { prisma } from '../lib/prisma';
-import type { TransactionType } from '../generated/prisma';
+import { prisma } from '../shared/database';
+import type { TransactionType } from '../shared/database';
 
 export async function getBalance(agentId: string) {
   const now = new Date();

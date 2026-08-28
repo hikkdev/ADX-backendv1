@@ -6,8 +6,8 @@ import {
   updateAdvertisementHandler,
   deleteAdvertisementHandler,
 } from '../controllers/advertisement';
-import { asyncHandler } from '../lib/errors';
-import { authenticate } from '../middleware/authenticate';
+import { asyncHandler } from '../shared/http';
+import { authenticate } from '../shared/auth';
 
 export const advertisementRouter = Router();
 advertisementRouter.use(authenticate);

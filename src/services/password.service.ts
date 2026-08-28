@@ -1,7 +1,7 @@
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
-import { prisma } from '../lib/prisma';
-import { logger } from '../lib/logger';
+import { prisma } from '../shared/database';
+import { logger } from '../shared/logging';
 
 const RESET_TOKEN_TTL_MINUTES = 30;
 

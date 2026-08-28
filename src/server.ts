@@ -1,6 +1,7 @@
 import { app } from './app';
 import { env } from './config/env';
-import { logger } from './lib/logger';
+import { logger } from './shared/logging';
+import { registerGracefulShutdown } from './bootstrap/graceful-shutdown';
 import { startPublisherTimerJob, publisherTimerInterval } from './jobs/publisherTimer';
 
 const server = app.listen(env.PORT, () => {
@@ -25,14 +26,6 @@ server.on('error', (err: NodeJS.ErrnoException) => {
   process.exit(1);
 });
 
-// Release the port and stop background timers on shutdown so a stopped dev
-// server (Ctrl+C, VS Code task restart, nodemon restart) doesn't linger as an
-// orphaned process that keeps holding the port and silently serving traffic.
-function shutdown(signal: NodeJS.Signals): void {
-  logger.info('Shutting down', { signal });
+registerGracefulShutdown(server, () => {
   if (publisherTimerInterval) clearInterval(publisherTimerInterval);
-  server.close(() => process.exit(0));
-}
-
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
+});

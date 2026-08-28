@@ -1,7 +1,7 @@
-import { prisma } from '../lib/prisma';
-import { redis } from '../lib/redis';
+import { prisma } from '../shared/database';
+import { redis } from '../shared/cache';
 import { createNotification } from '../services/notification.service';
-import { logger } from '../lib/logger';
+import { logger } from '../shared/logging';
 
 const TAG = 'publisherTimerJob';
 const INTERVAL_MS = 60 * 1000;

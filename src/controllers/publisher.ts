@@ -1,15 +1,15 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
-import { ApiError } from '../lib/errors';
-import { upperEnum } from '../lib/zod';
-import { prisma } from '../lib/prisma';
+import { ApiError } from '../shared/errors';
+import { upperEnum } from '../shared/validation';
+import { prisma } from '../shared/database';
 import {
   createPublisher, getPublishersForAgent, getPublisherById, updatePublisher,
   submitKyc, reviewKyc,
   createListing, getListingsForPublisher, updateListing, publishListing,
 } from '../services/publisher.service';
 import { generateQr } from '../services/qr.service';
-import type { PublisherType, KycStatus, ListingCategory } from '../generated/prisma';
+import type { PublisherType, KycStatus, ListingCategory } from '../shared/database';
 
 const ONBOARDING_CLAIM_TTL_HOURS = 48;
 

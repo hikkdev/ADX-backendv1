@@ -1,5 +1,5 @@
-import { prisma } from '../lib/prisma';
-import type { MilestoneType } from '../generated/prisma';
+import { prisma } from '../shared/database';
+import type { MilestoneType } from '../shared/database';
 
 export async function getMilestonesForAgent(agentId: string) {
   const agent = await prisma.agentProfile.findUnique({ where: { id: agentId } });

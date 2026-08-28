@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
-import { ApiError } from '../lib/errors';
-import { prisma } from '../lib/prisma';
+import { ApiError } from '../shared/errors';
+import { prisma } from '../shared/database';
 
 // Document fields accepted on employee create/update. Clients first POST the file to
 // /upload (purpose=KYC) to get a URL, then send that URL here — mirrors how PublisherKyc works.

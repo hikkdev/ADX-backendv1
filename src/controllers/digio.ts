@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
-import { ApiError } from '../lib/errors';
-import { prisma } from '../lib/prisma';
+import { ApiError } from '../shared/errors';
+import { prisma } from '../shared/database';
 import { initiateDigioKyc, handleDigioWebhook, getDigioKycStatus, type DigioWebhookPayload } from '../services/digio.service';
 
 // POST /publishers/:publisherId/kyc/digio/initiate

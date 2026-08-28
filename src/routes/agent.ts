@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { getAllAgentsHandler, getAgentByIdHandler } from '../controllers/agent';
-import { asyncHandler } from '../lib/errors';
-import { authenticate, requireRole } from '../middleware/authenticate';
+import { asyncHandler } from '../shared/http';
+import { authenticate, requireRole } from '../shared/auth';
 
 export const agentRouter = Router();
 agentRouter.use(authenticate);

@@ -1,25 +1,15 @@
-import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
-import { prisma } from '../lib/prisma';
+import { prisma } from '../shared/database';
 import { env } from '../config/env';
-import { logger } from '../lib/logger';
-import { logActivity } from './activityLog.service';
-import type { Role } from '../generated/prisma';
+import { logger } from '../shared/logging';
+import { logActivity } from '../shared/audit';
 
-export type AccessTokenPayload = {
-  sub: string;
-  roles: Role[];
-};
-
-export function signAccessToken(userId: string, roles: Role[]): string {
-  return jwt.sign({ sub: userId, roles } as AccessTokenPayload, env.JWT_ACCESS_SECRET, {
-    expiresIn: env.JWT_ACCESS_EXPIRES_IN as any,
-  });
-}
-
-export function verifyAccessToken(token: string): AccessTokenPayload {
-  return jwt.verify(token, env.JWT_ACCESS_SECRET) as AccessTokenPayload;
-}
+// Signing and verification live in shared/auth/jwt so the authenticate()
+// middleware can verify a token without shared depending on this module.
+// Re-exported here because refresh-token rotation returns an access token
+// alongside the new refresh token.
+export { signAccessToken, verifyAccessToken } from '../shared/auth';
+export type { AccessTokenPayload } from '../shared/auth';
 
 export type SessionMeta = { userAgent?: string; ipAddress?: string };
 
