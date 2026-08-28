@@ -1,13 +1,13 @@
 import { Router } from 'express';
+import { asyncHandler } from '../../shared/http';
+import { authenticate } from '../../shared/auth';
 import {
   getBankAccountsHandler,
   createBankAccountHandler,
   updateBankAccountHandler,
   deleteBankAccountHandler,
   setDefaultBankAccountHandler,
-} from '../controllers/banking';
-import { asyncHandler } from '../shared/http';
-import { authenticate } from '../shared/auth';
+} from './banking.controller';
 
 export const bankingRouter = Router();
 bankingRouter.use(authenticate);

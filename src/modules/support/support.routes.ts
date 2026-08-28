@@ -1,10 +1,10 @@
 import { Router } from 'express';
+import { asyncHandler } from '../../shared/http';
+import { authenticate } from '../../shared/auth';
 import {
   getTicketsHandler, getTicketHandler, createTicketHandler,
   addReplyHandler, updateTicketStatusHandler,
-} from '../controllers/support';
-import { asyncHandler } from '../shared/http';
-import { authenticate } from '../shared/auth';
+} from './support.controller';
 
 export const supportRouter = Router();
 supportRouter.use(authenticate);
