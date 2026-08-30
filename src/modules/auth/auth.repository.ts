@@ -28,6 +28,20 @@ export type PublisherLoginUser = User & {
 export interface AuthRepository {
   findLoginUserById(userId: string): Promise<LoginUser | null>;
   findLoginUserByEmail(email: string): Promise<LoginUser | null>;
+  /**
+   * Case-insensitive email lookup, for Google sign-in only.
+   *
+   * Returns a list rather than a row on purpose. Nothing in this codebase
+   * normalises email case on write and the unique index is case-sensitive, so
+   * `ada@adx.co` and `Ada@adx.co` can both exist. Google's address is
+   * canonically lower-case, so an exact match would silently fail to find the
+   * second — but picking one arbitrarily out of two would be an account
+   * confusion bug. The caller sees the ambiguity and refuses it.
+   *
+   * Password login deliberately keeps its exact-match lookup: changing that is
+   * an observable behaviour change to an existing endpoint.
+   */
+  findLoginUsersByEmailInsensitive(email: string): Promise<LoginUser[]>;
   /** Lean lookup for forgot-password, which only needs the id. */
   findByEmail(email: string): Promise<User | null>;
   findUserWithRoles(userId: string): Promise<(User & { roles: { role: Role }[] }) | null>;

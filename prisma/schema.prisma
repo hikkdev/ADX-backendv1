@@ -1,6 +1,11 @@
 generator client {
-  provider = "prisma-client-js"
-  output   = "../src/generated/prisma"
+  provider        = "prisma-client-js"
+  output          = "../src/generated/prisma"
+  // Lets a query opt into a single LATERAL JOIN instead of one round trip per
+  // relation. With the database in another region every extra round trip costs
+  // ~85ms, so the login lookup alone was paying 5x that. Opt-in per query via
+  // `relationLoadStrategy: 'join'` — the default stays unchanged everywhere else.
+  previewFeatures = ["relationJoins"]
 }
 
 datasource db {

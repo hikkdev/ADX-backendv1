@@ -167,7 +167,7 @@ Three gates protect the refactor and should protect future changes too:
 
 - `tests/architecture/route-inventory.test.ts` — diffs the live router tree,
   **in order**, against `docs/route-inventory.json`.
-- `tests/contract/auth-topology.test.ts` — drives all 167 routes: every
+- `tests/contract/auth-topology.test.ts` — drives all 168 routes: every
   authenticated route must reject a missing and a malformed token, every
   role-guarded route must reject a role outside its guard, and the six
   deliberately public endpoints must stay public.
@@ -203,7 +203,7 @@ Every file from the pre-refactor tree. Nothing is left behind:
 | `controllers/advertisement.ts` | `modules/advertisements/` |
 | `controllers/advertiserKyc.ts` | `modules/kyc/advertiser/` |
 | `controllers/agent.ts` | `modules/agents/` |
-| `controllers/auth.ts` | `modules/auth/{otp,password,tokens,publisher}/` |
+| `controllers/auth.ts` | `modules/auth/{otp,password,tokens,publisher}/` (`google/` added later) |
 | `controllers/banking.ts` | `modules/banking/` |
 | `controllers/config.ts` | `modules/app-config/` |
 | `controllers/digio.ts` | `modules/publishers/kyc/digio.controller.ts` |

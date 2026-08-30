@@ -22,7 +22,15 @@ export async function startSession(
   meta: SessionMeta,
 ): Promise<{ accessToken: string; refreshToken: string }> {
   const accessToken = signAccessToken(userId, roles);
-  const refreshToken = await createRefreshToken(userId, meta);
-  await repository.recordLogin(userId);
+
+  // The refresh-token INSERT and the lastLoginAt UPDATE touch different tables
+  // and neither reads the other's result, so running them sequentially just
+  // paid two round trips where one would do. With the database in another
+  // region that was ~85ms of pure latency per login, for nothing.
+  const [refreshToken] = await Promise.all([
+    createRefreshToken(userId, meta),
+    repository.recordLogin(userId),
+  ]);
+
   return { accessToken, refreshToken };
 }

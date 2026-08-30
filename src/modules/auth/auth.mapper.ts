@@ -4,7 +4,7 @@ import type { LoginUser, PublisherLoginUser } from './auth.repository';
 /**
  * Login response payloads — one function per endpoint, written out in full.
  *
- * They are deliberately NOT folded into a shared builder, because the four
+ * They are deliberately NOT folded into a shared builder, because the five
  * login endpoints do not return the same shape and unifying them would change
  * the API:
  *
@@ -63,6 +63,29 @@ export function passwordLoginUser(user: LoginUser, roles: Role[]) {
     language: user.language,
     avatarUrl: user.avatarUrl,
     hasPassword: true,
+    roles,
+    agentProfile: user.agentProfile,
+    publisherProfile: user.publisherProfile,
+  };
+}
+
+/**
+ * POST /auth/google.
+ *
+ * `hasPassword` is computed, not hardcoded: reaching this point proves Google
+ * vouched for the address, which says nothing about whether the ADX account
+ * also has a password. The admin UI uses the flag to decide whether to offer
+ * "set a password", so a Google-only account must report false.
+ */
+export function googleLoginUser(user: LoginUser, roles: Role[]) {
+  return {
+    id: user.id,
+    mobile: user.mobile,
+    name: user.name,
+    email: user.email,
+    language: user.language,
+    avatarUrl: user.avatarUrl,
+    hasPassword: !!user.passwordHash,
     roles,
     agentProfile: user.agentProfile,
     publisherProfile: user.publisherProfile,
