@@ -12,6 +12,7 @@
  */
 import '../config/load-env';
 import { prisma } from '../shared/database';
+import { redis } from '../shared/cache';
 import { hashPassword } from '../modules/auth';
 import type { Role } from '../shared/database';
 
@@ -62,4 +63,12 @@ main()
     console.error('Failed to create user:', err instanceof Error ? err.message : err);
     process.exit(1);
   })
-  .finally(() => void prisma.$disconnect());
+  .finally(async () => {
+    // Importing from `modules/auth` pulls in the rate limiters, which construct
+    // the shared ioredis client. That open socket keeps the event loop alive,
+    // so without disconnecting it this script finished its work and then hung
+    // forever — with its output still sitting in an unflushed pipe, making it
+    // look like it had frozen on the very first step.
+    await prisma.$disconnect().catch(() => undefined);
+    redis.disconnect();
+  });

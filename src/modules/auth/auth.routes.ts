@@ -4,6 +4,7 @@ import { authenticate } from '../../shared/auth';
 import { verifyCaptcha } from '../../shared/security';
 import {
   passwordAuthLimiter,
+  googleAuthLimiter,
   otpRequestLimiter,
   otpVerifyLimiter,
   refreshLimiter,
@@ -25,6 +26,7 @@ import {
   publisherSendOtpHandler,
   publisherVerifyOtpHandler,
 } from './publisher/publisher-auth.controller';
+import { googleLoginHandler } from './google/google.controller';
 
 export const authRouter = Router();
 
@@ -43,6 +45,12 @@ authRouter.post('/login-password', passwordAuthLimiter, verifyCaptcha, asyncHand
 authRouter.post('/forgot-password', passwordAuthLimiter, verifyCaptcha, asyncHandler(forgotPasswordHandler));
 authRouter.post('/reset-password', passwordAuthLimiter, asyncHandler(resetPasswordHandler));
 authRouter.post('/change-password', authenticate, asyncHandler(changePasswordHandler));
+
+// Google Workspace sign-in. No verifyCaptcha: the caller has already completed
+// Google's own account challenge, so a Turnstile check on top only adds a way
+// for the flow to fail. Authentication happens against Google's JWKS; this
+// endpoint never provisions an account.
+authRouter.post('/google', googleAuthLimiter, asyncHandler(googleLoginHandler));
 
 // Publisher self-registration / login
 authRouter.post('/publisher/send-otp', otpRequestLimiter, verifyCaptcha, asyncHandler(publisherSendOtpHandler));

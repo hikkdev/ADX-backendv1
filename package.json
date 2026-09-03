@@ -4,11 +4,11 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "predev": "node scripts/kill-port.cjs",
+    "predev": "node scripts/check-port.cjs",
     "dev": "nodemon --watch src --ext ts --exec tsx src/server.ts",
     "redis:up": "docker compose up -d redis",
     "redis:down": "docker compose stop redis",
-    "build": "tsc",
+    "build": "prisma generate && tsc",
     "postbuild": "node scripts/copy-prisma-client.cjs",
     "start": "node dist/server.js",
     "seed:config": "tsx src/scripts/seedConfig.ts",

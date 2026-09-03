@@ -24,6 +24,21 @@ export const passwordAuthLimiter = rateLimit({
   store: redisStore('rl:password-auth:'),
 });
 
+// Google sign-in is not brute-forceable — an ID token is RSA-signed by Google,
+// so there is nothing to guess. This limiter exists for the other cost: every
+// unverifiable token can force a JWKS refetch against Google, and each accepted
+// one writes a refresh-token row. Its own budget, rather than sharing the
+// password limiter's, so a burst of Google attempts cannot lock a legitimate
+// user out of password login.
+export const googleAuthLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'Too many attempts. Please try again later.' },
+  store: redisStore('rl:google-auth:'),
+});
+
 // Guards against SMS/email-bombing a number via repeated send-OTP calls from
 // one IP. A per-account limit in otp.service.ts backs this up against the
 // same abuse spread across many IPs.

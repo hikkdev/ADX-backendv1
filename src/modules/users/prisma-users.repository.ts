@@ -9,15 +9,28 @@ const profileInclude = {
   publisherProfile: { include: { kyc: true } },
 } as const;
 
+// Prisma's default strategy runs one query per relation. GET /users/me is on
+// every authenticated page load, and with the database in another region those
+// five sequential round trips cost ~85ms each. `join` collapses them into one
+// LATERAL JOIN. Used on the single-row profile reads only — see the comment on
+// findAllForAdmin for why the admin list is left alone.
+const JOIN = { relationLoadStrategy: 'join' } as const;
+
 export const prismaUsersRepository: UsersRepository = {
   findProfile(userId: string) {
-    return prisma.user.findUnique({ where: { id: userId }, include: profileInclude }) as never;
+    return prisma.user.findUnique({ ...JOIN, where: { id: userId }, include: profileInclude }) as never;
   },
 
   updateProfile(userId: string, data: UpdateProfileInput) {
     return prisma.user.update({ where: { id: userId }, data, include: profileInclude }) as never;
   },
 
+  // NOTE: unbounded, and deliberately left on the default load strategy.
+  // It returns every user joined to seven relations including one-to-many
+  // listings/sites/orders. A `join` strategy here would widen an already
+  // unbounded result set rather than fix it, and the real fix is pagination,
+  // which changes this endpoint's contract. Cheap today (2 users) but it will
+  // degrade sharply with real data — see the audit notes.
   findAllForAdmin() {
     return prisma.user.findMany({
       include: {

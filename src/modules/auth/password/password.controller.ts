@@ -52,8 +52,15 @@ export async function loginPasswordHandler(req: Request, res: Response): Promise
 
   await clearFailedLogins(email);
   const roles = user.roles.map((r) => r.role) as Role[];
-  const { accessToken, refreshToken } = await startSession(user.id, roles, sessionMeta(req));
-  await logActivity(user.id, 'LOGIN_PASSWORD', req);
+
+  // Independent writes: the audit row does not feed the session, and the
+  // session does not read the audit row. Awaiting both together keeps the
+  // audit durability guarantee (a silently dropped login record would matter)
+  // while spending one round trip instead of two.
+  const [{ accessToken, refreshToken }] = await Promise.all([
+    startSession(user.id, roles, sessionMeta(req)),
+    logActivity(user.id, 'LOGIN_PASSWORD', req),
+  ]);
 
   res.json({
     success: true,

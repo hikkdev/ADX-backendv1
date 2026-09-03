@@ -40,6 +40,15 @@ const envSchema = z.object({
   TWILIO_PHONE_NUMBER: z.string().optional(),
   // Google Maps Platform — geocoding/maps for the future agent/publisher/advertiser apps
   GOOGLE_MAPS_API_KEY: z.string().optional(),
+  // Google Sign-In — the OAuth client ID the admin UI's "Continue with Google
+  // Workspace" button is issued for. Unlike the integrations above this does
+  // NOT degrade to a no-op when unset: POST /auth/google answers 503 instead,
+  // because a login endpoint that skips its check lets anyone in.
+  GOOGLE_CLIENT_ID: z.string().optional(),
+  // Comma-separated Workspace domains allowed to sign in, matched against the
+  // ID token's `hd` claim (e.g. "adx.co"). Blank means any Google account may
+  // attempt it — the account must still already exist in ADX either way.
+  GOOGLE_ALLOWED_DOMAINS: z.string().default(''),
   // Razorpay — payments
   RAZORPAY_KEY_ID: z.string().optional(),
   RAZORPAY_KEY_SECRET: z.string().optional(),

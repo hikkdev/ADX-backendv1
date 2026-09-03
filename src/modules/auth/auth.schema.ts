@@ -28,6 +28,12 @@ export const loginPasswordSchema = z.object({
   password: z.string().min(1),
 });
 
+// The credential is Google's ID token, so there is nothing else to validate
+// here: every claim inside it is checked cryptographically in google.service.
+// A bare non-empty string keeps a malformed token a 401 from the verifier
+// rather than a 400 from Zod, so probing the endpoint yields one answer.
+export const googleLoginSchema = z.object({ idToken: z.string().min(1) });
+
 export const forgotPasswordSchema = z.object({ email: z.string().email() });
 
 export const resetPasswordSchema = z.object({

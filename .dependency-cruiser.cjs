@@ -37,11 +37,11 @@ module.exports = {
     {
       name: 'prisma-only-in-repositories',
       comment:
-        'The Prisma client belongs behind a module repository so controllers and services depend on an interface, not on the ORM. Type-only imports are exempt: generated enum and row types erase at compile time and carry no coupling to the ORM API.',
+        'The Prisma client belongs behind a module repository so controllers and services depend on an interface, not on the ORM. Type-only imports are exempt: generated enum and row types erase at compile time and carry no coupling to the ORM API. Tests under __tests__ are exempt too: the rule is about production layering, and an integration test that has to seed its own row legitimately needs the ORM to do it.',
       severity: 'error',
       from: {
         path: '^src/modules/',
-        pathNot: 'prisma-[^/]+\\.repository\\.ts$',
+        pathNot: ['prisma-[^/]+\\.repository\\.ts$', '/__tests__/'],
       },
       to: { path: '^src/shared/database', dependencyTypesNot: ['type-only'] },
     },

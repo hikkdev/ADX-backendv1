@@ -1,6 +1,6 @@
 {
   "generatedBy": "scripts/route-inventory.ts",
-  "routeCount": 167,
+  "routeCount": 168,
   "routes": [
     {
       "method": "GET",
@@ -158,6 +158,18 @@
         "requestLogger",
         "authenticate",
         "changePasswordHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/auth/google",
+      "chain": [
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "<anon>",
+        "googleLoginHandler"
       ]
     },
     {
