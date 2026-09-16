@@ -1,8 +1,9 @@
 import { prisma } from '../../shared/database';
-import type { OrderMilestoneStatus } from '../../shared/database';
+import type { OrderMilestoneStatus, OrderMilestoneType } from '../../shared/database';
 import { ApiError } from '../../shared/errors';
 import type {
   NewOrderMilestone,
+  NewReinstallMilestone,
   NewTemplate,
   OrderMilestonePatch,
   OrderMilestonesRepository,
@@ -114,15 +115,21 @@ export const prismaOrderMilestonesRepository: OrderMilestonesRepository = {
   },
 
   createManyForOrder(rows) {
+    // Issued to the agent already holding the order: theirs from the start,
+    // so accepted on creation rather than offered (A12).
+    const acceptedAt = new Date();
     return prisma.orderMilestone.createMany({
-      data: rows.map((row) => ({ ...row, status: 'DISPATCHED' as OrderMilestoneStatus })),
+      data: rows.map((row) => ({ ...row, status: 'DISPATCHED' as OrderMilestoneStatus, acceptedAt })),
     });
   },
 
   findWithOrderStatus(milestoneId: string) {
     return prisma.orderMilestone.findUnique({
       where: { id: milestoneId },
-      include: { template: true, orderRecord: { select: { status: true } } },
+      include: {
+        template: true,
+        orderRecord: { select: { status: true, agentId: true, startDate: true, endDate: true } },
+      },
     }) as never;
   },
 
@@ -141,6 +148,30 @@ export const prismaOrderMilestonesRepository: OrderMilestonesRepository = {
       where: { id: milestoneId, status: { in: ['PENDING', 'DISPATCHED'] } },
     });
     return result.count;
+  },
+
+  // ── Lot D (Q54/Q92): the re-install ──────────────────────────────────
+
+  findActiveTemplateByType(type: OrderMilestoneType) {
+    return prisma.orderMilestoneTemplate.findFirst({ where: { type, isActive: true }, orderBy: { createdAt: 'asc' } });
+  },
+
+  createReinstall(data: NewReinstallMilestone) {
+    return prisma.orderMilestone.create({
+      data: {
+        ...data,
+        status: data.assignedAgentId ? 'DISPATCHED' : 'PENDING',
+        isOptional: false,
+      },
+    });
+  },
+
+  findStatuses(milestoneIds: string[]) {
+    if (milestoneIds.length === 0) return Promise.resolve([]);
+    return prisma.orderMilestone.findMany({
+      where: { id: { in: milestoneIds } },
+      select: { id: true, status: true },
+    });
   },
 
   findForAgent(agentId: string) {
@@ -164,6 +195,68 @@ export const prismaOrderMilestonesRepository: OrderMilestonesRepository = {
       data: { status: 'IN_PROGRESS', startedAt: new Date() },
       include: { template: true },
     });
+  },
+
+  // ── A12: the offer ─────────────────────────────────────────────────────
+
+  accept(milestoneId: string, at: Date) {
+    return prisma.orderMilestone.update({
+      where: { id: milestoneId },
+      data: { acceptedAt: at, rejectionReason: null },
+      include: agentWorkInclude,
+    });
+  },
+
+  reject(milestoneId: string, reason: string) {
+    return prisma.orderMilestone.update({
+      where: { id: milestoneId },
+      data: {
+        status: 'PENDING',
+        assignedAgentId: null,
+        offeredAt: null,
+        offerExpiresAt: null,
+        acceptedAt: null,
+        scheduledStart: null,
+        scheduledEnd: null,
+        rejectionReason: reason,
+      },
+      include: { template: true },
+    });
+  },
+
+  schedule(milestoneId: string, start: Date, end: Date) {
+    return prisma.orderMilestone.update({
+      where: { id: milestoneId },
+      data: { scheduledStart: start, scheduledEnd: end, dueDate: start },
+      include: agentWorkInclude,
+    });
+  },
+
+  findDispatchedForAgent(agentId: string) {
+    return prisma.orderMilestone.findMany({
+      where: { assignedAgentId: agentId, status: 'DISPATCHED' },
+      select: { id: true, orderId: true },
+      orderBy: { createdAt: 'asc' },
+    });
+  },
+
+  findOfferExpired(windowStart: Date, now: Date) {
+    return prisma.orderMilestone.findMany({
+      where: {
+        status: 'DISPATCHED',
+        acceptedAt: null,
+        offerExpiresAt: { gt: windowStart, lte: now },
+      },
+      select: { id: true, orderId: true, assignedAgentId: true },
+    });
+  },
+
+  async findScheduledStartsForOrder(orderId: string, exceptMilestoneId: string) {
+    const rows = await prisma.orderMilestone.findMany({
+      where: { orderId, id: { not: exceptMilestoneId }, scheduledStart: { not: null } },
+      select: { scheduledStart: true },
+    });
+    return rows.flatMap((row) => (row.scheduledStart ? [row.scheduledStart] : []));
   },
 
   complete(milestoneId: string, evidence: EvidenceInput[]) {

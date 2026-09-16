@@ -1,5 +1,7 @@
 import { redis } from '../shared/cache';
 import { logger } from '../shared/logging';
+import { reportError } from '../shared/errors';
+import { recordHeartbeat } from '../shared/jobs';
 import { createNotification } from '../modules/notifications';
 import { findPublisherTimerExpired, shortId } from '../modules/orders';
 import { listAdminUserIds } from '../modules/users';
@@ -15,6 +17,7 @@ export let publisherTimerInterval: ReturnType<typeof setInterval> | null = null;
 
 export function startPublisherTimerJob(): void {
   publisherTimerInterval = setInterval(async () => {
+    recordHeartbeat('publisher-timer');
     // Every instance runs this interval, but only the one that wins the lock
     // for a given minute actually processes it — otherwise N instances would
     // each notify admins about the same expired order.
@@ -46,6 +49,7 @@ export function startPublisherTimerJob(): void {
             title: 'Publisher no response',
             message: `Order ${shortId(order.id)} has had no publisher response within 30 minutes. Please follow up.`,
             relatedId: order.id,
+            relatedType: 'ORDER',
           }).catch(() => {}),
         );
 
@@ -53,6 +57,7 @@ export function startPublisherTimerJob(): void {
       }
     } catch (err) {
       logger.error('publisherTimerJob tick failed', { tag: TAG, err });
+      void reportError(err, { tag: TAG });
     }
   }, INTERVAL_MS);
 }

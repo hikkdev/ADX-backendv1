@@ -6,3 +6,6 @@
  * flow an agent runs on site. This module is the back-office intake form.
  */
 export { onboardingRouter } from './onboarding.routes';
+
+// Lot G (answer 144): the module's feature declarations, loaded with the module so the registry sees them at boot.
+import './features';

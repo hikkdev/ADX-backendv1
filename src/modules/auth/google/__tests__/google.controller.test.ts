@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   findLoginUsersByEmailInsensitive: vi.fn(),
   startSession: vi.fn(),
   logActivity: vi.fn(),
+  issueChallenge: vi.fn(),
 }));
 
 vi.mock('../google.service', () => ({ verifyGoogleIdToken: mocks.verifyGoogleIdToken }));
@@ -34,9 +35,20 @@ vi.mock('../../auth.session', () => ({
   startSession: mocks.startSession,
 }));
 
-vi.mock('../../../../shared/audit', () => ({
+// Partial: the whole app is loaded below, and the audit module reads other
+// exports from here (ACTIVITY_SORTS and friends) while building its schemas.
+vi.mock('../../../../shared/audit', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../../shared/audit')>()),
   logActivity: mocks.logActivity,
   listActivity: vi.fn(),
+}));
+
+/* Lot A (Q25): an ADMIN gets a challenge here rather than tokens. Only the
+ * challenge itself is stubbed — `isAdmin` stays real, so the branch this file
+ * cares about is the one under test, and no database is touched. */
+vi.mock('../../two-factor/two-factor.service', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../two-factor/two-factor.service')>()),
+  issueChallenge: mocks.issueChallenge,
 }));
 
 import { app } from '../../../../app';
@@ -61,7 +73,9 @@ function adxUser(overrides: Record<string, unknown> = {}) {
     avatarUrl: null,
     passwordHash: null,
     isActive: true,
-    roles: [{ role: 'ADMIN' }],
+    // Deliberately NOT an admin: an admin's Google sign-in answers with a
+    // second-factor challenge, which has its own describe below.
+    roles: [{ role: 'PARTNER' }],
     agentProfile: null,
     publisherProfile: null,
     ...overrides,
@@ -87,6 +101,12 @@ beforeEach(async () => {
     refreshToken: 'adx-refresh',
   });
   mocks.logActivity.mockResolvedValue(undefined);
+  mocks.issueChallenge.mockResolvedValue({
+    challengeToken: 'challenge-token',
+    methods: ['SMS', 'EMAIL'],
+    maskedMobile: '+91 ***** 3210',
+    maskedEmail: 'a**a@adx.co',
+  });
 });
 
 describe('POST /auth/google — a verified identity with a matching account', () => {
@@ -101,7 +121,7 @@ describe('POST /auth/google — a verified identity with a matching account', ()
       data: {
         accessToken: 'adx-access',
         refreshToken: 'adx-refresh',
-        user: { id: 'usr_ada', email: 'ada@adx.co', roles: ['ADMIN'] },
+        user: { id: 'usr_ada', email: 'ada@adx.co', roles: ['PARTNER'] },
       },
     });
   });
@@ -116,14 +136,14 @@ describe('POST /auth/google — a verified identity with a matching account', ()
 
   it('starts a session with the roles the account actually holds', async () => {
     mocks.findLoginUsersByEmailInsensitive.mockResolvedValue([
-      adxUser({ roles: [{ role: 'ADMIN' }, { role: 'PARTNER' }] }),
+      adxUser({ roles: [{ role: 'PARTNER' }, { role: 'PUBLISHER' }] }),
     ]);
 
     await signIn();
 
     expect(mocks.startSession).toHaveBeenCalledWith(
       'usr_ada',
-      ['ADMIN', 'PARTNER'],
+      ['PARTNER', 'PUBLISHER'],
       expect.anything(),
     );
   });
@@ -161,6 +181,55 @@ describe('POST /auth/google — a verified identity with a matching account', ()
       expect.anything(),
       expect.objectContaining({ googleSub: IDENTITY.sub, hostedDomain: 'adx.co' }),
     );
+  });
+});
+
+/* Lot A (Q25). Google proved the mailbox, not the phone. */
+describe('POST /auth/google — an admin gets a challenge, not tokens', () => {
+  const admin = () => [adxUser({ roles: [{ role: 'ADMIN' }] })];
+
+  it('answers 200 with the challenge and starts no session', async () => {
+    mocks.findLoginUsersByEmailInsensitive.mockResolvedValue(admin());
+
+    const res = await signIn();
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      success: true,
+      data: {
+        challenge: {
+          challengeToken: 'challenge-token',
+          methods: ['SMS', 'EMAIL'],
+          maskedMobile: '+91 ***** 3210',
+          maskedEmail: 'a**a@adx.co',
+        },
+      },
+    });
+    expect(mocks.startSession).not.toHaveBeenCalled();
+  });
+
+  it('records the challenge against the account, naming the method it came from', async () => {
+    mocks.findLoginUsersByEmailInsensitive.mockResolvedValue(admin());
+
+    await signIn();
+
+    expect(mocks.logActivity).toHaveBeenCalledWith(
+      'usr_ada',
+      'LOGIN_2FA_CHALLENGED',
+      expect.anything(),
+      expect.objectContaining({ method: 'google' }),
+    );
+  });
+
+  it('a deactivated admin is still refused before any challenge is issued', async () => {
+    mocks.findLoginUsersByEmailInsensitive.mockResolvedValue([
+      adxUser({ roles: [{ role: 'ADMIN' }], isActive: false }),
+    ]);
+
+    const res = await signIn();
+
+    expect(res.status).toBe(401);
+    expect(mocks.issueChallenge).not.toHaveBeenCalled();
   });
 });
 

@@ -12,11 +12,18 @@ import type { Role, User } from '../../shared/database';
  * See docs/backend-modules.md.
  */
 
-/** Everything a login response needs, in one query. */
+/**
+ * Everything a login response needs, in one query.
+ *
+ * Both party profiles are joined so the app can tell, from the login response
+ * alone, whether this person still has to choose a type: a User with neither
+ * profile is a fresh register-or-login signup bound for POST /users/me/party.
+ */
 export type LoginUser = User & {
   roles: { role: Role }[];
   agentProfile: unknown;
   publisherProfile: unknown;
+  advertiserProfile: unknown;
 };
 
 /** Publisher login joins a narrower set — no agentProfile, no KYC. */

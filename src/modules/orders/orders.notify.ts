@@ -13,7 +13,8 @@ export function notifyUser(
   message: string,
   relatedId: string,
 ): Promise<unknown> {
-  return createNotification({ userId, type: 'ORDER', title, message, relatedId });
+  // E9: every order notice names its record, so a tap opens the order.
+  return createNotification({ userId, type: 'ORDER', title, message, relatedId, relatedType: 'ORDER' });
 }
 
 /** Fans an alert out to every admin. */

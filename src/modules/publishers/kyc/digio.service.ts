@@ -1,45 +1,30 @@
-import { env } from '../../../config/env';
+import { ApiError } from '../../../shared/errors';
 import { logger } from '../../../shared/logging';
-import { getEffectiveKycConfig, type KycConfig } from '../../../shared/integrations';
+import { requestDigioKyc, type DigioWebhookPayload } from '../../../shared/integrations/digio-client';
 import { createNotification } from '../../notifications';
 import { prismaDigioRepository as repository } from './prisma-digio.repository';
+
+export type { DigioWebhookPayload } from '../../../shared/integrations/digio-client';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type DigioPurpose = 'AADHAAR_VERIFICATION' | 'PAN_VERIFICATION' | 'DRIVING_LICENCE';
 
-type DigiInitiateResponse = {
-  id: string;             // kycId
-  customer_identifier: string;
-  access_token: { id: string; entity_id: string; valid_till: string };
-};
+/**
+ * What answers a webhook no publisher row claims.
+ *
+ * Digio has one callback URL and ADX verifies more than one kind of party
+ * through it. The publisher's module owns the endpoint because it was here
+ * first; anyone else who initiates a Digio check registers here, at boot,
+ * and is asked when a request id is not a publisher's. The advertiser's KYC
+ * module is the first; the registration lives in bootstrap so neither module
+ * has to import the other.
+ */
+type UnmatchedWebhookHandler = (payload: DigioWebhookPayload) => Promise<boolean>;
+const unmatchedHandlers: UnmatchedWebhookHandler[] = [];
 
-type DigioWebhookStatus = 'approved' | 'rejected' | 'pending' | 'cancelled';
-
-export type DigioWebhookPayload = {
-  id: string;             // kycId
-  customer_identifier: string;
-  status: DigioWebhookStatus;
-  message?: string;
-  kyc_documents?: {
-    type: string;
-    status: DigioWebhookStatus;
-    name?: string;
-    dob?: string;
-        id_number?: string;
-  }[];
-  completed_at?: string;
-};
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function getAuthHeader(cfg: KycConfig): string {
-  const creds = Buffer.from(`${cfg.clientId}:${cfg.clientSecret}`).toString('base64');
-  return `Basic ${creds}`;
-}
-
-function isConfigured(cfg: KycConfig): boolean {
-  return !!(cfg.clientId && cfg.clientSecret);
+export function onUnmatchedDigioWebhook(handler: UnmatchedWebhookHandler): void {
+  unmatchedHandlers.push(handler);
 }
 
 // ─── Initiate ─────────────────────────────────────────────────────────────────
@@ -50,84 +35,47 @@ export async function initiateDigioKyc(
   customerEmail: string,
   customerMobile: string,
 ): Promise<{ kycId: string; accessToken: string; validTill: string; sdkUrl: string }> {
-  const cfg = await getEffectiveKycConfig();
-
-  if (!isConfigured(cfg)) {
-    // Dev mode — simulate a pending KYC so the flow can be tested without real credentials
-    logger.warn('Digio not configured — returning mock KYC initiation (dev only)');
-    const mockKycId = `digio_mock_${publisherId}_${Date.now()}`;
-
-    await repository.upsertDigioKyc(publisherId, {
-      method: 'DIGIO',
-      digioRequestId: mockKycId,
-      digioReferenceId: publisherId,
-      digioStatus: 'pending',
-      submittedAt: new Date(),
-    });
-
-    const sdkBase = cfg.baseUrl!.replace('https://', 'https://');
-    return { kycId: mockKycId, accessToken: 'mock_token', validTill: new Date(Date.now() + 3600_000).toISOString(), sdkUrl: `${sdkBase}/#${mockKycId}?token=mock_token` };
+  // N2 verifier: a verified publisher has nothing to start — a fresh session
+  // would re-point the row and its webhook would write over VERIFIED. Guarded
+  // here so every caller (the publisher's own, the agent's, the desk's) is
+  // covered; 409 like every other submit path (N2-B).
+  const current = await repository.findByPublisherId(publisherId);
+  if (current?.status === 'VERIFIED') {
+    throw new ApiError(409, 'KYC_ALREADY_VERIFIED', 'This publisher is already verified; there is nothing to start');
   }
-
   const referenceId = `adx-${publisherId}-${Date.now()}`;
-
-  if (!env.BASE_URL) {
-    logger.warn('BASE_URL is not set — Digio webhook callbacks will not work until it is configured');
-  }
-
-  const body = {
-    customer_identifier: customerEmail || customerMobile,
-    customer_name: customerName,
-    reference_id: referenceId,
-    notify_customer: true,
-    ...(env.BASE_URL ? { callback_url: `${env.BASE_URL}/api/v1/webhooks/digio` } : {}),
-    purpose: 'KYC',
-  };
-
-  const response = await fetch(`${cfg.baseUrl}/client/kyc/v2/request/with_template`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': getAuthHeader(cfg),
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!response.ok) {
-    const err = await response.text();
-    logger.error('Digio initiate failed', { status: response.status, body: err });
-    throw new Error(`Digio KYC initiation failed: ${response.status}`);
-  }
-
-  const data = await response.json() as DigiInitiateResponse;
+  const session = await requestDigioKyc({ referenceId, customerName, customerEmail, customerMobile });
 
   await repository.upsertDigioKyc(publisherId, {
     method: 'DIGIO',
-    digioRequestId: data.id,
+    digioRequestId: session.kycId,
     digioReferenceId: referenceId,
     digioStatus: 'pending',
     submittedAt: new Date(),
   });
 
-  return {
-    kycId: data.id,
-    accessToken: data.access_token.id,
-    validTill: data.access_token.valid_till,
-    sdkUrl: `${cfg.baseUrl}/#${data.id}?token=${data.access_token.id}`,
-  };
+  return { kycId: session.kycId, accessToken: session.accessToken, validTill: session.validTill, sdkUrl: session.sdkUrl };
 }
 
 // ─── Webhook Handler ──────────────────────────────────────────────────────────
 
-export async function handleDigioWebhook(payload: DigioWebhookPayload): Promise<void> {
+/**
+ * Applies Digio's answer to the publisher it belongs to. When no publisher
+ * row carries the request id, the other parties registered above are asked
+ * in turn. Returns whether anyone claimed it.
+ */
+export async function handleDigioWebhook(payload: DigioWebhookPayload): Promise<boolean> {
   const { id: kycId, status, completed_at } = payload;
 
   logger.info('Digio webhook received', { kycId, status });
 
   const kyc = await repository.findByRequestId(kycId);
   if (!kyc) {
+    for (const handler of unmatchedHandlers) {
+      if (await handler(payload)) return true;
+    }
     logger.warn('Digio webhook: no KYC record found for kycId', { kycId });
-    return;
+    return false;
   }
 
   const isApproved = status === 'approved';
@@ -158,8 +106,10 @@ export async function handleDigioWebhook(payload: DigioWebhookPayload): Promise<
         ? `KYC for publisher ${publisher.name} was rejected. ${payload.message ?? ''}`
         : `KYC status updated to ${status} for ${publisher.name}.`,
       relatedId: publisher.id,
+      relatedType: 'PUBLISHER',
     });
   }
+  return true;
 }
 
 // ─── Status Check ─────────────────────────────────────────────────────────────

@@ -11,7 +11,7 @@
  * failing, so it doubles as a "I forgot the dev password" reset.
  */
 import '../config/load-env';
-import { prisma } from '../shared/database';
+import { closeDatabase, prisma } from '../shared/database';
 import { redis } from '../shared/cache';
 import { hashPassword } from '../modules/auth';
 import type { Role } from '../shared/database';
@@ -69,6 +69,6 @@ main()
     // so without disconnecting it this script finished its work and then hung
     // forever — with its output still sitting in an unflushed pipe, making it
     // look like it had frozen on the very first step.
-    await prisma.$disconnect().catch(() => undefined);
+    await closeDatabase().catch(() => undefined);
     redis.disconnect();
   });

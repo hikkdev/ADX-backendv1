@@ -1,0 +1,31 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "https://dataserving-in.geoiq.io/production/v1.0/getvariables",
+    "headers": { "x-api-key": "<GEOIQ_API_KEY>", "Content-Type": "application/json" },
+    "body": {
+      "lat": 12.9758,
+      "lng": 77.6061,
+      "radius": 500,
+      "variables": "w_footfall_daily_avg,w_pop_age_18_24_perc,w_pop_age_25_34_perc,w_pop_age_35_44_perc,w_pop_male_perc,w_pop_female_perc,w_hh_income_high_perc,w_hh_income_mid_perc,w_poi_gym_count"
+    }
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "data": {
+        "w_footfall_daily_avg": 18420.6,
+        "w_pop_age_18_24_perc": 0.21,
+        "w_pop_age_25_34_perc": 0.34,
+        "w_pop_age_35_44_perc": 0.19,
+        "w_pop_male_perc": 0.53,
+        "w_pop_female_perc": 0.47,
+        "w_hh_income_high_perc": 0.38,
+        "w_hh_income_mid_perc": 0.44,
+        "w_poi_gym_count": 12
+      },
+      "message": "success"
+    }
+  },
+  "note": "The variable ids are per account (catalog.geoiq.io) and are mapped to the seam's field names in audience.geoiqVariables; GeoIQ has no hourly or weekday panel, so byHour and byWeekday are null from this vendor."
+}

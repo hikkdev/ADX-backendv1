@@ -1,9 +1,12 @@
 import { ApiError } from '../../shared/errors';
 import { normalizeMobile } from '../auth';
+import { createAgent } from '../agents';
+import { createEmployee, findEmployeeByUserId, inviteEmployeeToConsole } from '../employees';
 import type { OnboardingSubmissionStatus, Role } from '../../shared/database';
 import { defaultFlowTemplates } from './onboarding.flow-defaults';
+import { agentIntakeSchema, employeeIntakeSchema } from './onboarding.schema';
 import { prismaOnboardingRepository as repository } from './prisma-onboarding.repository';
-import type { InlineUser } from './onboarding.repository';
+import type { InlineUser, SubmissionFilter } from './onboarding.repository';
 
 /**
  * Seeds or upgrades the shipped flow templates.
@@ -61,6 +64,8 @@ function defaultRolesForUserType(userType: string): Role[] {
   if (userType === 'PUBLISHER') return ['PUBLISHER'];
   if (userType === 'ADVERTISER') return ['ADVERTISER'];
   if (userType === 'PARTNER') return ['PARTNER'];
+  // AGENT gets its role from `createAgent` at approval (the side decides
+  // which); EMPLOYEE gets console access from the invitation, not a role.
   return [];
 }
 
@@ -117,11 +122,18 @@ export async function createSubmission(
   );
 }
 
-export async function listSubmissions(filter: {
-  userType?: string;
-  status?: OnboardingSubmissionStatus;
-}) {
+export async function listSubmissions(filter: SubmissionFilter) {
   return repository.listSubmissions(filter);
+}
+
+/**
+ * E7-3: the same list on the list contract — `{ items, total, page,
+ * pageSize, counts }`, the chips counted with the status facet removed.
+ * `listSubmissions` above is the bare array the console read before, kept
+ * one release for a caller that sends no page.
+ */
+export async function listSubmissionsPage(filter: SubmissionFilter, page: number, pageSize: number) {
+  return repository.findSubmissionsPage(filter, page, pageSize);
 }
 
 export async function getSubmission(id: string) {
@@ -175,11 +187,85 @@ export async function deleteSubmission(id: string) {
   return existing;
 }
 
+/** What an approval created, reported beside the submission. */
+export type Provisioned =
+  | { agentId: string; userId: string }
+  | { employeeId: string; userId: string; inviteId: string | null; inviteSkipped?: 'NO_EMAIL' };
+
+/**
+ * Lot D (Q131): an APPROVED intake for an AGENT provisions the User and the
+ * AgentProfile through `agents` — the same door the direct create screen
+ * uses, so an agent has one way of coming into being whichever screen ops
+ * chose; a submission with an inline user is attached, not duplicated,
+ * because `createAgent` finds the mobile first. An EMPLOYEE approval creates
+ * the HR row for the user the submission holds and, when the data asks,
+ * the console invitation. Publisher, advertiser and partner approvals
+ * provision nothing, as before.
+ */
+async function provisionOnApproval(id: string, reviewedById: string): Promise<Provisioned | undefined> {
+  const full = (await repository.findSubmission(id)) as {
+    userType: string;
+    userId: string | null;
+    data: Record<string, unknown> | null;
+    user: { mobile?: string | null; name?: string | null; email?: string | null } | null;
+  } | null;
+  if (!full) throw new ApiError(404, 'NOT_FOUND', 'Onboarding submission not found');
+  const data = full.data ?? {};
+
+  if (full.userType === 'AGENT') {
+    const parsed = agentIntakeSchema.safeParse({
+      ...data,
+      mobile: data['mobile'] ?? full.user?.mobile ?? undefined,
+      name: data['name'] ?? full.user?.name ?? undefined,
+      email: data['email'] ?? full.user?.email ?? undefined,
+    });
+    if (!parsed.success) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'The intake needs a mobile, a name and the side the agent works', parsed.error.flatten());
+    }
+    const agent = await createAgent(parsed.data);
+    if (!full.userId) await repository.linkSubmissionUser(id, agent.userId);
+    return { agentId: agent.id, userId: agent.userId };
+  }
+
+  if (full.userType === 'EMPLOYEE') {
+    if (!full.userId) {
+      throw new ApiError(409, 'CONFLICT', 'Link or provision the user before approving an employee intake');
+    }
+    const parsed = employeeIntakeSchema.safeParse(data);
+    if (!parsed.success) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid employee intake', parsed.error.flatten());
+    const { inviteToConsole, ...record } = parsed.data;
+
+    const existing = await findEmployeeByUserId(full.userId);
+    const employee = existing
+      ? { id: existing.id, email: full.user?.email ?? null }
+      : await (async () => {
+          const created = await createEmployee({ userId: full.userId!, ...(record as object) } as Parameters<typeof createEmployee>[0]);
+          return { id: created.employee.id, email: created.employee.user.email };
+        })();
+
+    if (!inviteToConsole) return { employeeId: employee.id, userId: full.userId, inviteId: null };
+    if (!employee.email) return { employeeId: employee.id, userId: full.userId, inviteId: null, inviteSkipped: 'NO_EMAIL' };
+    const invite = await inviteEmployeeToConsole(employee.email, inviteToConsole, reviewedById);
+    return { employeeId: employee.id, userId: full.userId, inviteId: invite.id };
+  }
+
+  return undefined;
+}
+
 export async function updateSubmissionStatus(
   id: string,
   status: OnboardingSubmissionStatus,
   reviewedById: string,
   rejectionReason?: string,
 ) {
-  return repository.updateSubmissionStatus(id, { status, rejectionReason, reviewedById });
+  const existing = await repository.findSubmissionSummary(id);
+  if (!existing) throw new ApiError(404, 'NOT_FOUND', 'Onboarding submission not found');
+
+  // Provision before the status moves, so a failed provisioning leaves the
+  // submission where it was; and only on the first approval, so a second
+  // press creates nothing twice.
+  const provisioned = status === 'APPROVED' && existing.status !== 'APPROVED' ? await provisionOnApproval(id, reviewedById) : undefined;
+
+  const updated = (await repository.updateSubmissionStatus(id, { status, rejectionReason, reviewedById })) as object;
+  return provisioned ? { ...updated, provisioned } : updated;
 }

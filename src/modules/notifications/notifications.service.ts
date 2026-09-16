@@ -1,5 +1,6 @@
+import type { NotificationChannel, NotificationType } from '../../shared/database';
 import { prismaNotificationRepository as repository } from './prisma-notifications.repository';
-import { NOTIFICATION_TYPES } from './notifications.types';
+import { defaultEnabled, isMandatory, NOTIFICATION_CHANNELS, NOTIFICATION_TYPES } from './notifications.types';
 import type {
   ListNotificationsOptions,
   NewNotification,
@@ -7,12 +8,14 @@ import type {
 } from './notifications.types';
 
 export async function getNotifications(userId: string, opts: ListNotificationsOptions = {}) {
-  const [notifications, unreadCount] = await Promise.all([
+  // E10-1: `readCount` beside `unreadCount`, both over the whole feed.
+  const [notifications, unreadCount, readCount] = await Promise.all([
     repository.findManyForUser(userId, opts),
     repository.countUnread(userId),
+    repository.countRead(userId),
   ]);
 
-  return { notifications, unreadCount };
+  return { notifications, unreadCount, readCount };
 }
 
 export async function getNotificationById(notificationId: string) {
@@ -41,24 +44,56 @@ export async function createNotification(data: NewNotification) {
 }
 
 /**
- * Every notification type is reported, defaulting to enabled when the user has
- * never saved a preference for it.
+ * Every kind on every channel, with the default where nothing is saved.
+ *
+ * The whole matrix rather than the saved rows, because the screen draws the
+ * whole matrix and a missing row means "never touched", not "off".
  */
 export async function getPreferences(userId: string) {
   const saved = await repository.findPreferences(userId);
-  return NOTIFICATION_TYPES.map((type) => {
-    const preference = saved.find((p) => p.type === type);
-    return { type, enabled: preference ? preference.enabled : true };
-  });
+  return NOTIFICATION_TYPES.flatMap((type) =>
+    NOTIFICATION_CHANNELS.map((channel) => {
+      const preference = saved.find((p) => p.type === type && p.channel === channel);
+      return {
+        type,
+        channel,
+        enabled: isMandatory(type, channel)
+          ? true
+          : (preference?.enabled ?? defaultEnabled(type, channel)),
+        mandatory: isMandatory(type, channel),
+      };
+    }),
+  );
 }
 
+/** A row the person cannot switch off is not saved off, whatever was sent. */
 export async function savePreferences(
   userId: string,
   preferences: NotificationPreferenceInput[],
 ): Promise<void> {
   await Promise.all(
-    preferences.map((preference) =>
-      repository.upsertPreference(userId, preference.type, preference.enabled),
-    ),
+    preferences.map((preference) => {
+      const channel = preference.channel ?? 'IN_APP';
+      const enabled = isMandatory(preference.type, channel) ? true : preference.enabled;
+      return repository.upsertPreference(userId, preference.type, channel, enabled);
+    }),
   );
+}
+
+/**
+ * Whether a notification of this kind may go out on this channel — what a
+ * delivery worker asks before it sends. Nothing calls it yet: in-app delivery
+ * is a row in the list and asks nobody. It is here so the preference the
+ * screen saves has one reader when push lands, rather than a second rule
+ * written somewhere else.
+ */
+export async function mayDeliver(
+  userId: string,
+  type: NotificationType,
+  channel: NotificationChannel,
+): Promise<boolean> {
+  if (isMandatory(type, channel)) return true;
+  const saved = await repository.findPreferences(userId);
+  const preference = saved.find((p) => p.type === type && p.channel === channel);
+  return preference?.enabled ?? defaultEnabled(type, channel);
 }

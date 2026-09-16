@@ -5,8 +5,11 @@ import type { Role } from '../../../shared/database';
 import { publisherRegisterSchema, publisherVerifyOtpSchema } from '../auth.schema';
 import { publisherLoginUser } from '../auth.mapper';
 import { prismaAuthRepository as repository } from '../prisma-auth.repository';
-import { createRefreshToken } from '../tokens/tokens.service';
+import { issueRefreshToken } from '../tokens/tokens.service';
+import { OtpError } from '../otp/otp-security';
 import { normalizeMobile, sendOtp, verifyOtp } from '../otp/otp.service';
+import { logActivity } from '../../../shared/audit';
+import { adminSignInRequired } from '../two-factor/two-factor.service';
 
 /**
  * POST /auth/publisher/send-otp
@@ -48,16 +51,15 @@ export async function publisherVerifyOtpHandler(req: Request, res: Response): Pr
   const { mobile, otp, name } = parsed.data;
 
   // The client does not say whether this is a registration or a login, so
-  // REGISTER is tried first and LOGIN second.
+  // REGISTER is tried first and LOGIN second. Only "no REGISTER code exists"
+  // falls through: a wrong guess against a live REGISTER code, or a locked
+  // number, is that answer and must not be retried as a LOGIN.
   let userId: string;
   try {
     userId = await verifyOtp(mobile, otp, 'REGISTER');
-  } catch {
-    try {
-      userId = await verifyOtp(mobile, otp, 'LOGIN');
-    } catch (err: any) {
-      throw new ApiError(401, 'UNAUTHORIZED', err.message);
-    }
+  } catch (err) {
+    if (err instanceof OtpError && err.reason !== 'OTP_EXPIRED') throw err;
+    userId = await verifyOtp(mobile, otp, 'LOGIN');
   }
 
   const user = await repository.findPublisherLoginUserById(userId);
@@ -71,10 +73,17 @@ export async function publisherVerifyOtpHandler(req: Request, res: Response): Pr
   }
 
   const roles = user.roles.map((r) => r.role) as Role[];
-  const accessToken = signAccessToken(userId, roles);
+  // M-B: this door falls back to the LOGIN code the ordinary send issues,
+  // so it is the mobile OTP door under another name — and the publisher app
+  // cannot draw a challenge. An ADMIN is sent to the console login.
+  if (roles.includes('ADMIN')) {
+    await logActivity(userId, 'LOGIN_FAILED', req, { method: 'publisher_otp', reason: 'ADMIN_SIGN_IN_REQUIRED' });
+    throw adminSignInRequired();
+  }
   // No session metadata is captured here, and lastLoginAt is still stamped —
   // matching the original handler, which called createRefreshToken() bare.
-  const refreshToken = await createRefreshToken(userId);
+  const { raw: refreshToken, sessionId } = await issueRefreshToken(userId);
+  const accessToken = signAccessToken(userId, roles, sessionId);
   await repository.recordLogin(userId);
 
   res.json({

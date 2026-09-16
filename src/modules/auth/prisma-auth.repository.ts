@@ -6,6 +6,7 @@ const loginInclude = {
   roles: true,
   agentProfile: true,
   publisherProfile: { include: { kyc: true } },
+  advertiserProfile: true,
 } as const;
 
 // Prisma's default strategy issues one query per relation — five here, run

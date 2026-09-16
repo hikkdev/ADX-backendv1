@@ -2,6 +2,7 @@ import { ApiError } from '../../shared/errors';
 import {
   VALID_EVIDENCE_KINDS,
   parseRequirements,
+  requirementIsOptional,
   type EvidenceInput,
   type MilestoneRequirement,
 } from './order-milestones.types';
@@ -35,6 +36,11 @@ export function checkEvidence(rawRequirements: unknown, evidence: EvidenceInput[
   const missing: string[] = [];
   for (const req of parseRequirements(rawRequirements)) {
     if (req.kind === 'contact_details_visible') continue; // informational only
+
+    // An optional requirement is never missing. Skipped whole rather than
+    // checked-then-forgiven, so an optional checklist item the agent answered
+    // "no" to is recorded as the answer it is instead of failing the visit.
+    if (requirementIsOptional(req)) continue;
 
     const submitted = deduped.find((e) => {
       if (e.kind !== req.kind) return false;

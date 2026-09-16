@@ -8,6 +8,7 @@ import { googleLoginUser } from '../auth.mapper';
 import { prismaAuthRepository as repository } from '../prisma-auth.repository';
 import { sessionMeta, startSession } from '../auth.session';
 import { verifyGoogleIdToken } from './google.service';
+import { isAdmin, issueChallenge } from '../two-factor/two-factor.service';
 
 /**
  * POST /auth/google — exchange a Google ID token for an ADX session.
@@ -73,6 +74,16 @@ export async function googleLoginHandler(req: Request, res: Response): Promise<v
   }
 
   const roles = user.roles.map((r) => r.role) as Role[];
+
+  // Lot A (Q25): Google proved the mailbox, not the phone. An admin therefore
+  // gets the same challenge a password sign-in gets, and no tokens yet.
+  if (isAdmin(roles)) {
+    const challenge = await issueChallenge(user);
+    await logActivity(user.id, 'LOGIN_2FA_CHALLENGED', req, { method: 'google', googleSub: identity.sub });
+    res.json({ success: true, data: { challenge } });
+    return;
+  }
+
   const { accessToken, refreshToken } = await startSession(user.id, roles, sessionMeta(req));
   await logActivity(user.id, 'LOGIN_GOOGLE', req, {
     googleSub: identity.sub,

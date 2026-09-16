@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import { ApiError } from '../../../shared/errors';
 import { requireAgentProfile } from '../../agents';
 import { checkInSchema, locationSchema } from '../orders.schema';
-import { agentCheckIn, getAgentLocation, updateAgentLocation } from './tracking.service';
+import { agentCheckIn, agentUpdateLocation, getAgentLocation } from './tracking.service';
 
 export async function agentCheckInHandler(req: Request, res: Response): Promise<void> {
   const parsed = checkInSchema.safeParse(req.body);
@@ -24,7 +24,9 @@ export async function updateLocationHandler(req: Request, res: Response): Promis
     throw new ApiError(400, 'VALIDATION_ERROR', 'latitude and longitude required');
   }
 
-  await updateAgentLocation(req.params['id'] as string, parsed.data);
+  // Lot H: the ping is the assigned agent's — 403 for anyone else.
+  const agent = await requireAgentProfile(req.user!.sub);
+  await agentUpdateLocation(req.params['id'] as string, agent.id, parsed.data);
 
   // Deliberately no `data` key — this endpoint answers `{ success: true }`.
   res.json({ success: true });

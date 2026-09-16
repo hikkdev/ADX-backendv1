@@ -5,6 +5,8 @@ import type { Role } from '../../../shared/database';
 import { logoutSchema, refreshSchema } from '../auth.schema';
 import { prismaAuthRepository as repository } from '../prisma-auth.repository';
 import { sessionMeta } from '../auth.session';
+import { resolvePermissions } from '../auth.ports';
+import { mustEnrolAuthenticator } from '../two-factor/authenticator.service';
 import { revokeRefreshToken, rotateRefreshToken } from './tokens.service';
 
 export async function refreshTokenHandler(req: Request, res: Response): Promise<void> {
@@ -15,8 +17,9 @@ export async function refreshTokenHandler(req: Request, res: Response): Promise<
 
   let userId: string;
   let newRaw: string;
+  let sessionId: string;
   try {
-    ({ userId, newRaw } = await rotateRefreshToken(parsed.data.refreshToken, sessionMeta(req)));
+    ({ userId, newRaw, sessionId } = await rotateRefreshToken(parsed.data.refreshToken, sessionMeta(req)));
   } catch {
     // Every rotation failure — unknown, expired, or a reuse that just revoked
     // the whole session family — reports the same message.
@@ -31,8 +34,15 @@ export async function refreshTokenHandler(req: Request, res: Response): Promise<
   const roles = user.roles.map((r) => r.role) as Role[];
 
   // Refresh renews a session rather than starting one, so it re-signs the
-  // access token directly and leaves lastLoginAt alone.
-  const accessToken = signAccessToken(userId, roles);
+  // access token directly and leaves lastLoginAt alone. The rotated row is
+  // the session now, so the new access token names it. Permissions are
+  // re-resolved here rather than copied off the old token: a role edited an
+  // hour ago takes effect on the next refresh at the latest.
+  // Lot K2: the must-enrol claim is re-decided the same way, so an admin
+  // who set the app up is free on the next refresh and one the policy has
+  // since caught is held from it.
+  const [perms, mustEnrol] = await Promise.all([resolvePermissions(userId, roles), mustEnrolAuthenticator(user, roles.includes('ADMIN'))]);
+  const accessToken = signAccessToken(userId, roles, sessionId, { perms, mustEnrolAuthenticator: mustEnrol });
 
   res.json({ success: true, data: { accessToken, refreshToken: newRaw } });
 }

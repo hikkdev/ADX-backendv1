@@ -19,6 +19,11 @@ import {
   getMilestoneDetailHandler,
   startMilestoneHandler,
   completeMilestoneHandler,
+  acceptMilestoneHandler,
+  rejectMilestoneHandler,
+  milestoneSlotCandidatesHandler,
+  milestoneLocationHandler,
+  scheduleMilestoneHandler,
 } from './order-milestones.controller';
 
 export const milestoneTemplateRouter = Router();
@@ -53,5 +58,13 @@ agentMilestoneRouter.use(requireRole('AGENT_PUBLISHER', 'AGENT_ADVERTISER'));
 
 agentMilestoneRouter.get('/', asyncHandler(getAgentMilestonesHandler));
 agentMilestoneRouter.get('/:milestoneId', asyncHandler(getMilestoneDetailHandler));
+// A12: the offer's answers, then the slot — DR 01's three sheets.
+agentMilestoneRouter.post('/:milestoneId/accept', asyncHandler(acceptMilestoneHandler));
+agentMilestoneRouter.post('/:milestoneId/reject', asyncHandler(rejectMilestoneHandler));
+agentMilestoneRouter.get('/:milestoneId/slot-candidates', asyncHandler(milestoneSlotCandidatesHandler));
+agentMilestoneRouter.post('/:milestoneId/schedule', asyncHandler(scheduleMilestoneHandler));
 agentMilestoneRouter.post('/:milestoneId/start', asyncHandler(startMilestoneHandler));
 agentMilestoneRouter.post('/:milestoneId/complete', asyncHandler(completeMilestoneHandler));
+// G12-B: the live-position ping on the way to the visit — the order lane's
+// body, written onto the milestone's order.
+agentMilestoneRouter.post('/:milestoneId/update-location', asyncHandler(milestoneLocationHandler));

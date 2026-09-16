@@ -2,16 +2,43 @@ import type { Request, Response } from 'express';
 import { ApiError } from '../../../shared/errors';
 import type { KycStatus } from '../../../shared/database';
 import { pagination, reviewSchema } from '../kyc.schema';
-import { createUserKycSchema } from './user-kyc.schema';
+import { attestationSchema, createUserKycSchema, livenessSchema } from './user-kyc.schema';
 import {
+  attestPresence,
   deleteMyUserKyc,
   deleteUserKycById,
   getMyUserKyc,
   getUserKycById,
   listUserKycs,
   reviewUserKyc,
+  submitLiveness,
+  submitLivenessOnBehalf,
   submitUserKyc,
 } from './user-kyc.service';
+
+// POST /user-kyc/:userId/attest — Lot N: presence attested at the desk instead of a video.
+export async function attestPresenceHandler(req: Request, res: Response): Promise<void> {
+  const parsed = attestationSchema.safeParse(req.body ?? {});
+  if (!parsed.success) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid request', parsed.error.flatten());
+  const { kyc, created } = await attestPresence(req.params['userId'] as string, parsed.data, req.user!.sub, req);
+  res.status(created ? 201 : 200).json({ success: true, data: kyc });
+}
+
+// POST /user-kyc/:userId — Lot N: the liveness video the desk captured on the person's behalf.
+export async function submitLivenessOnBehalfHandler(req: Request, res: Response): Promise<void> {
+  const parsed = livenessSchema.safeParse(req.body ?? {});
+  if (!parsed.success) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid request', parsed.error.flatten());
+  const { kyc, created } = await submitLivenessOnBehalf(req.params['userId'] as string, parsed.data.fileId, req.user!.sub, req);
+  res.status(created ? 201 : 200).json({ success: true, data: kyc });
+}
+
+// POST /user-kyc/me — Lot D (Q131): the liveness video, by private file id.
+export async function submitLivenessHandler(req: Request, res: Response): Promise<void> {
+  const parsed = livenessSchema.safeParse(req.body ?? {});
+  if (!parsed.success) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid request', parsed.error.flatten());
+  const { kyc, created } = await submitLiveness(req.user!.sub, parsed.data.fileId);
+  res.status(created ? 201 : 200).json({ success: true, data: kyc });
+}
 
 export async function createUserKycHandler(req: Request, res: Response): Promise<void> {
   const parsed = createUserKycSchema.safeParse(req.body);

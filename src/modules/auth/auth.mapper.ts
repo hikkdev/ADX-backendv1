@@ -14,8 +14,13 @@ import type { LoginUser, PublisherLoginUser } from './auth.repository';
  *   - email OTP returns `hasPassword`, computed the same way.
  *   - password login hardcodes `hasPassword: true`: reaching that point proves
  *     a hash exists.
- *   - publisher login returns neither field, omits `avatarUrl` and
- *     `agentProfile`, and prefers a just-submitted name over the stored one.
+ *   - publisher login returns neither field, omits `avatarUrl`, `agentProfile`
+ *     and `advertiserProfile`, and prefers a just-submitted name over the
+ *     stored one.
+ *
+ * The four full payloads carry both party profiles. A user with neither is a
+ * register-or-login signup who has not chosen a type yet; the app sends them
+ * to POST /users/me/party.
  *
  * Writing them out separately keeps each difference visible instead of hidden
  * behind an options argument.
@@ -34,6 +39,7 @@ export function mobileOtpLoginUser(user: LoginUser, roles: Role[]) {
     roles,
     agentProfile: user.agentProfile,
     publisherProfile: user.publisherProfile,
+    advertiserProfile: user.advertiserProfile,
   };
 }
 
@@ -50,6 +56,7 @@ export function emailOtpLoginUser(user: LoginUser, roles: Role[]) {
     roles,
     agentProfile: user.agentProfile,
     publisherProfile: user.publisherProfile,
+    advertiserProfile: user.advertiserProfile,
   };
 }
 
@@ -66,6 +73,7 @@ export function passwordLoginUser(user: LoginUser, roles: Role[]) {
     roles,
     agentProfile: user.agentProfile,
     publisherProfile: user.publisherProfile,
+    advertiserProfile: user.advertiserProfile,
   };
 }
 
@@ -89,6 +97,31 @@ export function googleLoginUser(user: LoginUser, roles: Role[]) {
     roles,
     agentProfile: user.agentProfile,
     publisherProfile: user.publisherProfile,
+    advertiserProfile: user.advertiserProfile,
+  };
+}
+
+/**
+ * POST /auth/2fa/verify — the second half of an admin's password or Google
+ * sign-in.
+ *
+ * `hasPassword` is computed rather than hardcoded: the challenge that led here
+ * may have come from Google, and the console uses the flag to decide whether
+ * to offer "set a password".
+ */
+export function twoFactorLoginUser(user: LoginUser, roles: Role[]) {
+  return {
+    id: user.id,
+    mobile: user.mobile,
+    name: user.name,
+    email: user.email,
+    language: user.language,
+    avatarUrl: user.avatarUrl,
+    hasPassword: !!user.passwordHash,
+    roles,
+    agentProfile: user.agentProfile,
+    publisherProfile: user.publisherProfile,
+    advertiserProfile: user.advertiserProfile,
   };
 }
 

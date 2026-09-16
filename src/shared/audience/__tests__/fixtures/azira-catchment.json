@@ -1,0 +1,32 @@
+{
+  "request": {
+    "method": "POST",
+    "url": "<AZIRA_BASE_URL>/insights/footfall",
+    "headers": { "Authorization": "Bearer <AZIRA_API_KEY>", "X-Client-Id": "<AZIRA_CLIENT_ID>", "Content-Type": "application/json" },
+    "body": {
+      "location": { "lat": 12.9758, "lng": 77.6061, "radius_m": 500 },
+      "period": { "start": "2026-09-01", "end": "2026-09-30" }
+    }
+  },
+  "response": {
+    "status": 200,
+    "body": {
+      "footfall": {
+        "daily_average": 21340.2,
+        "hourly": [0.4, 0.2, 0.1, 0.1, 0.2, 0.6, 1.8, 4.2, 6.5, 6.9, 6.4, 6.8, 7.2, 6.6, 6.1, 6.0, 6.4, 7.5, 7.9, 6.8, 4.9, 3.1, 1.9, 0.9],
+        "weekday": [13.2, 13.0, 13.4, 13.8, 15.1, 16.9, 14.6]
+      },
+      "demographics": {
+        "age": { "18-24": 0.19, "25-34": 0.36, "35-44": 0.22, "45-54": 0.13, "55+": 0.10 },
+        "gender": { "male": 0.55, "female": 0.45 },
+        "income": { "high": 0.31, "mid": 0.49, "low": 0.20 },
+        "affinities": [
+          { "name": "Fitness", "share": 0.27 },
+          { "name": "Dining", "share": 0.41 },
+          { "name": "Shopping", "share": 0.32 }
+        ]
+      }
+    }
+  },
+  "note": "Azira publishes no open API reference; this is the shape the adapter reads and it is confirmed against the account's API documentation when the contract arrives. Any field absent from the real answer is null on the seam, never invented."
+}

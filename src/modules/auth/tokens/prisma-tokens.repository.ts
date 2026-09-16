@@ -39,6 +39,14 @@ export const prismaTokensRepository: TokensRepository = {
     });
   },
 
+  async revokeOthersForUser(userId: string, keepSessionId: string) {
+    const result = await prisma.refreshToken.updateMany({
+      where: { userId, revokedAt: null, id: { not: keepSessionId } },
+      data: { revokedAt: new Date() },
+    });
+    return result.count;
+  },
+
   listActive(userId: string) {
     return prisma.refreshToken.findMany({
       where: { userId, revokedAt: null, expiresAt: { gt: new Date() } },

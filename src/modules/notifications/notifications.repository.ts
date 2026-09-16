@@ -1,4 +1,4 @@
-import type { Notification, NotificationPreference, NotificationType } from '../../shared/database';
+import type { NotificationChannel, Notification, NotificationPreference, NotificationType } from '../../shared/database';
 import type { ListNotificationsOptions, NewNotification } from './notifications.types';
 
 /**
@@ -12,6 +12,8 @@ import type { ListNotificationsOptions, NewNotification } from './notifications.
 export interface NotificationRepository {
   findManyForUser(userId: string, opts: ListNotificationsOptions): Promise<Notification[]>;
   countUnread(userId: string): Promise<number>;
+  /** E10-1: the other half — how many the user has already read, over the whole feed. */
+  countRead(userId: string): Promise<number>;
   findById(notificationId: string): Promise<Notification | null>;
   markRead(notificationId: string): Promise<Notification>;
   markAllRead(userId: string): Promise<{ count: number }>;
@@ -20,6 +22,7 @@ export interface NotificationRepository {
   upsertPreference(
     userId: string,
     type: NotificationType,
+    channel: NotificationChannel,
     enabled: boolean,
   ): Promise<NotificationPreference>;
 }

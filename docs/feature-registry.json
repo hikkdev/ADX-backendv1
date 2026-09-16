@@ -1,0 +1,4324 @@
+{
+  "generatedBy": "scripts/features-sync.ts",
+  "featureCount": 165,
+  "features": [
+    {
+      "key": "account.closure",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "senior",
+      "launch": "on",
+      "description": "A party asks to close their account; ops review the case and decide.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/users/me/closure-request",
+        "/api/v1/users/closure-cases",
+        "/api/v1/users/:id/closure-review",
+        "/api/v1/users/:id/closure-cases"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "users/closures"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "account.erasure",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "senior",
+      "launch": "on",
+      "description": "A person asks to be erased; the DPO approves, refuses or executes, and the number is tombstoned.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/users/me/erasure",
+        "/api/v1/users/erasure",
+        "/api/v1/users/:id/erasure"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "users/erasure"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "advertisers.accounts",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "demand",
+      "launch": "on",
+      "description": "Advertiser accounts: the party's own read, the console directory, eligibility, KYC, activity, agreements, the QR grant to an agent.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/advertisers"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "advertisers/directory",
+          "advertisers/[id]"
+        ],
+        "APP_USER": [
+          "advertiser"
+        ],
+        "APP_AGENT": [
+          "advertisers"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE",
+        "APP_USER",
+        "APP_AGENT"
+      ]
+    },
+    {
+      "key": "advertisers.brands",
+      "surfaces": [
+        "APP_USER",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "demand",
+      "launch": "on",
+      "description": "The brands an advertiser books under.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/advertisers/:id/brands"
+      ],
+      "jobs": [],
+      "paths": {
+        "APP_USER": [
+          "advertiser/brands"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "APP_USER"
+      ]
+    },
+    {
+      "key": "advertisers.funnel",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "demand",
+      "launch": "on",
+      "description": "The demand-side funnel: advertisers by activation stage.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/advertisers/funnel"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "advertisers/activation"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "advertisers.wallet",
+      "surfaces": [
+        "APP_USER",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "finance",
+      "launch": "on",
+      "description": "The advertiser wallet (Lot B): balance, statement, top-ups, goodwill, holds, refund requests and the finance desks over them.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/advertisers/:id/wallet",
+        "/api/v1/advertisers/wallet",
+        "/api/v1/advertisers/refund-requests",
+        "/api/v1/finance/refund-requests",
+        "/api/v1/finance/top-ups"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "finance/refunds"
+        ],
+        "APP_USER": [
+          "advertiser/billing"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE",
+        "APP_USER"
+      ]
+    },
+    {
+      "key": "agent.certification",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "agent-experience",
+      "launch": "on",
+      "description": "Certification earned by the curriculum, listed and revoked by ops.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/training/certification",
+        "/api/v1/training/certifications"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "training/certifications"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "agent.earnings",
+      "surfaces": [
+        "APP_AGENT"
+      ],
+      "kind": "FEATURE",
+      "owner": "agent-experience",
+      "launch": "on",
+      "description": "The agent's balance and transaction list on the phone.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/earnings"
+      ],
+      "jobs": [],
+      "paths": {
+        "APP_AGENT": [
+          "earnings"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "APP_AGENT"
+      ]
+    },
+    {
+      "key": "agent.field-visits",
+      "surfaces": [
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "agent-experience",
+      "launch": "on",
+      "description": "Visits dispatched, accepted, scheduled, started and completed; the day view.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/visits",
+        "/api/v1/agents/me/day"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "visits"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "agent.home",
+      "surfaces": [
+        "APP_AGENT"
+      ],
+      "kind": "FEATURE",
+      "owner": "agent-experience",
+      "launch": "on",
+      "description": "DR 01: the agent's home — the dashboard, the persona tabs, the offer sheet and the order cards.",
+      "variants": [],
+      "aliases": [],
+      "routes": [],
+      "jobs": [],
+      "paths": {
+        "APP_AGENT": [
+          "home"
+        ]
+      },
+      "declaredIn": [
+        "APP_AGENT"
+      ]
+    },
+    {
+      "key": "agent.leaderboard",
+      "surfaces": [
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "agent-experience",
+      "launch": "on",
+      "description": "The leaderboard, for the agent and for ops.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/agents/me/leaderboard",
+        "/api/v1/agents/leaderboard"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "growth/leaderboard"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "agent.leads",
+      "surfaces": [
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "agent-experience",
+      "launch": "on",
+      "description": "Leads near the agent, contact / visit / convert, the transactional import.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/leads"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "leads"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "agent.milestones",
+      "surfaces": [
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "agent-experience",
+      "launch": "on",
+      "description": "Gamification milestones: templates, targets, rewards and claims.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/milestones",
+        "/api/v1/agents/:id/milestones"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "growth"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "agent.profile",
+      "surfaces": [
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "agent-experience",
+      "launch": "on",
+      "description": "Agent profiles: the agent's own read and rating, the console directory and edits.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/agents"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "agents/directory",
+          "agents/[id]"
+        ],
+        "APP_AGENT": [
+          "account"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE",
+        "APP_AGENT"
+      ]
+    },
+    {
+      "key": "agent.tiers",
+      "surfaces": [
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "agent-experience",
+      "launch": "on",
+      "description": "The tier ladder, an agent's tier and the acknowledgement of a move.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/agents/me/tier",
+        "/api/v1/agents/tier-ladder",
+        "/api/v1/agents/:id/tier"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "growth/ladder"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "agent.training",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "agent-experience",
+      "launch": "on",
+      "description": "Training resources, modules, progress and the quiz.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/training"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "training",
+          "training/library"
+        ],
+        "APP_USER": [
+          "training"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE",
+        "APP_USER"
+      ]
+    },
+    {
+      "key": "agent.work-preferences",
+      "surfaces": [
+        "APP_AGENT"
+      ],
+      "kind": "FEATURE",
+      "owner": "agent-experience",
+      "launch": "on",
+      "description": "What work an agent takes, and where.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/agents/me/preferences"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "ai.listing-description",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "A drafted listing description and the quota behind it.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/ai"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "auth.admin-invites",
+      "surfaces": [
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "senior",
+      "launch": "on",
+      "description": "An admin invite is opened and accepted here; it is minted under users.admin-invites.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/auth/invites",
+        "/api/v1/auth/accept-invite"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "auth.authenticator-app",
+      "surfaces": [
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "senior",
+      "launch": "on",
+      "description": "Lot K2: an authenticator app (RFC 6238 TOTP) as the console second factor: enrol, confirm, disable, recovery codes, the status read; the sign-in half rides on auth.two-factor.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/auth/2fa/totp",
+        "/api/v1/auth/2fa/recovery-codes",
+        "/api/v1/auth/2fa/status"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "auth.change-mobile",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "senior",
+      "launch": "on",
+      "description": "Lot F (Q18): the sign-in number moves in two codes, the old number first.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/auth/change-mobile"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "auth.google-sign-in",
+      "surfaces": [
+        "APP_USER",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "senior",
+      "launch": "on",
+      "description": "Sign in with Google on the user app.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/auth/google"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "auth.otp-sign-in",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "senior",
+      "launch": "on",
+      "description": "OTP sign-in by SMS or email for both phone apps, refresh and logout — the door everything else is behind.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/auth"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "auth.password-sign-in",
+      "surfaces": [
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "senior",
+      "launch": "on",
+      "description": "Password sign-in, forgot / reset / change password — the console door.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/auth/login-password",
+        "/api/v1/auth/forgot-password",
+        "/api/v1/auth/reset-password",
+        "/api/v1/auth/change-password"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "auth.two-factor",
+      "surfaces": [
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "senior",
+      "launch": "on",
+      "description": "The console's second factor: a code sent and verified at sign-in.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/auth/2fa"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "campaigns.analytics",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "demand",
+      "launch": "on",
+      "description": "Campaign analytics: digital interactions per campaign and across the book (Q109).",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/campaigns/analytics",
+        "/api/v1/campaigns/:id/analytics"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "campaigns.booking",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "demand",
+      "launch": "on",
+      "description": "Campaigns: draft, inventory, spots, review, submit for payment, authorise, cancel; the lifecycle job that moves them SCHEDULED → LIVE → ENDED.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/campaigns"
+      ],
+      "jobs": [
+        "campaign-lifecycle"
+      ],
+      "paths": {
+        "CONSOLE": [
+          "campaigns"
+        ],
+        "APP_USER": [
+          "advertiser/campaigns"
+        ],
+        "APP_AGENT": [
+          "advertisers/campaigns"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE",
+        "APP_USER",
+        "APP_AGENT"
+      ]
+    },
+    {
+      "key": "campaigns.creative-moderation",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "demand",
+      "launch": "on",
+      "description": "Lot D (Q44/Q120/Q138): creatives in review, the desk, the ADX-design tap-accept, the hard gate on print.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/campaigns/creatives",
+        "/api/v1/campaigns/:id/creatives"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "moderation"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "campaigns.landing-pages",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE",
+        "WEBSITE"
+      ],
+      "kind": "FEATURE",
+      "owner": "demand",
+      "launch": "on",
+      "description": "Lot E (Q7/Q106): the AI-drafted landing page, its builder, the review list, the public page and its beacon.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/campaigns/:id/landing-page",
+        "/api/v1/campaigns/landing-pages",
+        "/p/:slug",
+        "/t/:code/e"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "campaigns/landing-pages"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "campaigns.multi-market",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "demand",
+      "launch": "dark",
+      "description": "A campaign may target more than one market (Q8): allowed, warned against. Off: a second market is refused 409 FEATURE_OFF.",
+      "variants": [
+        "default",
+        "unwarned"
+      ],
+      "aliases": [
+        "multi-market-campaigns"
+      ],
+      "routes": [],
+      "jobs": [],
+      "paths": {
+        "APP_USER": [
+          "advertiser/campaigns"
+        ],
+        "APP_AGENT": [
+          "advertisers/campaigns"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "APP_USER",
+        "APP_AGENT"
+      ]
+    },
+    {
+      "key": "campaigns.refunds",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "finance",
+      "launch": "on",
+      "description": "Lot B (Q41): a cancelled campaign's refund, released or rejected by finance.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/finance/campaign-refunds"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "campaigns.tracking",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "BACKEND",
+        "WEBSITE"
+      ],
+      "kind": "FEATURE",
+      "owner": "demand",
+      "launch": "on",
+      "description": "Tracking codes and their QR images, the scan redirect on the hoarding, redemptions.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/t/:code",
+        "/api/v1/campaigns/:id/tracking-codes",
+        "/api/v1/campaigns/:id/redemptions"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "comms.announcements",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "Announcements drafted, previewed per channel, sent now or at a time, cancelled; the job that fans them out.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/announcements"
+      ],
+      "jobs": [
+        "announcement-sender"
+      ],
+      "paths": {
+        "CONSOLE": [
+          "comms/announcements"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "comms.delivery-log",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "The masked delivery log, a resend, and the CSV export.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/comms/deliveries"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "comms/delivery-logs"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "comms.dispatcher",
+      "surfaces": [
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "KILL_SWITCH",
+      "owner": "platform",
+      "launch": "on",
+      "description": "The sender job: renders and sends every queued delivery on its rail, three attempts, and the rails' delivery-report webhooks.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/comms",
+        "/api/v1/webhooks/msg91",
+        "/api/v1/webhooks/twilio"
+      ],
+      "jobs": [
+        "notification-sender"
+      ],
+      "paths": {
+        "CONSOLE": [
+          "comms"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "comms.inbox",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "The notification feed, read marks and the per-channel preferences.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/notifications"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "notifications"
+        ],
+        "APP_AGENT": [
+          "notifications"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE",
+        "APP_AGENT"
+      ]
+    },
+    {
+      "key": "comms.push",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "BACKEND"
+      ],
+      "kind": "KILL_SWITCH",
+      "owner": "platform",
+      "launch": "on",
+      "description": "G6 (Q103/133): the device registry under /users/me/devices and the dispatcher's push rail. Off: a phone cannot register a token and the routes answer 503 FEATURE_OFF.",
+      "variants": [],
+      "aliases": [],
+      "routes": [],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "comms.templates",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "The outbound templates, the events catalogue and the SMS kinds.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/comms/templates",
+        "/api/v1/comms/events",
+        "/api/v1/comms/sms-kinds"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "comms/templates"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "comms.unsubscribe",
+      "surfaces": [
+        "BACKEND",
+        "WEBSITE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "The unsubscribe link at the foot of every email.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/comms/unsubscribe"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "console.analytics",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "Q115: the console's analytics — earnings, spend, commissions and onboarding as separate series, every one sortable and filterable.",
+      "variants": [],
+      "aliases": [],
+      "routes": [],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "analytics"
+        ]
+      },
+      "declaredIn": [
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "console.bookings-calendar",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "marketplace",
+      "launch": "on",
+      "description": "Q116: bookings by day and by slot — digital signage and billboards carry slotsTotal, a static wall is one.",
+      "variants": [],
+      "aliases": [],
+      "routes": [],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "bookings"
+        ]
+      },
+      "declaredIn": [
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "console.import-formats",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "Lot U: the format guide — one JSON per import kind on the platform (columns, rules, sample rows) and a template.csv per kind, derived from the validators.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/party-imports/formats"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "settings/import-formats"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "console.listing-imports",
+      "surfaces": [
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "supply",
+      "launch": "on",
+      "description": "Lot U: a publisher's spots and rate card imported on their behalf — validate with a per-row plan (geocoding, the vocabulary, the ADX floor, 25 m duplicates), commit under one supply attempt or through the listing's own rate door, revoke, report.csv. ADMIN, or the publisher's agent under the listing act rule.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/party-imports/listings",
+        "/api/v1/party-imports/rate-card"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "listings/import"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "console.overview",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "finance",
+      "launch": "on",
+      "description": "The dashboard aggregates across campaigns, sales, the ledger and the parties.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/admin/overview"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "dashboard"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "console.party-imports",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "Lot S: the legacy-book import for advertisers, agents, print partners and employees — validate with a per-row report, commit through each party's own creation service, revoke, report.csv.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/party-imports"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "advertisers/import",
+          "agents/import",
+          "print-partners/import",
+          "employees/import"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "console.section-overviews",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "The overview tab of each user section — tiles, series, breakdowns and top tens over a window, with the previous window beside every figure.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/section-overviews"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "publishers",
+          "advertisers",
+          "agents",
+          "print-partners",
+          "employees",
+          "users"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "finance.desk",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "finance",
+      "launch": "on",
+      "description": "The console's finance root: every desk under /finance not claimed by a narrower feature (rails, limits, tax rates).",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/finance",
+        "/api/v1/finance/limits",
+        "/api/v1/finance/tax-rates",
+        "/api/v1/finance/rails"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "finance/settings"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "finance.invoices",
+      "surfaces": [
+        "APP_USER",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "finance",
+      "launch": "on",
+      "description": "ADX's invoices to advertisers, publishers' invoices to ADX, the legal entity behind them.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/finance/legal-entity",
+        "/api/v1/finance/invoices",
+        "/api/v1/finance/publisher-invoices",
+        "/api/v1/advertisers/:id/invoices",
+        "/api/v1/publishers/me/invoices"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "finance/invoices"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "finance.ledger",
+      "surfaces": [
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "finance",
+      "launch": "on",
+      "description": "The ledger read, the verify walk and a reversal by finance.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/finance/ledger"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "finance/ledger"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "finance.reconciliation",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "finance",
+      "launch": "on",
+      "description": "Bank statement profiles, imports, lines, auto-match and the manual matches.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/finance/reconciliation"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "finance/reconciliation"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "finance.statements",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "finance",
+      "launch": "on",
+      "description": "The monthly payment advice per wallet, generated by the job and read back as PDF.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/finance/statements",
+        "/api/v1/payouts/wallet/statements"
+      ],
+      "jobs": [
+        "monthly-statements"
+      ],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "finance.wallet-moves",
+      "surfaces": [
+        "BACKEND"
+      ],
+      "kind": "KILL_SWITCH",
+      "owner": "finance",
+      "launch": "on",
+      "description": "Every credit and debit on every wallet — publisher, agent, advertiser, print partner. Metadata only: the primitives take no flag, and off would mean stopping money, which is a deploy, not a switch.",
+      "variants": [],
+      "aliases": [],
+      "routes": [],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "finance.wallets",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "finance",
+      "launch": "on",
+      "description": "The console's read over every wallet and its entries.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/finance/wallets"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "finance/wallets"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "geo.rollout",
+      "surfaces": [
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "Lot V: the all-India geography catalogue (GeoNames), the city rollout stages and their six function switches, the readiness read, the bulk rollout, the seed, and the hourly wind-down of a withdrawn city. Lot X-B: the city key on every party table, and the unresolved typed strings the console folds in. Lot X-L: the city key backfill from the console. Y-B: the city audience profile, the blend of both audience vendors over the city spots.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/geo/summary",
+        "/api/v1/geo/unresolved",
+        "/api/v1/geo/backfill-city-keys",
+        "/api/v1/geo/map",
+        "/api/v1/geo/states",
+        "/api/v1/geo/cities",
+        "/api/v1/geo/rollout",
+        "/api/v1/geo/seed",
+        "/api/v1/app/geo"
+      ],
+      "jobs": [
+        "city-winddown"
+      ],
+      "paths": {
+        "CONSOLE": [
+          "settings/geographies",
+          "settings/geographies/[slug]"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "hr.departments",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "Q122: departments as a full model — the register, its members and region / work mode / employment type per employee.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/hr/departments"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "employees/departments"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "hr.employees",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "The employee register: create, read, edit, remove — ADMIN at every route.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/employees"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "employees/directory",
+          "employees/new"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "hr.holidays",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "The year's holidays, seeded at boot, editable by ops; the schedule reads them.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/hr/holidays"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "employees/holidays"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "hr.people",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "The people registry: staff and agents in one list, no table of its own.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/hr/people"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "hr.schedule",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "Schedule entries for staff and agents, with the field overlay and the audit trail read back.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/schedule"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "schedule"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "kyc.advertiser",
+      "surfaces": [
+        "APP_USER",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "Advertiser KYC: submitted on the phone, reviewed per document on the desk.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/advertiser-kyc"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "kyc/advertisers"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "kyc.agent",
+      "surfaces": [
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "Agent KYC, reviewed by ops.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/agent-kyc"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "kyc/agents"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "kyc.desk-intake",
+      "surfaces": [
+        "APP_USER",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "Lot N (14 Sep 2026): KYC from the desk — requested from the console (Digio on the party's behalf, or a notice to come by), recorded at the desk on their behalf, and the person's presence attested by the admin who met them. N3-B: the one-click Digio request on every party — agents and employees included.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/publishers/kyc-queue/:publisherId/request",
+        "/api/v1/advertiser-kyc/:id/request",
+        "/api/v1/agent-kyc/:agentId/request",
+        "/api/v1/employee-kyc/:employeeId/request",
+        "/api/v1/user-kyc/:userId/attest"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "kyc.digio",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "KILL_SWITCH",
+      "owner": "platform",
+      "launch": "on",
+      "description": "Digio as the KYC provider: initiate, status, restart, the webhook, and the five-minute probe that moves DIGIO ↔ DEGRADED. Off: every initiate answers 503 KYC_PROVIDER_UNAVAILABLE and the desk works MANUAL.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/advertiser-kyc/me/digio",
+        "/api/v1/advertiser-kyc/:id/digio",
+        "/api/v1/publishers/me/kyc/digio",
+        "/api/v1/publishers/:publisherId/kyc/digio",
+        "/api/v1/publishers/kyc-queue/:publisherId/digio",
+        "/api/v1/print-partners/me/kyc/digio",
+        "/api/v1/print-partner-kyc/:id/digio",
+        "/api/v1/webhooks/digio"
+      ],
+      "jobs": [
+        "kyc-provider-probe"
+      ],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "kyc.employee",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "Employee KYC, reviewed by ops.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/employee-kyc"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "kyc/employees"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "kyc.escalation",
+      "surfaces": [
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "Q127: a KYC case escalates from age past N x SLA, a fraud link or a reviewer's flag — assisting the reviewer, never deciding.",
+      "variants": [],
+      "aliases": [],
+      "routes": [],
+      "jobs": [
+        "kyc-escalation"
+      ],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "kyc.purge",
+      "surfaces": [
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "Q127: verified identity images and liveness videos purged after the retention window.",
+      "variants": [],
+      "aliases": [],
+      "routes": [],
+      "jobs": [
+        "kyc-purge"
+      ],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "kyc.user-liveness",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "Lot D (Q131): the liveness video every person records once.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/user-kyc"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "legal.agreements",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "senior",
+      "launch": "on",
+      "description": "Agreement templates (draft / live / superseded), acceptances per party and per transaction, the stale-terms report.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/agreements",
+        "/api/v1/advertisers/:id/agreements"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "agreements"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "legal.documents",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE",
+        "WEBSITE"
+      ],
+      "kind": "FEATURE",
+      "owner": "senior",
+      "launch": "on",
+      "description": "Legal documents: read by kind without a token, managed and activated by ops.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/legal"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "legal"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "listings.browse",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT"
+      ],
+      "kind": "FEATURE",
+      "owner": "demand",
+      "launch": "on",
+      "description": "The advertiser's discovery: browse, detail, similar spots, the content categories.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/listings/browse",
+        "/api/v1/listings/:id/similar",
+        "/api/v1/listings/content-categories"
+      ],
+      "jobs": [],
+      "paths": {
+        "APP_USER": [
+          "advertiser/discover"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "APP_USER"
+      ]
+    },
+    {
+      "key": "listings.inventory",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "supply",
+      "launch": "on",
+      "description": "A publisher's listings: create, edit, submit, the content rules, the console list.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/listings"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "listings"
+        ],
+        "APP_USER": [
+          "publisher/listing-flow"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE",
+        "APP_USER"
+      ]
+    },
+    {
+      "key": "listings.reprice-log",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "supply",
+      "launch": "on",
+      "description": "E10-2: the LISTING_REPRICED_BY_FACTOR rows shaped for the Pricing tab.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/listings/:listingId/reprice-log"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "listings.review-desk",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "supply",
+      "launch": "on",
+      "description": "The listing review queue: read, send back, publish.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/listings/review",
+        "/api/v1/listings/:listingId/review",
+        "/api/v1/listings/:listingId/send-back",
+        "/api/v1/listings/:listingId/publish"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "listings/review"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "listings.saved-spaces",
+      "surfaces": [
+        "APP_USER",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "demand",
+      "launch": "on",
+      "description": "Lot D (Q5): an advertiser saves a spot and reads the shortlist back.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/listings/browse/:listingId/save",
+        "/api/v1/advertisers/:advertiserId/saved"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "listings.spot-page",
+      "surfaces": [
+        "BACKEND",
+        "WEBSITE"
+      ],
+      "kind": "FEATURE",
+      "owner": "demand",
+      "launch": "on",
+      "description": "E11-2: the public spot page a shared link opens, metered by IP.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/s/:displayId"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "listings.suggested-rate",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT"
+      ],
+      "kind": "FEATURE",
+      "owner": "supply",
+      "launch": "on",
+      "description": "Lot E: the advisory rate on the publisher's own listing, and taking it.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/listings/me"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "marketplace.instant-booking",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "marketplace",
+      "launch": "dark",
+      "description": "Publishers may opt a listing into automatic acceptance (Q6): allowed, not recommended. Off: the switch, the filter and the bolt chip are not drawn, and an instant order is refused 409 FEATURE_OFF.",
+      "variants": [
+        "default",
+        "recommended"
+      ],
+      "aliases": [
+        "instant-booking"
+      ],
+      "routes": [],
+      "jobs": [],
+      "paths": {
+        "APP_USER": [
+          "publisher/listing-flow",
+          "advertiser/discover"
+        ],
+        "APP_AGENT": [
+          "listing"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "APP_USER",
+        "APP_AGENT"
+      ]
+    },
+    {
+      "key": "marketplace.reviews",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "marketplace",
+      "launch": "on",
+      "description": "Reviews of a spot and of an agent, the eligibility read, the console desk that hides with a reason.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/reviews",
+        "/api/v1/campaigns/:id/spots/:spotId/review",
+        "/api/v1/listings/browse/:listingId/reviews",
+        "/api/v1/orders/:id/rate-agent",
+        "/api/v1/agents/me/reviews",
+        "/api/v1/agents/:id/reviews"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "onboarding.agent-assist",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "agent-experience",
+      "launch": "on",
+      "description": "A party grants an agent PROFILE or LISTING access by QR; the grant is live, revocable and logged.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/access-grants"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "access"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "onboarding.flow-templates",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "The flow templates the intake form runs on.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/onboarding/flow-templates"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "onboarding.ladder",
+      "surfaces": [
+        "APP_USER"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "DR 08: the unified onboarding ladder — account type, party, the captured steps, Digio, the agreement and the status screen; the same flow for a publisher and an advertiser.",
+      "variants": [],
+      "aliases": [],
+      "routes": [],
+      "jobs": [],
+      "paths": {
+        "APP_USER": [
+          "onboarding"
+        ]
+      },
+      "declaredIn": [
+        "APP_USER"
+      ]
+    },
+    {
+      "key": "onboarding.qr-claim",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "Mint, render, resolve and delete QR codes; the scan log behind them.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/qr"
+      ],
+      "jobs": [],
+      "paths": {
+        "APP_AGENT": [
+          "scan"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "APP_AGENT"
+      ]
+    },
+    {
+      "key": "onboarding.submissions",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "Onboarding submissions for every user type; an APPROVED one provisions the profile.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/onboarding"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "onboarding/submissions"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "orders.agent-fulfilment",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "agent-experience",
+      "launch": "on",
+      "description": "The agent's job: offers, accept / reject, slots, prints pickup, check-in, condition and installation capture, OTP handover, live location and evidence; the 25-minute acceptance window.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/orders/agents/:agentId/offers",
+        "/api/v1/orders/:id/accept-agent",
+        "/api/v1/orders/:id/reject-agent",
+        "/api/v1/orders/:id/propose-slot",
+        "/api/v1/orders/:id/slot-candidates",
+        "/api/v1/orders/:id/collect-prints",
+        "/api/v1/orders/:id/pickup-code",
+        "/api/v1/orders/:id/checkin",
+        "/api/v1/orders/:id/capture-condition",
+        "/api/v1/orders/:id/reject-condition",
+        "/api/v1/orders/:id/capture-installation",
+        "/api/v1/orders/:id/submit-installation",
+        "/api/v1/orders/:id/request-otp",
+        "/api/v1/orders/:id/verify-otp",
+        "/api/v1/orders/:id/update-location",
+        "/api/v1/orders/:id/agent-location",
+        "/api/v1/orders/:id/evidence"
+      ],
+      "jobs": [
+        "agent-timer"
+      ],
+      "paths": {
+        "APP_AGENT": [
+          "jobs"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "APP_AGENT"
+      ]
+    },
+    {
+      "key": "orders.booking",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "marketplace",
+      "launch": "on",
+      "description": "Placing an order, the publisher accepting or rejecting it, the slot negotiation, and the timers that expire an unanswered offer.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/orders"
+      ],
+      "jobs": [
+        "publisher-timer"
+      ],
+      "paths": {
+        "CONSOLE": [
+          "orders"
+        ],
+        "APP_USER": [
+          "publisher/bookings"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE",
+        "APP_USER"
+      ]
+    },
+    {
+      "key": "orders.milestones",
+      "surfaces": [
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "marketplace",
+      "launch": "on",
+      "description": "Milestone templates and plans on the console; the agent's milestone offers, scheduling, start and completion.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/milestone-templates",
+        "/api/v1/milestone-plans",
+        "/api/v1/orders/:orderId/milestones",
+        "/api/v1/agent/milestones"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "orders.ops-moves",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "marketplace",
+      "launch": "on",
+      "description": "Ops over an order: assign or reassign the agent, approve, cancel, end the campaign, mark print-ready, and act for a publisher who is not on the phone.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/orders/:id/ops",
+        "/api/v1/orders/:id/assign-agent",
+        "/api/v1/orders/:id/reassign-agent",
+        "/api/v1/orders/:id/approve",
+        "/api/v1/orders/:id/cancel",
+        "/api/v1/orders/:id/end-campaign",
+        "/api/v1/orders/:id/print-ready"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "orders/pipeline"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "orders.self-install",
+      "surfaces": [
+        "APP_USER"
+      ],
+      "kind": "FEATURE",
+      "owner": "marketplace",
+      "launch": "on",
+      "description": "The publisher installs the creative themselves: collect prints, capture condition, check in, capture installation.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/orders/:id/self-install",
+        "/api/v1/orders/:id/choose-fulfilment"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "packages.catalogue",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "demand",
+      "launch": "on",
+      "description": "The package catalogue: plans per tier and the add-ons, ADMIN and audited.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/packages/catalogue"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "packages/catalogue"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "packages.payment-link",
+      "surfaces": [
+        "BACKEND",
+        "WEBSITE"
+      ],
+      "kind": "FEATURE",
+      "owner": "demand",
+      "launch": "on",
+      "description": "The payment link sent by SMS — public, tokenised, short by design.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/p/:token"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "packages.sales",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "demand",
+      "launch": "on",
+      "description": "Package quotes and sales: create, resend, cancel, accept terms, pay or record a payment; the active entitlements; Lot J2: free trials, the auto-renew switch and the daily renewal sweep.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/packages"
+      ],
+      "jobs": [
+        "package-renewal"
+      ],
+      "paths": {
+        "CONSOLE": [
+          "packages/sales"
+        ],
+        "APP_USER": [
+          "advertiser/packages"
+        ],
+        "APP_AGENT": [
+          "advertisers/packages"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE",
+        "APP_USER",
+        "APP_AGENT"
+      ]
+    },
+    {
+      "key": "partners.print-floor",
+      "surfaces": [
+        "APP_USER"
+      ],
+      "kind": "FEATURE",
+      "owner": "finance",
+      "launch": "on",
+      "description": "Lot H (Q147): the print partner's own floor — profile and rate card, the assigned jobs walked to handover by scan, the wallet, withdrawals, payout methods and the monthly invoice.",
+      "variants": [],
+      "aliases": [],
+      "routes": [],
+      "jobs": [],
+      "paths": {
+        "APP_USER": [
+          "partner"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "APP_USER"
+      ]
+    },
+    {
+      "key": "partners.quotes",
+      "surfaces": [
+        "APP_USER",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "finance",
+      "launch": "on",
+      "description": "Lot H (Q147): quote requests on an order print — ops invite the partners in reach, partners quote until the deadline, the lowest is awarded unless ops override with a note; the nightly expiry re-invites once. G13-B: the desk's list across orders.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/print-quote-requests"
+      ],
+      "jobs": [
+        "print-quote-expiry"
+      ],
+      "paths": {
+        "APP_USER": [
+          "partner/quotes"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "APP_USER"
+      ]
+    },
+    {
+      "key": "payments.cashfree",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "finance",
+      "launch": "dark",
+      "description": "Cashfree in test mode until its credentials arrive (Q110).",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/webhooks/cashfree"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "payments.ccavenue",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "finance",
+      "launch": "dark",
+      "description": "CCAvenue in test mode until its credentials arrive (Q110).",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/webhooks/ccavenue"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "payments.gateways",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "finance",
+      "launch": "on",
+      "description": "Payment intents and their status across every gateway; the console's payment list and an advertiser's payments.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/payments",
+        "/api/v1/advertisers/:id/payments"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "finance/payments"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "payments.razorpay",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "finance",
+      "launch": "on",
+      "description": "Razorpay, live first: the checkout page in the system browser, the return page, the confirm and the webhook.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/payments/:id/checkout",
+        "/api/v1/payments/:id/return",
+        "/api/v1/payments/:id/confirm",
+        "/api/v1/webhooks/razorpay"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "payments.refunds",
+      "surfaces": [
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "finance",
+      "launch": "on",
+      "description": "A refund to the original method, raised by finance and settled by the gateway.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/payments/:id/refund"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "payouts.batches",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "finance",
+      "launch": "on",
+      "description": "Lot B (Q85/Q140): payout batches — drafted, submitted, approved (reserves), released (debits), exported, line by line.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/finance/payout-batches"
+      ],
+      "jobs": [
+        "payout-batch-draft"
+      ],
+      "paths": {
+        "CONSOLE": [
+          "finance/payouts"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "payouts.earnings-accrual",
+      "surfaces": [
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "finance",
+      "launch": "on",
+      "description": "Lot B (B1): every live spot accrues daily — gross = rate × quantity, commission from the stamp; the run and the quantity backfill.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/finance/accrual",
+        "/api/v1/finance/accruals"
+      ],
+      "jobs": [
+        "earnings-accrual"
+      ],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "payouts.incentives",
+      "surfaces": [
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "agent-experience",
+      "launch": "on",
+      "description": "Agent incentives and the rates behind them; credited or rejected by finance.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/finance/incentives",
+        "/api/v1/finance/incentive-rates"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "finance/incentives"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "payouts.methods",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "finance",
+      "launch": "on",
+      "description": "Payout methods and the IFSC lookup; verified or rejected by finance; ADX's own bank accounts.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/payouts/methods",
+        "/api/v1/payouts/ifsc",
+        "/api/v1/finance/payout-methods",
+        "/api/v1/finance/bank-accounts"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "finance/payout-methods"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "payouts.wallet",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT"
+      ],
+      "kind": "FEATURE",
+      "owner": "finance",
+      "launch": "on",
+      "description": "A publisher's or agent's wallet on the phone: balance, entries, earnings, incentives.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/payouts",
+        "/api/v1/payouts/wallet"
+      ],
+      "jobs": [],
+      "paths": {
+        "APP_USER": [
+          "publisher/wallet"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "APP_USER"
+      ]
+    },
+    {
+      "key": "payouts.withdrawals",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "finance",
+      "launch": "on",
+      "description": "Withdrawal requests: raised and cancelled on the phone, approved / rejected / marked paid / failed by finance, raised on a partner's behalf.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/payouts/withdrawals",
+        "/api/v1/finance/withdrawals"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "finance"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "platform.health",
+      "surfaces": [
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "Liveness and readiness: Postgres and Redis pinged, the failing part named.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/health"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "platform.maps",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "Geocoding, reverse geocoding, place search and place detail through the Maps key.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/geo",
+        "/api/v1/app/maps"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "platform.uploads",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "Uploading a file and reading a private one back through the one door.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/upload",
+        "/api/v1/files"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "pricing.binding-factors",
+      "surfaces": [
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "demand",
+      "launch": "on",
+      "description": "Lot E (Q125): pricing factors in ADVISORY or BINDING mode; a binding apply reprices within maxBindingChangePct or raises a price case.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/pricing/factors",
+        "/api/v1/pricing/listings/:id/factors"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "pricing/factors"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "pricing.cities",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "demand",
+      "launch": "on",
+      "description": "The city table and its per-city settings.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/pricing/cities"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "pricing.engine",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "demand",
+      "launch": "on",
+      "description": "The evaluation, comparables, the price indicator on a listing, and the pricing settings.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/pricing",
+        "/api/v1/pricing/settings"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "pricing",
+          "pricing/engine-settings"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "pricing.market-data",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "demand",
+      "launch": "on",
+      "description": "Market data imports and their revocation.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/pricing/market-data"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "pricing/market-data"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "pricing.price-approvals",
+      "surfaces": [
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "demand",
+      "launch": "on",
+      "description": "Price approval cases (PUBLISH_REQUEST / CARD_REVISION) and the gate a listing passes before it publishes.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/rate-cards/approvals",
+        "/api/v1/rate-cards/gate"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "pricing/approvals"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "pricing.price-model",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "demand",
+      "launch": "on",
+      "description": "Model settings, dimensions and their values, category rules, rules and their conditions, the simulator.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/price-model"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "pricing/categories",
+          "pricing/dimensions",
+          "pricing/model",
+          "pricing/rules",
+          "pricing/simulator"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "pricing.quotes",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "demand",
+      "launch": "on",
+      "description": "Quotes priced by the model and moved through their statuses.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/price-model/quotes"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "pricing/quotes"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "pricing.rate-cards",
+      "surfaces": [
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "demand",
+      "launch": "on",
+      "description": "Rate cards: draft, entries, submit, approve, reject, archive, revise; the impact read and the dry run over a draft grid.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/rate-cards"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "pricing/rate-cards"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "pricing.surge",
+      "surfaces": [
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "demand",
+      "launch": "on",
+      "description": "Surge events, the scraper sources that feed them and the job that runs the due ones.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/pricing/surge",
+        "/api/v1/pricing/scraper-sources"
+      ],
+      "jobs": [
+        "event-scraper"
+      ],
+      "paths": {
+        "CONSOLE": [
+          "pricing/scraper",
+          "pricing/surge"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "pricing.vocabulary",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "demand",
+      "launch": "on",
+      "description": "Media types, size classes, materials, venue types, the match log and the proposals.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/pricing/media-types",
+        "/api/v1/pricing/size-classes",
+        "/api/v1/pricing/materials",
+        "/api/v1/pricing/venue-types",
+        "/api/v1/pricing/vocabulary"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "pricing/media-types",
+          "pricing/venues",
+          "pricing/vocabulary"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "print.jobs",
+      "surfaces": [
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "finance",
+      "launch": "on",
+      "description": "A print job on an order and the cost approval that pays the partner.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/orders/:id/print-job"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "print.partner-kyc",
+      "surfaces": [
+        "APP_USER",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "Lot N: the print partner's KYC on three paths — the partner's own documents or Digio session from the phone, the desk recording it on their behalf, the desk requesting it (Digio on their behalf, or by hand) — reviewed per document on the same workbench as the publisher's and the advertiser's; purged and escalated with them.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/print-partner-kyc",
+        "/api/v1/print-partners/me/kyc"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "kyc/print-partners"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "print.partners",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "finance",
+      "launch": "on",
+      "description": "Print partners: created, edited, deactivated, reactivated, activated for the app; their ledger, rate card and quote history.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/print-partners"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "print-partners/roster",
+          "print-partners/quote-requests",
+          "print-partners/[id]"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "publisher.book",
+      "surfaces": [
+        "APP_AGENT"
+      ],
+      "kind": "FEATURE",
+      "owner": "agent-experience",
+      "launch": "on",
+      "description": "The agent's publisher book.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/publishers/book"
+      ],
+      "jobs": [],
+      "paths": {
+        "APP_AGENT": [
+          "publishers"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "APP_AGENT"
+      ]
+    },
+    {
+      "key": "publisher.dashboard",
+      "surfaces": [
+        "APP_USER"
+      ],
+      "kind": "FEATURE",
+      "owner": "supply",
+      "launch": "on",
+      "description": "The publisher's home: dashboard figures and their listings.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/publishers/me/dashboard",
+        "/api/v1/publishers/me/listings"
+      ],
+      "jobs": [],
+      "paths": {
+        "APP_USER": [
+          "publisher"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "APP_USER"
+      ]
+    },
+    {
+      "key": "publisher.kyc-desk",
+      "surfaces": [
+        "APP_USER",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "Publisher KYC: submitted by the party, reviewed per document from the queue, re-uploads asked, assignment as a filter.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/publishers/kyc-queue",
+        "/api/v1/publishers/:publisherId/kyc",
+        "/api/v1/publishers/me/kyc"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "kyc"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "publisher.legacy-import",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "supply",
+      "launch": "on",
+      "description": "Lot D (Q86): the legacy-book import with its per-row report, commit and revoke.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/publishers/import",
+        "/api/v1/publishers/imports"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "publishers/import"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "publisher.onboarding",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "supply",
+      "launch": "on",
+      "description": "Publisher accounts: register, the party's own read and edit, the QR grant to an agent, onboarding completion or cancellation, the console directory.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/publishers"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "publishers/directory",
+          "publishers/[id]"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "publisher.spot-insights",
+      "surfaces": [
+        "APP_USER",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "supply",
+      "launch": "dark",
+      "description": "Publishers see the advertiser's per-spot figures on their bookings (Q9): kept present, off until there is data.",
+      "variants": [],
+      "aliases": [
+        "publisher-spot-insights"
+      ],
+      "routes": [],
+      "jobs": [],
+      "paths": {
+        "APP_USER": [
+          "publisher/bookings"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "APP_USER"
+      ]
+    },
+    {
+      "key": "qr.desk",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "K-B1: the console's QR desk — every code with what it names and its scans, one person's scans, regenerate and deactivate with a reason.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/qr/scans",
+        "/api/v1/qr/:qrId/scans",
+        "/api/v1/qr/:qrId/regenerate"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "qr"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "reports.catalogue",
+      "surfaces": [
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "Lot G (Q129/Q143): the twelve reports defined in code — run on demand or on a schedule, mailed as a time-limited link.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/reports"
+      ],
+      "jobs": [
+        "report-schedule"
+      ],
+      "paths": {
+        "CONSOLE": [
+          "settings/reports"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "revenue.commission",
+      "surfaces": [
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "finance",
+      "launch": "on",
+      "description": "Commission rates by category or media type, publisher subscriptions and per-publisher overrides.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/revenue",
+        "/api/v1/revenue/commission",
+        "/api/v1/revenue/subscriptions",
+        "/api/v1/revenue/overrides"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "finance/revenue"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "revenue.fees-and-tax",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "finance",
+      "launch": "on",
+      "description": "The fee schedule and the tax settings.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/revenue/fees",
+        "/api/v1/revenue/tax"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "revenue.price-locks",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "finance",
+      "launch": "on",
+      "description": "The checkout quote and the price lock that holds it while the advertiser pays.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/revenue/quote",
+        "/api/v1/revenue/price-locks"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "revenue.publisher-plans",
+      "surfaces": [
+        "APP_USER",
+        "CONSOLE"
+      ],
+      "kind": "KILL_SWITCH",
+      "owner": "finance",
+      "launch": "on",
+      "description": "Publisher subscription plans: the priced catalogue and its editor, self-service orders paid from the wallet, the phone's subscription screen, and the daily expiry sweep.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/revenue/plans",
+        "/api/v1/revenue/subscription-orders",
+        "/api/v1/revenue/subscriptions/me"
+      ],
+      "jobs": [
+        "publisher-subscription"
+      ],
+      "paths": {
+        "CONSOLE": [
+          "packages/subscriptions"
+        ],
+        "APP_USER": [
+          "publisher/subscription"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE",
+        "APP_USER"
+      ]
+    },
+    {
+      "key": "safety.alerts",
+      "surfaces": [
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "agent-experience",
+      "launch": "on",
+      "description": "Safety alerts raised by an agent and worked by ops.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/safety"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "support/safety"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "safety.fraud-desk",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "Fraud cases: notes, evidence, the score and its signals, a decision that applies or lifts suspension scopes.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/fraud"
+      ],
+      "jobs": [
+        "fraud-signal-scan"
+      ],
+      "paths": {
+        "CONSOLE": [
+          "disputes/fraud"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "safety.suspension",
+      "surfaces": [
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "Suspend and reinstate a listing, publisher, advertiser or agent by scope; the read of what is in force.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/suspension",
+        "/api/v1/listings/:id/suspend",
+        "/api/v1/listings/:id/reinstate",
+        "/api/v1/publishers/:id/suspend",
+        "/api/v1/publishers/:id/reinstate",
+        "/api/v1/advertisers/:id/suspend",
+        "/api/v1/advertisers/:id/reinstate",
+        "/api/v1/agents/:id/suspend",
+        "/api/v1/agents/:id/reinstate"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "supply.claims",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "supply",
+      "launch": "on",
+      "description": "Ownership claims on a listing, decided by ops.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/supply/claims"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "listings/claims"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "supply.compliance",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "supply",
+      "launch": "on",
+      "description": "Compliance cases, the enforcement sweep and the earnings holds it raises.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/supply/compliance",
+        "/api/v1/supply/enforcement"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "supply.funnel",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "supply",
+      "launch": "on",
+      "description": "The supply-side funnel: publishers by stage.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/supply/funnel"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "publishers/activation"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "supply.listing-attempts",
+      "surfaces": [
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "supply",
+      "launch": "on",
+      "description": "An agent's on-site listing attempt, the acceptances it collects, and the supply root.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/supply",
+        "/api/v1/supply/attempts",
+        "/api/v1/supply/agreements"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "listings/attempts"
+        ],
+        "APP_AGENT": [
+          "listing"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE",
+        "APP_AGENT"
+      ]
+    },
+    {
+      "key": "supply.verification",
+      "surfaces": [
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "supply",
+      "launch": "on",
+      "description": "Listing documents and site verifications, reviewed from the verification queue.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/supply/listings",
+        "/api/v1/supply/documents",
+        "/api/v1/supply/verifications",
+        "/api/v1/supply/verification-queue"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "listings/verification"
+        ],
+        "APP_AGENT": [
+          "verification"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE",
+        "APP_AGENT"
+      ]
+    },
+    {
+      "key": "support.disputes",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "Disputes: raised, messaged, evidenced, resolved, reopened, rated; the credit release.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/disputes"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "disputes"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "support.live-chat",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "KILL_SWITCH",
+      "owner": "platform",
+      "launch": "on",
+      "description": "Live chat for paid subscribers: the entitlement read, the SSE thread, operator presence and auto-assignment, the desk inbox, canned replies and the first-response sweep.",
+      "variants": [],
+      "aliases": [],
+      "routes": [],
+      "jobs": [
+        "live-chat-sla"
+      ],
+      "paths": {
+        "CONSOLE": [
+          "support/live",
+          "support/canned"
+        ],
+        "APP_USER": [
+          "support"
+        ],
+        "APP_AGENT": [
+          "support"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE",
+        "APP_USER",
+        "APP_AGENT"
+      ]
+    },
+    {
+      "key": "support.tickets",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "Support tickets: raised on the phone, queued, replied to, assigned and closed on the console.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/support"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "support",
+          "support/assignments"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "system.app-status",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "The force-update / maintenance gate both apps read before sign-in, and the wizard limits.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/app/status",
+        "/api/v1/app/limits"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "settings/app-status"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "system.audit-trail",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "The activity log, per target and as a CSV export.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/audit"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "audit"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "system.feature-flags",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "Settings -> Feature flags: every feature across the surfaces, the kill switch, variants, rollback and rollout; the per-caller read the apps boot with.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/flags",
+        "/api/v1/app/flags"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "settings/flags"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "system.flow-editor",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "The enums and flow definitions the apps boot from, edited by the console's flow editor (Q83/Q148).",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/config"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "flows"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "system.health",
+      "surfaces": [
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "System health: last dump, last drill, retention-due, job heartbeats; the restore drill and the retention sweep.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/settings/system-health"
+      ],
+      "jobs": [
+        "restore-drill",
+        "retention",
+        "health-sample"
+      ],
+      "paths": {
+        "CONSOLE": [
+          "settings/system-health"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "system.identifiers",
+      "surfaces": [
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "Identifier formats per party, the preview, and the publisher backfill.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/identifiers"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "settings/identifiers"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "system.integrations",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "The integrations row: SMS rails, email, HRMS, work tool, KYC provider mode, maps — secrets masked on the way out.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/integrations"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "settings/integrations",
+          "settings/ai"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "system.platform-settings",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "The platform settings row: SLAs, floors, retention windows.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/settings/platform"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "settings"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "system.roles",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "Role configs, their permission lists and their members; the capability matrix the console draws.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/roles-config",
+        "/api/v1/users/:id/role-config"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "roles"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "system.status-page",
+      "surfaces": [
+        "CONSOLE",
+        "BACKEND",
+        "WEBSITE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "Lot G (Q130): the public status page — samples every five minutes, the incident log, regions, and the subscribe / confirm / unsubscribe links.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/status"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "users.admin-invites",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "senior",
+      "launch": "on",
+      "description": "Inviting a console user by email, resending and withdrawing the invite.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/users/invites"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "users.admins",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "Lot K2: the console's own operators — role, the second factor the next sign-in asks for, last sign-in, state; change role, reset 2FA, invite and create an admin. The app itself is auth.authenticator-app.",
+      "variants": [],
+      "aliases": [],
+      "routes": [],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "users/admins"
+        ]
+      },
+      "declaredIn": [
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "users.contacts",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "senior",
+      "launch": "on",
+      "description": "K-B1: the contacts beside the primary pair — add, label, prove with a code, make one the primary; the desk does the same with a reason.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/users/me/contacts",
+        "/api/v1/users/:id/contacts"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "users.data-export",
+      "surfaces": [
+        "APP_USER",
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "senior",
+      "launch": "on",
+      "description": "Q125: a person's data exported on request (DataExportRequest) — built by the job, released as a time-limited file.",
+      "variants": [],
+      "aliases": [],
+      "routes": [],
+      "jobs": [
+        "data-export"
+      ],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "users.directory",
+      "surfaces": [
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "senior",
+      "launch": "on",
+      "description": "The console's user directory: list, create, edit, delete, reset password and 2FA, bootstrap the first admin.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/users"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "users/accounts",
+          "users/[id]"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "users.impersonation",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "senior",
+      "launch": "on",
+      "description": "Read the platform as a party sees it — a 15-minute read-only token, listed and ended here.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/users/impersonations",
+        "/api/v1/users/:id/impersonate"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "users.profile",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "senior",
+      "launch": "on",
+      "description": "A person's own account: profile, party choice, onboarding manifest, preferences, activity, email resubscribe.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/users/me"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "account"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "users.sessions",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "senior",
+      "launch": "on",
+      "description": "DR 07: the devices signed in, and signing them out one by one or all at once.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/users/me/sessions",
+        "/api/v1/users/:id/sessions"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "work.issues",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "Issues raised on a project or a task, by severity; an OPEN CRITICAL one flags the task as blocked on read.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/work/issues"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "tasks/issues"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "work.my-tasks",
+      "surfaces": [
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "A person's own tasks — assigned or reviewing — with their own moves: start, submit for review, block with a reason, comment, log hours, review.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/work/me"
+      ],
+      "jobs": [],
+      "paths": {
+        "APP_AGENT": [
+          "work"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "APP_AGENT"
+      ]
+    },
+    {
+      "key": "work.projects",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "A department's or a city's project: the frame a set of tasks and issues sit in, with counts and an archive.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/work/projects"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "tasks/projects"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "work.tasks",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "The DR 10 Tasks section on real tables: tasks with sub-tasks, people, reviewers, prerequisites, comments and hours; the status rules, the board, the overview and the daily due notices.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/work"
+      ],
+      "jobs": [
+        "work-due"
+      ],
+      "paths": {
+        "CONSOLE": [
+          "tasks"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    }
+  ]
+}

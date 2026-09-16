@@ -1,6 +1,6 @@
 import type { Request, Response } from 'express';
 import { ApiError } from '../../shared/errors';
-import type { NotificationType } from '../../shared/database';
+import type { NotificationChannel, NotificationType } from '../../shared/database';
 import { listNotificationsQuerySchema, savePreferencesSchema } from './notifications.schema';
 import {
   getNotifications,
@@ -55,7 +55,11 @@ export async function savePreferencesHandler(req: Request, res: Response): Promi
 
   await savePreferences(
     req.user!.sub,
-    parsed.data.map((p) => ({ ...p, type: p.type as NotificationType })),
+    parsed.data.map((p) => ({
+      type: p.type as NotificationType,
+      ...(p.channel ? { channel: p.channel as NotificationChannel } : {}),
+      enabled: p.enabled,
+    })),
   );
 
   res.json({ success: true, data: { message: 'Preferences saved' } });

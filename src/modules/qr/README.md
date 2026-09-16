@@ -13,9 +13,13 @@ Mounted at `/api/v1/qr`.
 | GET | `/:qrId/image.png` | **none** |
 | GET | `/:qrId/image.svg` | **none** |
 | POST | `/resolve` | `authenticate` |
-| POST | `/` | ADMIN (**201**) |
-| GET | `/:qrId/scans` | ADMIN |
-| DELETE | `/:qrId` | ADMIN |
+| GET | `/scans/:scanId` | `authenticate` — the scanner's own scan, for polling an approval |
+| GET | `/scans` | ADMIN — D6: `?scannedById=` (or the older `scannedBy=`) — one person's scans, newest first, each with its code; K-B1: `&outcome=` and `&from=&to=` narrow it. An array, as the console reads it |
+| GET | `/` | ADMIN — K-B1, the desk: `?type=&active=true\|false&refId=&q=&page&pageSize`, the list contract with `counts` per type (the type facet removed); each row `{ id, type, refId, ref: { kind, id, label, href, displayId }, isActive, expiresAt, scansCount, lastScanAt, createdAt, imagePngUrl, imageSvgUrl }` — `ref` is what the refId names, resolved through the ref-label port below, one batch per kind on the page |
+| POST | `/` | ADMIN (**201**) — K-B1: audited `QR_GENERATED` against the admin |
+| GET | `/:qrId/scans` | ADMIN — K-B1: the list contract (`?page&pageSize&outcome=`), `counts` per outcome, each row with `scannedBy { id, name, mobile }` (the number stands in for a missing name) |
+| POST | `/:qrId/regenerate` | ADMIN (**201**) — K-B1: deactivates the code (if still live) and issues a new token for the same type / ref / roles / metadata / remaining expiry / position, answering the new row with `previousQrId` and the image urls; audited `QR_REGENERATED` |
+| DELETE | `/:qrId` | ADMIN — K-B1: `{ reason }` in the body (400 without); audited `QR_DEACTIVATED` with the reason; 404 for a code that does not exist |
 | GET | `/:qrId` | `authenticate` |
 
 ### The image routes are load-bearing
@@ -34,7 +38,40 @@ The route-inventory test asserts this.
 - `qrRouter`.
 - `generateQr`, `deactivateQr`, `getQrById`, `findActiveQrFor`,
   `deactivateQrsFor` — so no other module queries `QrCode` itself.
+- `confirmPickupHandover` (Lot H) — the print partner's handover scan, above.
 - `registerPublisherOnboardingPort` and its types.
+
+## The pickup code (A9)
+
+`orders` mints an `ORDER` code with `metadata.purpose = PICKUP` when the prints
+are marked ready for an agent (`fulfilment.markPrintReady`), restricted to
+`AGENT_PUBLISHER`. Resolving it answers `PICKUP_MATERIAL`; an `ORDER` code
+without that purpose is still `ORDER_CHECKIN`. `assertQrForRef(qrId, type,
+refId)` is what `collect-prints` calls to check the scanned code is this
+order's. Printed on the package via `GET /qr/:id/image.png`, found through
+`GET /orders/:id/pickup-code`.
+
+Lot H (Q147): the same code read from the other side of the counter.
+`confirmPickupHandover(token, orderId, scannedById)` — for `print-partners`'
+`POST /print-partners/me/jobs/:jobId/handover` — verifies the signed string,
+checks it is this order's **live** ORDER code with `purpose: PICKUP`, logs
+the scan (action `PICKUP_HANDOVER`, role PARTNER, outcome GRANTED) and
+answers `{ qrId }`; `QR_INVALID` for a string that is not a signed code,
+`QR_MISMATCH` otherwise, and a refused string logs nothing.
+
+## The ref-label port (K-B1)
+
+`GET /qr` names each code's subject. The spot, the agent, the order, the
+publisher, the advertiser and the grant live in six modules that all import
+`qr` to mint codes, so `qr.ports.ts` declares `QrRefLabelPort` —
+`Partial<Record<QrType, (ids) => Promise<{ id, label, displayId }[]>>>` — and
+`bootstrap/register-modules` registers each module's own batch export
+(`findListingLabels`, `findAgentLabels`, `findOrderLabels`,
+`findPublisherLabels`, `findAdvertiserLabels`, `findAccessGrantLabels`).
+`resolveRefs` asks each kind once per page, never once per row; a kind with
+no resolver (AD today) or an id the module no longer has answers
+`label: null, href: null` rather than failing the page — a code can outlive
+what it pointed at.
 
 ## The publisher-claim port
 

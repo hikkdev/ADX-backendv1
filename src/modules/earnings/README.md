@@ -18,7 +18,14 @@ The role guard is applied router-wide, not per route.
 
 ## Owned Prisma entities
 
-`Transaction`.
+None exclusively. The ledger is `Wallet` + `WalletEntry`, shared with every
+other party — see `docs/advertiser-onboarding.md` and the `Wallet` model
+comment for why one table serves advertisers, publishers and agents.
+
+The agent-only `Transaction` table still exists and still holds whatever it
+held, but nothing reads or writes it any more. It is kept so the migrated
+numbers have something to be reconciled against; dropping it is a separate,
+deliberate step.
 
 ## Public exports (`index.ts`)
 
@@ -48,6 +55,15 @@ The role guard is applied router-wide, not per route.
 - The month boundary uses server local time (`new Date(year, month, 1)`), not
   UTC.
 - Transactions are returned newest first, `limit` 50 by default.
+- **The response shape did not change when the storage did.** Callers still see
+  `TransactionType` values (`ORDER_COMPLETION`, `BONUS`, …) even though the
+  wallet stores `WalletEntryType` (`EARNING`, `BONUS`, …). The mapping lives in
+  the Prisma adapter and is pinned by a round-trip test.
+- `currentBalance` is read from `Wallet.balance` rather than re-summed from the
+  entries. That column is what the money actually moves through, so recomputing
+  around it would hide a disagreement rather than surface one.
+- A credit or debit writes the wallet and its explaining entry in **one**
+  transaction, or neither.
 
 ## Tests
 

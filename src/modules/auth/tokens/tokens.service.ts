@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { env } from '../../../config/env';
 import { logger } from '../../../shared/logging';
 import { logActivity } from '../../../shared/audit';
+import { markSessionsRevoked } from '../../../shared/auth';
 import { prismaTokensRepository as repository } from './prisma-tokens.repository';
 import type { SessionMeta } from './tokens.repository';
 
@@ -30,15 +31,20 @@ function refreshExpiry(): Date {
 
 /** Only the hash is stored; the raw value is returned to the client once. */
 export async function createRefreshToken(userId: string, meta: SessionMeta = {}): Promise<string> {
+  return (await issueRefreshToken(userId, meta)).raw;
+}
+
+/** The raw token and the row it lives in — the row id is the session id the access token carries. */
+export async function issueRefreshToken(userId: string, meta: SessionMeta = {}): Promise<{ raw: string; sessionId: string }> {
   const raw = crypto.randomBytes(64).toString('hex');
-  await repository.create({ userId, tokenHash: hash(raw), expiresAt: refreshExpiry(), meta });
-  return raw;
+  const row = await repository.create({ userId, tokenHash: hash(raw), expiresAt: refreshExpiry(), meta });
+  return { raw, sessionId: row.id };
 }
 
 export async function rotateRefreshToken(
   raw: string,
   meta: SessionMeta = {},
-): Promise<{ userId: string; newRaw: string }> {
+): Promise<{ userId: string; newRaw: string; sessionId: string }> {
   const existing = await repository.findByHash(hash(raw));
 
   if (!existing) {
@@ -65,8 +71,8 @@ export async function rotateRefreshToken(
 
   await repository.revokeById(existing.id);
 
-  const newRaw = await createRefreshToken(existing.userId, meta);
-  return { userId: existing.userId, newRaw };
+  const { raw: newRaw, sessionId } = await issueRefreshToken(existing.userId, meta);
+  return { userId: existing.userId, newRaw, sessionId };
 }
 
 export async function revokeRefreshToken(raw: string): Promise<void> {
@@ -77,10 +83,43 @@ export async function revokeAllRefreshTokens(userId: string): Promise<void> {
   await repository.revokeAllForUser(userId);
 }
 
+/**
+ * Ends every session a person holds — the refresh-token rows AND the access
+ * tokens still in flight, through the revocation marker authenticate() reads
+ * (shared/auth/revocation). Without the marker an access token stays good for
+ * up to its whole lifetime after an account is deactivated or a role changes,
+ * which is exactly the window console access must not have.
+ *
+ * `reason` goes on an audit row against the person whose sessions ended.
+ * Called by `users` (deactivation, a desk mobile change, a role change) and by
+ * `access-control` (a role's permission list changed).
+ */
+export async function revokeSessions(userId: string, reason: string): Promise<void> {
+  await repository.revokeAllForUser(userId);
+  await markSessionsRevoked(userId);
+  await logActivity(userId, 'SESSIONS_REVOKED', {
+    targetType: 'User',
+    targetId: userId,
+    module: 'auth',
+    metadata: { reason },
+  });
+}
+
 export async function listActiveSessions(userId: string) {
   return repository.listActive(userId);
 }
 
 export async function revokeSessionById(userId: string, sessionId: string): Promise<boolean> {
   return (await repository.revokeSessionForUser(sessionId, userId)) > 0;
+}
+
+/**
+ * E6: `DELETE /users/me/sessions` — ends every other device's session and
+ * keeps the caller's own. Only the refresh tokens go: the per-user revocation
+ * marker would take the caller's access token with it, so the other devices'
+ * access tokens lapse within one lifetime instead, exactly as a single
+ * `revokeSessionById` already behaves. Returns how many were ended.
+ */
+export async function revokeOtherSessions(userId: string, keepSessionId: string): Promise<number> {
+  return repository.revokeOthersForUser(userId, keepSessionId);
 }

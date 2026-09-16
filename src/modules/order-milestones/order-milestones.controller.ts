@@ -7,7 +7,10 @@ import {
   completeMilestoneSchema,
   createPlanSchema,
   createTemplateSchema,
+  milestoneLocationSchema,
+  rejectMilestoneSchema,
   replacePlanItemsSchema,
+  scheduleMilestoneSchema,
   updateMilestoneSchema,
   updatePlanSchema,
   updateTemplateSchema,
@@ -33,9 +36,14 @@ import {
   updateOrderMilestone,
 } from './order/order-milestones.service';
 import {
+  acceptMilestone,
   completeMilestone,
   getAgentMilestones,
   getMilestoneDetail,
+  milestoneSlotCandidates,
+  rejectMilestone,
+  scheduleMilestone,
+  shareMilestoneLocation,
   startMilestone,
 } from './agent/agent-execution.service';
 
@@ -161,10 +169,50 @@ export async function getMilestoneDetailHandler(req: Request, res: Response): Pr
   res.json({ success: true, data: milestone });
 }
 
+/* A12: the answers to a visit offer. */
+
+export async function acceptMilestoneHandler(req: Request, res: Response): Promise<void> {
+  const agent = await requireAgentProfile(req.user!.sub);
+  res.json({ success: true, data: await acceptMilestone(req.params['milestoneId'] as string, agent.id) });
+}
+
+export async function rejectMilestoneHandler(req: Request, res: Response): Promise<void> {
+  const agent = await requireAgentProfile(req.user!.sub);
+  const parsed = rejectMilestoneSchema.safeParse(req.body);
+  if (!parsed.success) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid request', parsed.error.flatten());
+  res.json({ success: true, data: await rejectMilestone(req.params['milestoneId'] as string, agent.id, parsed.data) });
+}
+
+export async function milestoneSlotCandidatesHandler(req: Request, res: Response): Promise<void> {
+  const agent = await requireAgentProfile(req.user!.sub);
+  res.json({ success: true, data: await milestoneSlotCandidates(req.params['milestoneId'] as string, agent.id) });
+}
+
+export async function scheduleMilestoneHandler(req: Request, res: Response): Promise<void> {
+  const agent = await requireAgentProfile(req.user!.sub);
+  const parsed = scheduleMilestoneSchema.safeParse(req.body);
+  if (!parsed.success) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid request', parsed.error.flatten());
+  const milestone = await scheduleMilestone(req.params['milestoneId'] as string, agent.id, new Date(parsed.data.start));
+  res.json({ success: true, data: milestone });
+}
+
 export async function startMilestoneHandler(req: Request, res: Response): Promise<void> {
   const agent = await requireAgentProfile(req.user!.sub);
   const milestone = await startMilestone(req.params['milestoneId'] as string, agent.id);
   res.json({ success: true, data: milestone });
+}
+
+/**
+ * G12-B: POST /agent/milestones/:milestoneId/update-location — the order
+ * lane's position ping, on a milestone visit. Answers `{ success: true }`
+ * with no `data` key, the way `POST /orders/:id/update-location` does.
+ */
+export async function milestoneLocationHandler(req: Request, res: Response): Promise<void> {
+  const parsed = milestoneLocationSchema.safeParse(req.body);
+  if (!parsed.success) throw new ApiError(400, 'VALIDATION_ERROR', 'latitude and longitude required');
+  const agent = await requireAgentProfile(req.user!.sub);
+  await shareMilestoneLocation(req.params['milestoneId'] as string, agent.id, parsed.data);
+  res.json({ success: true });
 }
 
 export async function completeMilestoneHandler(req: Request, res: Response): Promise<void> {

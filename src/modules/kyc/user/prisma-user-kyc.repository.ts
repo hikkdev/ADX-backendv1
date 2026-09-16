@@ -1,5 +1,5 @@
 import { prisma } from '../../../shared/database';
-import type { KycStatus } from '../../../shared/database';
+import type { KycStatus, UserKycPurpose } from '../../../shared/database';
 import type { UserKycRepository } from './user-kyc.repository';
 
 const userSelection = { select: { id: true, name: true, mobile: true } };
@@ -38,6 +38,36 @@ export const prismaUserKycRepository: UserKycRepository = {
     });
   },
 
+  async upsertLiveness(userId: string, selfVideoUrl: string, recordedById: string, fileId: string) {
+    const existing = await prisma.userKyc.findUnique({ where: { userId }, select: { id: true } });
+    const now = new Date();
+    const kyc = await prisma.userKyc.upsert({
+      where: { userId },
+      create: { userId, selfVideoUrl, fileId, purpose: 'LIVENESS', recordedById, status: 'PENDING', submittedAt: now },
+      update: { selfVideoUrl, fileId, purpose: 'LIVENESS', recordedById, status: 'PENDING', rejectionReason: null, submittedAt: now, reviewedAt: null },
+    });
+    return { kyc, created: existing === null };
+  },
+
+  async attest(userId: string, stamp: { attestedById: string; attestationNote: string; at: Date }) {
+    const existing = await prisma.userKyc.findUnique({ where: { userId }, select: { id: true } });
+    const data = {
+      purpose: 'LIVENESS' as const,
+      status: 'VERIFIED' as const,
+      rejectionReason: null,
+      reviewedAt: stamp.at,
+      attestedById: stamp.attestedById,
+      attestedAt: stamp.at,
+      attestationNote: stamp.attestationNote,
+    };
+    const kyc = await prisma.userKyc.upsert({
+      where: { userId },
+      create: { userId, ...data },
+      update: data,
+    });
+    return { kyc, created: existing === null };
+  },
+
   review(id: string, status: KycStatus, rejectionReason: string | null) {
     return prisma.userKyc.update({
       where: { id },
@@ -51,5 +81,17 @@ export const prismaUserKycRepository: UserKycRepository = {
 
   removeById(id: string) {
     return prisma.userKyc.delete({ where: { id } });
+  },
+
+  findPurgeable(purpose: UserKycPurpose, cutoff: Date, limit: number) {
+    return prisma.userKyc.findMany({
+      where: { purpose, status: 'VERIFIED', selfVideoUrl: { not: null }, reviewedAt: { not: null, lt: cutoff } },
+      orderBy: { reviewedAt: 'asc' },
+      take: limit,
+    });
+  },
+
+  purgeVideo(id: string) {
+    return prisma.userKyc.update({ where: { id }, data: { selfVideoUrl: null, fileId: null } });
   },
 };

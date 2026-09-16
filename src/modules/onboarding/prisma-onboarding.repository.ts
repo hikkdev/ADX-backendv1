@@ -1,11 +1,13 @@
 import { Prisma, prisma } from '../../shared/database';
 import type { OnboardingSubmissionStatus } from '../../shared/database';
 import { ApiError } from '../../shared/errors';
+import { countsFrom, listArgs, toListPage } from '../../shared/pagination';
 import type {
   FlowTemplateData,
   InlineUser,
   NewSubmission,
   OnboardingRepository,
+  SubmissionFilter,
 } from './onboarding.repository';
 
 /** Steps and schema are free-form JSON columns. */
@@ -15,6 +17,27 @@ function asJson(value: unknown): Prisma.InputJsonValue {
 
 function templateData(data: FlowTemplateData) {
   return { ...data, steps: asJson(data.steps), schema: asJson(data.schema) };
+}
+
+const SUBMISSION_STATUSES = ['DRAFT', 'SUBMITTED', 'UNDER_REVIEW', 'APPROVED', 'REJECTED', 'CANCELLED'] as const;
+
+/** E7-3: the filter as a where clause; `q` over the intake's own name / mobile and the linked user's. */
+function submissionWhere(filter: SubmissionFilter): Prisma.OnboardingSubmissionWhereInput {
+  const statuses = filter.status === undefined ? [] : Array.isArray(filter.status) ? filter.status : [filter.status];
+  return {
+    ...(filter.userType ? { userType: filter.userType } : {}),
+    ...(statuses.length ? { status: { in: statuses } } : {}),
+    ...(filter.q
+      ? {
+          OR: [
+            { data: { path: ['name'], string_contains: filter.q } },
+            { data: { path: ['mobile'], string_contains: filter.q } },
+            { user: { name: { contains: filter.q, mode: 'insensitive' } } },
+            { user: { mobile: { contains: filter.q } } },
+          ],
+        }
+      : {}),
+  };
 }
 
 const submissionInclude = {
@@ -57,15 +80,27 @@ export const prismaOnboardingRepository: OnboardingRepository = {
     });
   },
 
-  listSubmissions({ userType, status }) {
+  listSubmissions(filter) {
     return prisma.onboardingSubmission.findMany({
-      where: {
-        ...(userType ? { userType } : {}),
-        ...(status ? { status } : {}),
-      },
+      where: submissionWhere(filter),
       include: submissionInclude,
       orderBy: { createdAt: 'desc' },
     });
+  },
+
+  async findSubmissionsPage(filter, page, pageSize) {
+    const where = submissionWhere(filter);
+    const [items, total, groups] = await Promise.all([
+      prisma.onboardingSubmission.findMany({
+        where,
+        include: submissionInclude,
+        orderBy: { createdAt: 'desc' },
+        ...listArgs({ page, pageSize }),
+      }),
+      prisma.onboardingSubmission.count({ where }),
+      prisma.onboardingSubmission.groupBy({ by: ['status'], where: submissionWhere({ ...filter, status: undefined }), _count: { _all: true } }),
+    ]);
+    return toListPage(items, total, countsFrom(groups, SUBMISSION_STATUSES), { page, pageSize });
   },
 
   findSubmission(id: string) {
@@ -130,6 +165,10 @@ export const prismaOnboardingRepository: OnboardingRepository = {
 
   deleteSubmission(id: string) {
     return prisma.onboardingSubmission.delete({ where: { id } });
+  },
+
+  linkSubmissionUser(id: string, userId: string) {
+    return prisma.onboardingSubmission.update({ where: { id }, data: { userId } });
   },
 
   updateSubmissionStatus(

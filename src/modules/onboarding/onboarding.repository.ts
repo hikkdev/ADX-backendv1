@@ -1,9 +1,20 @@
+import type { ListPage } from '../../shared/pagination';
 import type {
   OnboardingFlowTemplate,
   OnboardingSubmission,
   OnboardingSubmissionStatus,
   Role,
 } from '../../shared/database';
+
+/**
+ * E7-3: `q` is a contains over the intake's own `name` / `mobile` (the form
+ * data) and the linked user's name / mobile; `status` one or several.
+ */
+export type SubmissionFilter = {
+  userType?: string | undefined;
+  status?: OnboardingSubmissionStatus | OnboardingSubmissionStatus[] | undefined;
+  q?: string | undefined;
+};
 
 export type FlowTemplateData = {
   userType: string;
@@ -44,10 +55,9 @@ export interface OnboardingRepository {
   updateTemplate(key: string, data: FlowTemplateData): Promise<OnboardingFlowTemplate>;
   upsertTemplate(key: string, data: FlowTemplateData): Promise<OnboardingFlowTemplate>;
 
-  listSubmissions(filter: {
-    userType?: string;
-    status?: OnboardingSubmissionStatus;
-  }): Promise<unknown[]>;
+  listSubmissions(filter: SubmissionFilter): Promise<unknown[]>;
+  /** E7-3: the same list on the list contract — one page, the total, the chips by status minus the status facet. */
+  findSubmissionsPage(filter: SubmissionFilter, page: number, pageSize: number): Promise<ListPage<unknown>>;
   findSubmission(id: string): Promise<unknown | null>;
   findSubmissionSummary(id: string): Promise<OnboardingSubmission | null>;
   /**
@@ -69,6 +79,8 @@ export interface OnboardingRepository {
     },
   ): Promise<unknown>;
   deleteSubmission(id: string): Promise<unknown>;
+  /** Lot D: the user an approval provisioned, written back onto the submission. */
+  linkSubmissionUser(id: string, userId: string): Promise<unknown>;
   updateSubmissionStatus(
     id: string,
     data: {

@@ -1,4 +1,4 @@
-import { prisma } from '../../shared/database';
+import { Prisma, prisma } from '../../shared/database';
 import { CONFIG_KEY, type AppConfigRepository } from './app-config.repository';
 
 export const prismaAppConfigRepository: AppConfigRepository = {
@@ -11,10 +11,22 @@ export const prismaAppConfigRepository: AppConfigRepository = {
   },
 
   save(value: object) {
+    return this.saveByKey(CONFIG_KEY, value);
+  },
+
+  saveByKey(key: string, value: object) {
     return prisma.appConfig.upsert({
-      where: { key: CONFIG_KEY },
-      update: { value },
-      create: { key: CONFIG_KEY, value },
+      where: { key },
+      update: { value: value as Prisma.InputJsonValue },
+      create: { key, value: value as Prisma.InputJsonValue },
     });
+  },
+
+  listByPrefix(prefix: string) {
+    return prisma.appConfig.findMany({ where: { key: { startsWith: prefix } }, orderBy: { key: 'asc' } });
+  },
+
+  async deleteByKey(key: string) {
+    await prisma.appConfig.deleteMany({ where: { key } });
   },
 };

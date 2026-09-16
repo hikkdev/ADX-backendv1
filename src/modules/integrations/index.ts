@@ -7,3 +7,6 @@
  * all read it and shared may not import a business module.
  */
 export { integrationsRouter } from './integrations.routes';
+
+// Lot G (answer 144): the module's feature declarations, loaded with the module so the registry sees them at boot.
+import './features';

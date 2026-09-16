@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import { ApiError } from '../../../shared/errors';
 import { env } from '../../../config/env';
 import { logActivity } from '../../../shared/audit';
-import { passwordResetEmail, sendMail } from '../../../shared/email';
+import { passwordResetEmail, sendEmail } from '../../../shared/email';
 import type { Role } from '../../../shared/database';
 import {
   changePasswordSchema,
@@ -13,13 +13,14 @@ import {
 import { passwordLoginUser } from '../auth.mapper';
 import { prismaAuthRepository as repository } from '../prisma-auth.repository';
 import { sessionMeta, startSession } from '../auth.session';
-import { revokeAllRefreshTokens } from '../tokens/tokens.service';
+import { revokeSessions } from '../tokens/tokens.service';
 import {
   consumePasswordResetToken,
   createPasswordResetToken,
   hashPassword,
   verifyPassword,
 } from './password.service';
+import { isAdmin, issueChallenge } from '../two-factor/two-factor.service';
 import {
   assertAccountNotLocked,
   clearFailedLogins,
@@ -53,6 +54,17 @@ export async function loginPasswordHandler(req: Request, res: Response): Promise
   await clearFailedLogins(email);
   const roles = user.roles.map((r) => r.role) as Role[];
 
+  // Lot A (Q25): an admin's password is only the first factor. No tokens are
+  // issued here — the challenge names the account for five minutes and the
+  // second factor finishes the sign-in at /auth/2fa/verify. Everyone else is
+  // unaffected: a publisher's OTP already was a second factor.
+  if (isAdmin(roles)) {
+    const challenge = await issueChallenge(user);
+    await logActivity(user.id, 'LOGIN_2FA_CHALLENGED', req, { method: 'password' });
+    res.json({ success: true, data: { challenge } });
+    return;
+  }
+
   // Independent writes: the audit row does not feed the session, and the
   // session does not read the audit row. Awaiting both together keeps the
   // audit durability guarantee (a silently dropped login record would matter)
@@ -84,7 +96,8 @@ export async function forgotPasswordHandler(req: Request, res: Response): Promis
     const rawToken = await createPasswordResetToken(user.id);
     const resetUrl = `${env.FRONTEND_URL}/reset-password?token=${rawToken}`;
     const { subject, html } = passwordResetEmail(resetUrl);
-    await sendMail(parsed.data.email, subject, html);
+    // AE-B: by the one door — SMTP, Resend or the Ethereal inbox, as the row says.
+    await sendEmail(parsed.data.email, subject, html);
     await logActivity(user.id, 'PASSWORD_RESET_REQUESTED', req);
   }
 
@@ -111,8 +124,11 @@ export async function resetPasswordHandler(req: Request, res: Response): Promise
   const passwordHash = await hashPassword(parsed.data.newPassword);
   await repository.setPasswordHash(userId, passwordHash);
 
-  // A password reset invalidates all existing sessions as a precaution.
-  await revokeAllRefreshTokens(userId);
+  // A password reset ends every session — the refresh tokens AND the access
+  // tokens still in flight, through the revocation marker authenticate()
+  // reads. Refresh tokens alone left an attacker's access token good for its
+  // whole lifetime after the victim reset their password (Lot A verifier).
+  await revokeSessions(userId, 'PASSWORD_RESET');
   await logActivity(userId, 'PASSWORD_RESET', req);
 
   res.json({

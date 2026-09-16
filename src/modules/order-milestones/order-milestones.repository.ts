@@ -1,6 +1,7 @@
 import type {
   MilestonePlan,
   OrderMilestone,
+  OrderMilestoneStatus,
   OrderMilestoneTemplate,
   OrderMilestoneType,
 } from '../../shared/database';
@@ -24,6 +25,17 @@ export type TemplatePatch = {
 
 export type PlanItemInput = { templateId: string; order: number; isOptional?: boolean };
 
+export type NewReinstallMilestone = {
+  orderId: string;
+  templateId: string;
+  order: number;
+  assignedAgentId: string | null;
+  reinstallOfDisputeId: string;
+  notes: string;
+  offeredAt: Date | null;
+  offerExpiresAt: Date | null;
+};
+
 export type NewOrderMilestone = {
   orderId: string;
   templateId: string;
@@ -39,12 +51,17 @@ export type OrderMilestonePatch = {
   dueDate?: Date | null;
   notes?: string;
   status?: 'SKIPPED' | 'DISPATCHED';
+  /* A12: stamped by the service when an assignment is an offer. */
+  offeredAt?: Date | null;
+  offerExpiresAt?: Date | null;
+  acceptedAt?: Date | null;
+  rejectionReason?: string | null;
 };
 
-/** Milestone joined to the parent order's status, for finalised-order guards. */
+/** Milestone joined to the parent order, for the finalised-order guards and the slot window. */
 export type MilestoneWithOrderStatus = OrderMilestone & {
   template: OrderMilestoneTemplate;
-  orderRecord: { status: string };
+  orderRecord: { status: string; agentId: string | null; startDate: Date | null; endDate: Date | null };
 };
 
 export interface OrderMilestonesRepository {
@@ -87,10 +104,34 @@ export interface OrderMilestonesRepository {
   /** Deletes only while still PENDING or DISPATCHED; returns rows removed. */
   deleteIfRemovable(milestoneId: string): Promise<number>;
 
+  // Lot D (Q54/Q92): the re-install a dispute raises
+  /** The first active template of a type — the INSTALLATION step a re-install is built from. */
+  findActiveTemplateByType(type: OrderMilestoneType): Promise<OrderMilestoneTemplate | null>;
+  /**
+   * A re-install milestone: DISPATCHED as an offer when an agent is named
+   * (the window stamped), PENDING and unassigned otherwise, and always
+   * carrying the dispute it answers.
+   */
+  createReinstall(data: NewReinstallMilestone): Promise<OrderMilestone>;
+  /** The status of each milestone named — what a dispute reads to say whether its re-install is still pending. */
+  findStatuses(milestoneIds: string[]): Promise<{ id: string; status: OrderMilestoneStatus }[]>;
+
   // Agent execution
   findForAgent(agentId: string): Promise<unknown[]>;
   findDetail(milestoneId: string): Promise<(OrderMilestone & { template: unknown }) | null>;
   start(milestoneId: string): Promise<unknown>;
   /** Flips to COMPLETED and stores evidence atomically. */
   complete(milestoneId: string, evidence: EvidenceInput[]): Promise<unknown>;
+
+  // A12: the offer on a dispatched visit
+  accept(milestoneId: string, at: Date): Promise<unknown>;
+  /** Back to PENDING, unassigned, the reason kept for ops. */
+  reject(milestoneId: string, reason: string): Promise<unknown>;
+  schedule(milestoneId: string, start: Date, end: Date): Promise<unknown>;
+  /** DISPATCHED and still held by this agent — what STOP_OPEN_WORK returns to ADX. */
+  findDispatchedForAgent(agentId: string): Promise<{ id: string; orderId: string }[]>;
+  /** Unanswered offers whose window closed in [windowStart, now]. */
+  findOfferExpired(windowStart: Date, now: Date): Promise<{ id: string; orderId: string; assignedAgentId: string | null }[]>;
+  /** Starts other milestones on the order already hold, so two visits are not booked into one band. */
+  findScheduledStartsForOrder(orderId: string, exceptMilestoneId: string): Promise<Date[]>;
 }

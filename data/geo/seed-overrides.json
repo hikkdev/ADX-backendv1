@@ -1,0 +1,15 @@
+{
+  "cities": [
+    {
+      "slug": "navi-mumbai",
+      "name": "Navi Mumbai",
+      "stateCode": "16",
+      "districtCode": "517",
+      "lat": 19.033,
+      "lng": 73.0297,
+      "population": 1120547,
+      "kind": "TOWN",
+      "aliases": ["navi mumbai", "new bombay"]
+    }
+  ]
+}

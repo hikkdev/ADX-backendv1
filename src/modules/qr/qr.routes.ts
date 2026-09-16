@@ -2,8 +2,17 @@ import { Router } from 'express';
 import { asyncHandler } from '../../shared/http';
 import { authenticate, requireRole } from '../../shared/auth';
 import {
-  generateQrHandler, resolveQrHandler, getQrScansHandler,
-  deactivateQrHandler, getQrHandler, qrImagePngHandler, qrImageSvgHandler,
+  generateQrHandler,
+  resolveQrHandler,
+  getScanForScannerHandler,
+  getQrScansHandler,
+  deactivateQrHandler,
+  getQrHandler,
+  qrImagePngHandler,
+  qrImageSvgHandler,
+  scansByHandler,
+  listQrHandler,
+  regenerateQrHandler,
 } from './qr.controller';
 
 export const qrRouter = Router();
@@ -18,10 +27,16 @@ qrRouter.use(authenticate);
 
 // Scan & resolve a QR token — any authenticated user
 qrRouter.post('/resolve', asyncHandler(resolveQrHandler));
+// The agent's poll after an onboarding scan: has the owner approved?
+// D6: ops' view of one person's scans. Literal path, ahead of /scans/:scanId.
+qrRouter.get('/scans', requireRole('ADMIN'), asyncHandler(scansByHandler));
+qrRouter.get('/scans/:scanId', asyncHandler(getScanForScannerHandler));
 
-// Admin: generate, view scans, deactivate
+// Admin: the desk (K-B1) — list, generate, view scans, regenerate, deactivate
+qrRouter.get('/', requireRole('ADMIN'), asyncHandler(listQrHandler));
 qrRouter.post('/', requireRole('ADMIN'), asyncHandler(generateQrHandler));
 qrRouter.get('/:qrId/scans', requireRole('ADMIN'), asyncHandler(getQrScansHandler));
+qrRouter.post('/:qrId/regenerate', requireRole('ADMIN'), asyncHandler(regenerateQrHandler));
 qrRouter.delete('/:qrId', requireRole('ADMIN'), asyncHandler(deactivateQrHandler));
 
 qrRouter.get('/:qrId', asyncHandler(getQrHandler));

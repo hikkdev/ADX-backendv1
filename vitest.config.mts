@@ -15,8 +15,11 @@ export default defineConfig({
     setupFiles: ['tests/setup.ts'],
     // Vitest injects Vite's own BASE_URL ("/") into process.env, which collides
     // with the app's BASE_URL setting and fails config/env.ts validation.
-    // Re-applying .env here takes precedence over that injection.
-    env: { BASE_URL: '', ...fileEnv },
+    // Re-applying .env here takes precedence over that injection. One key is
+    // allowed to win over .env from the shell: REDIS_URL, so the suite can run
+    // against the local Docker Redis (docker-compose.yml) when the hosted one
+    // is out of quota — `REDIS_URL=redis://localhost:6379 npm run verify`.
+    env: { BASE_URL: '', ...fileEnv, ...(process.env.REDIS_URL ? { REDIS_URL: process.env.REDIS_URL } : {}) },
     // The Prisma pool and the Redis connection are process-wide singletons, and
     // the route collector may only patch the Express Router prototype once per
     // process, so each file gets its own forked worker and they run one at a time.

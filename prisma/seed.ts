@@ -372,24 +372,28 @@ async function main() {
   console.log('✅ Support tickets + messages created');
 
   // ─── Milestones ───────────────────────────────────────────────────────────
+  // Progress is derived on read from real counters (DR 05); the seed only
+  // plants the templates and the agent's rows. A `target` is a count in the
+  // unit of the type: onboardings, visits, rupees, on-time arrivals.
   const milestoneTemplates = [
-    { id: 'ms-tmpl-001', type: 'ONBOARDING' as const, title: 'Onboarding milestones', description: 'Onboard publishers to unlock bonuses', target: 5, rewardAmount: 5000, sortOrder: 1 },
-    { id: 'ms-tmpl-002', type: 'ACTIVITY' as const, title: 'Activity milestones', description: 'Complete verification orders', target: 10, rewardAmount: 3000, sortOrder: 2 },
-    { id: 'ms-tmpl-003', type: 'REVENUE' as const, title: 'Revenue milestones', description: 'Hit revenue targets for tier upgrades', target: 50000, rewardAmount: 10000, sortOrder: 3 },
-    { id: 'ms-tmpl-004', type: 'QUALITY' as const, title: 'Quality milestones', description: 'Maintain high quality rating', target: 20, rewardAmount: 5000, sortOrder: 4 },
+    { id: 'ms-tmpl-001', type: 'ONBOARDING' as const, title: 'Onboard 10 publishers', description: 'Onboard publishers to unlock bonuses', target: 10, rewardAmount: '5000.00', sortOrder: 1, windowDays: 30 },
+    { id: 'ms-tmpl-002', type: 'ACTIVITY' as const, title: 'Complete 10 visits', description: 'Complete field visits and verifications', target: 10, rewardAmount: '3000.00', sortOrder: 2, windowDays: 30 },
+    { id: 'ms-tmpl-003', type: 'REVENUE' as const, title: 'Earn ₹50,000', description: 'Credited incentives in the window', target: 50000, rewardAmount: '10000.00', sortOrder: 3, windowDays: 90 },
+    { id: 'ms-tmpl-004', type: 'QUALITY' as const, title: '20 on-time arrivals', description: 'Arrive on time at twenty slots', target: 20, rewardAmount: '5000.00', sortOrder: 4, unlockAfter: 2 },
   ];
 
   for (const t of milestoneTemplates) {
     await prisma.milestoneTemplate.upsert({
       where: { id: t.id },
-      update: { sortOrder: t.sortOrder },
+      // Everything but the id, so an edit here reaches an existing database.
+      update: { type: t.type, title: t.title, description: t.description, target: t.target, rewardAmount: t.rewardAmount, sortOrder: t.sortOrder, windowDays: t.windowDays ?? null, unlockAfter: t.unlockAfter ?? null },
       create: t,
     });
 
     await prisma.agentMilestone.upsert({
       where: { agentId_templateId: { agentId: agentProfile.id, templateId: t.id } },
       update: {},
-      create: { agentId: agentProfile.id, templateId: t.id, progress: t.id === 'ms-tmpl-001' ? 3 : t.id === 'ms-tmpl-002' ? 32000 : t.id === 'ms-tmpl-003' ? 7 : 14 },
+      create: { agentId: agentProfile.id, templateId: t.id },
     });
   }
 
@@ -412,6 +416,54 @@ async function main() {
   }
 
   console.log('✅ Training resources created');
+
+  // ─── Training curriculum (DR 05) ──────────────────────────────────────────
+  // Five modules, each with a short quiz, the way the index frame draws them.
+  // Sequential: each waits on the one before it. Created active because the
+  // questions land in the same pass; through the API a module starts inactive.
+  const curriculum = [
+    { id: 'tm-001', ordinal: 1, title: 'Welcome to ADX', summary: 'What the platform is and what an agent does', durationMins: 6, takeaways: ['ADX matches advertisers to spaces publishers own', 'An agent brings both sides on and keeps them happy'] },
+    { id: 'tm-002', ordinal: 2, title: 'Onboarding a publisher', summary: 'The door-to-door code, KYC and the first listing', durationMins: 12, takeaways: ['The publisher approves your code before you can act', 'KYC is verified before money moves'] },
+    { id: 'tm-003', ordinal: 3, title: 'Site visits and proof', summary: 'Photographs, check-ins and what ops looks for', durationMins: 10, takeaways: ['Four photographs, one map pin', 'A visit pays when it is completed, not when it is booked'] },
+    { id: 'tm-004', ordinal: 4, title: 'Selling a package', summary: 'Plans, add-ons and the payment link', durationMins: 9, takeaways: ['The advertiser pays through the link; you never take money', 'Your commission is recorded when the sale is paid'] },
+    { id: 'tm-005', ordinal: 5, title: 'Earnings and payouts', summary: 'Incentives, the wallet and withdrawals', durationMins: 8, takeaways: ['Every incentive is verified before it is credited', 'Withdrawals go to a verified bank account'] },
+  ];
+  for (const m of curriculum) {
+    await prisma.trainingModule.upsert({
+      where: { id: m.id },
+      update: { ordinal: m.ordinal, title: m.title, summary: m.summary, durationMins: m.durationMins, takeaways: m.takeaways, unlockAfterOrdinal: m.ordinal > 1 ? m.ordinal - 1 : null },
+      create: {
+        id: m.id,
+        ordinal: m.ordinal,
+        title: m.title,
+        summary: m.summary,
+        durationMins: m.durationMins,
+        lessonBody: `# ${m.title}\n\n${m.summary}.`,
+        takeaways: m.takeaways,
+        unlockAfterOrdinal: m.ordinal > 1 ? m.ordinal - 1 : null,
+        passPercent: 80,
+        isActive: true,
+        questions: {
+          create: [
+            { ordinal: 1, prompt: `Which statement about "${m.title}" is true?`, options: { create: [
+              { ordinal: 1, label: m.takeaways[0]!, isCorrect: true },
+              { ordinal: 2, label: 'An agent collects cash from the advertiser', isCorrect: false },
+              { ordinal: 3, label: 'KYC is optional for a publisher', isCorrect: false },
+              { ordinal: 4, label: 'A visit pays when it is booked', isCorrect: false },
+            ] } },
+            { ordinal: 2, prompt: 'What does ADX verify before money moves?', options: { create: [
+              { ordinal: 1, label: 'Nothing — money moves on booking', isCorrect: false },
+              { ordinal: 2, label: 'KYC', isCorrect: true },
+              { ordinal: 3, label: 'The agent\'s rating', isCorrect: false },
+              { ordinal: 4, label: 'The listing\'s photographs', isCorrect: false },
+            ] } },
+          ],
+        },
+      },
+    });
+  }
+
+  console.log('✅ Training curriculum created');
 
   // ─── Order milestone templates ────────────────────────────────────────────
   const tmplSurvey = await prisma.orderMilestoneTemplate.upsert({
@@ -469,6 +521,36 @@ async function main() {
         { kind: 'location_checkin' },
       ],
       estimatedDurationMins: 25,
+    },
+  });
+
+  /*
+   * The guided site-verification visit the agent app's AG-22/AG-23 frames are
+   * drawn against: a mirror decal in a gym, photographed four ways.
+   *
+   * Seeded because it is the first template to use `optional`, and because the
+   * four labels here are what the capture sequence prints on screen — the app
+   * holds no list of its own. Rename one and the agent is asked for the new
+   * name; add a fifth and there are five frames.
+   */
+  await prisma.orderMilestoneTemplate.upsert({
+    where: { id: 'omt-verify-mirror-001' },
+    update: {},
+    create: {
+      id: 'omt-verify-mirror-001',
+      title: 'Mirror Decal Verification',
+      description: 'Photograph the decal, the fixture and the zone it sits in.',
+      type: 'VERIFICATION',
+      requirements: [
+        { kind: 'photo', label: 'The mirror decal' },
+        { kind: 'photo', label: 'Decal from an angle' },
+        { kind: 'photo', label: 'Mirror & fixture' },
+        // The wide context shot. Useful, and not worth sending an agent back
+        // across town for on its own.
+        { kind: 'photo', label: 'Reception / locker zone', optional: true },
+        { kind: 'location_checkin' },
+      ],
+      estimatedDurationMins: 15,
     },
   });
 
@@ -575,23 +657,27 @@ async function main() {
 
   console.log('✅ Order milestones dispatched to agent');
 
-  // ─── Bank account ─────────────────────────────────────────────────────────
-  await prisma.bankAccount.upsert({
+  // ─── Payout method ────────────────────────────────────────────────────────
+  // `BankAccount` left with the retired banking module (DR 04); the wallet's
+  // payout method is the record that replaced it.
+  await prisma.payoutMethod.upsert({
     where: { id: 'bank-agent-001' },
     update: {},
     create: {
       id: 'bank-agent-001',
       userId: agent.id,
+      type: 'BANK',
       accountHolder: 'Shivam Kumar',
       bankName: 'State Bank of India',
       accountNumber: '31298765432100',
       ifscCode: 'SBIN0001234',
       isDefault: true,
-      isVerified: true,
+      status: 'VERIFIED',
+      verifiedAt: new Date(),
     },
   });
 
-  console.log('✅ Bank account created');
+  console.log('✅ Payout method created');
 
   console.log('\n✅ Seed complete!');
   console.log(`   Agent mobile: +919876543210`);

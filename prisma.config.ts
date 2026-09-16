@@ -3,6 +3,17 @@
 import "dotenv/config";
 import { defineConfig } from "prisma/config";
 
+/**
+ * Prisma 7: the client no longer reads a datasource URL from the schema — it
+ * connects through the pg adapter in src/shared/database/prisma.ts, on
+ * DATABASE_URL, the pooled Neon endpoint. This `datasource.url` is only what
+ * the CLI uses: `prisma migrate`, `db push`, `studio`. Those want the direct
+ * endpoint (Lot E, decision 95): a pooler cannot hold the transaction a
+ * migration's DDL runs in. DIRECT_URL when set, DATABASE_URL otherwise — a
+ * local Postgres has no pooler and needs only the one.
+ */
+const migrationUrl = process.env["DIRECT_URL"] || process.env["DATABASE_URL"];
+
 export default defineConfig({
   schema: "prisma/schema.prisma",
   migrations: {
@@ -10,6 +21,6 @@ export default defineConfig({
     seed: "tsx prisma/seed.ts",
   },
   datasource: {
-    url: process.env["DATABASE_URL"],
+    url: migrationUrl,
   },
 });

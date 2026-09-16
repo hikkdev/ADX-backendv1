@@ -3,6 +3,7 @@ import { asyncHandler } from '../../shared/http';
 import { authenticate, requireRole } from '../../shared/auth';
 import {
   createRoleConfigHandler,
+  getCapabilitiesHandler,
   getAllRoleConfigsHandler,
   getRoleConfigByIdHandler,
   updateRoleConfigHandler,
@@ -16,6 +17,8 @@ rolesConfigRouter.use(authenticate);
 // from them); writes are ADMIN-only.
 rolesConfigRouter.post('/', requireRole('ADMIN'), asyncHandler(createRoleConfigHandler));
 rolesConfigRouter.get('/', asyncHandler(getAllRoleConfigsHandler));
+// Ahead of '/:id', which would otherwise read "capabilities" as an id.
+rolesConfigRouter.get('/capabilities', asyncHandler(getCapabilitiesHandler));
 rolesConfigRouter.get('/:id', asyncHandler(getRoleConfigByIdHandler));
 rolesConfigRouter.put('/:id', requireRole('ADMIN'), asyncHandler(updateRoleConfigHandler));
 rolesConfigRouter.delete('/:id', requireRole('ADMIN'), asyncHandler(deleteRoleConfigHandler));

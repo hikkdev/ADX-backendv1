@@ -3,7 +3,7 @@ import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '../../generated/prisma';
 
-const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
+const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient; pool?: Pool };
 
 function createPrismaClient(): PrismaClient {
   const pool = new Pool({
@@ -33,8 +33,26 @@ function createPrismaClient(): PrismaClient {
     // pool buys nothing and just holds sockets open.
     max: 10,
   });
+  globalForPrisma.pool = pool;
   const adapter = new PrismaPg(pool);
   return new PrismaClient({ adapter });
+}
+
+/**
+ * Shuts the database down so a one-shot process can exit.
+ *
+ * `$disconnect()` releases Prisma's side; the pool underneath it is ours, and
+ * `min: 4` means pg-pool deliberately never reaps those four sockets. A seed
+ * script that only disconnected therefore finished its work and then sat there
+ * with a live event loop until somebody killed it — the work was done, the
+ * process just never said so, which is indistinguishable from a hang.
+ *
+ * The server does not call this: it wants the pool for as long as it runs.
+ */
+export async function closeDatabase(): Promise<void> {
+  await prisma.$disconnect();
+  await globalForPrisma.pool?.end();
+  globalForPrisma.pool = undefined;
 }
 
 export const prisma = globalForPrisma.prisma ?? createPrismaClient();

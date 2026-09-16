@@ -18,7 +18,42 @@ export {
   getQrById,
   findActiveQrFor,
   deactivateQrsFor,
+  findPendingScan,
+  decideOnboardingScan,
+  ONBOARDING_QR_TTL_SECONDS,
+  assertQrForRef,
+  isSignedCodeFor,
+  PICKUP_PURPOSE,
+  confirmPickupHandover,
+  listScansFor,
+  listScansBy,
 } from './qr.service';
+export type { ScanWithScanner } from './qr.repository';
+export type { QrOptions } from './qr.service';
+export { qrErrorToApi } from './qr.controller';
 
-export { registerPublisherOnboardingPort } from './qr.ports';
-export type { PublisherOnboardingPort, ClaimedPublisher } from './qr.ports';
+/**
+ * Lot D (Q139): the renderer alone, for `campaigns` — a tracking code's QR
+ * (`/t/:code`) is drawn in the house style so the artwork can embed it.
+ * Rendering is stateless; the QrCode row and its scan log stay here.
+ */
+export { toPngBuffer, clampSize, IMAGE_CACHE_CONTROL } from './qr.image';
+
+export {
+  registerPublisherOnboardingPort,
+  registerAdvertiserOnboardingPort,
+  registerAccessGrantPort,
+  registerQrRefLabelPort,
+} from './qr.ports';
+export type { QrRefLabelPort, QrRefLabel } from './qr.ports';
+export type {
+  PublisherOnboardingPort,
+  ClaimedPublisher,
+  AdvertiserOnboardingPort,
+  ClaimedAdvertiser,
+  AccessGrantPort,
+  ClaimedGrant,
+} from './qr.ports';
+
+// Lot G (answer 144): the module's feature declarations, loaded with the module so the registry sees them at boot.
+import './features';

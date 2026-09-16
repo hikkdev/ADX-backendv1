@@ -66,4 +66,46 @@ export const defaultFlowTemplates = [
       requiredIdentityFields: ['partnerLegalName', 'partnerDisplayName', 'mobile'],
     },
   },
+  // Lot D (Q131): the intake form is the onboarding record for agents and
+  // employees. `side` is which market the agent works; the documents are
+  // recorded on the KYC twin (`/agent-kyc`, `/employee-kyc`) after approval.
+  {
+    key: 'agent-onboarding',
+    userType: 'AGENT',
+    name: 'Agent Onboarding',
+    description: 'Field agent intake: identity, territory and the side they work.',
+    version: 1,
+    steps: [
+      { label: 'User Type' },
+      { label: 'Side' },
+      { label: 'Agent Info' },
+      { label: 'Territory' },
+      { label: 'KYC Capture' },
+      { label: 'Review' },
+    ],
+    schema: {
+      accountTypes: ['PUBLISHER', 'ADVERTISER'],
+      requiredIdentityFields: ['name', 'mobile', 'side'],
+    },
+  },
+  {
+    key: 'employee-onboarding',
+    userType: 'EMPLOYEE',
+    name: 'Employee Onboarding',
+    description: 'Staff intake: HR record, documents and the optional console login.',
+    version: 1,
+    steps: [
+      { label: 'User Type' },
+      { label: 'Employee Info' },
+      { label: 'Department' },
+      { label: 'HR Documents' },
+      { label: 'KYC Capture' },
+      { label: 'Console Access' },
+      { label: 'Review' },
+    ],
+    schema: {
+      accountTypes: ['FULL_TIME', 'CONTRACT', 'INTERN'],
+      requiredIdentityFields: ['name', 'mobile', 'department'],
+    },
+  },
 ] as const;

@@ -7,7 +7,7 @@ import {
   statusUpdateSchema,
   submissionSchema,
   submissionUpdateSchema,
-  submissionStatusSchema,
+  listSubmissionsQuerySchema,
   userTypeSchema,
 } from './onboarding.schema';
 import * as service from './onboarding.service';
@@ -66,21 +66,21 @@ export async function createOnboardingSubmission(req: Request, res: Response): P
   res.status(201).json({ success: true, data: submission });
 }
 
+/**
+ * E7-3: the list contract — `?q=&status=a,b&userType=&page=&pageSize=` →
+ * `{ items, total, page, pageSize, counts }` — when a page is asked for;
+ * the bare array it always answered otherwise, one release.
+ */
 export async function listOnboardingSubmissions(req: Request, res: Response): Promise<void> {
-  const userType = upperQuery(req.query['userType']);
-  const status = upperQuery(req.query['status']);
-  if (userType && !userTypeSchema.safeParse(userType).success) {
-    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid userType');
-  }
-  if (status && !submissionStatusSchema.safeParse(status).success) {
-    throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid status');
-  }
+  const parsed = listSubmissionsQuerySchema.safeParse(req.query);
+  if (!parsed.success) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid query', parsed.error.flatten());
+  const { page, pageSize, ...filter } = parsed.data;
 
-  const submissions = await service.listSubmissions({
-    userType,
-    status: status as OnboardingSubmissionStatus | undefined,
-  });
-  res.json({ success: true, data: submissions });
+  if (page !== undefined || pageSize !== undefined) {
+    res.json({ success: true, data: await service.listSubmissionsPage(filter, page ?? 1, pageSize ?? 20) });
+    return;
+  }
+  res.json({ success: true, data: await service.listSubmissions(filter) });
 }
 
 export async function getOnboardingSubmission(req: Request, res: Response): Promise<void> {

@@ -1,5 +1,7 @@
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
+import { env } from '../../../config/env';
+import { passwordResetEmail, sendEmail } from '../../../shared/email';
 import { logger } from '../../../shared/logging';
 import { prismaPasswordRepository as repository } from './prisma-password.repository';
 
@@ -11,6 +13,19 @@ export async function hashPassword(password: string): Promise<string> {
 
 export async function verifyPassword(password: string, hash: string): Promise<boolean> {
   return bcrypt.compare(password, hash);
+}
+
+/**
+ * E6: the same link `POST /auth/forgot-password` sends, raised from the desk
+ * (`POST /users/:id/reset-password`). The token is minted and emailed here so
+ * the raw value never crosses a module boundary.
+ */
+export async function sendPasswordResetLink(userId: string, email: string): Promise<void> {
+  const raw = await createPasswordResetToken(userId);
+  const resetUrl = `${env.FRONTEND_URL}/reset-password?token=${raw}`;
+  const { subject, html } = passwordResetEmail(resetUrl);
+  // AE-B: by the one door — SMTP, Resend or the Ethereal inbox, as the row says.
+  await sendEmail(email, subject, html);
 }
 
 /** Returns the raw token to email to the user; only its hash is persisted. */

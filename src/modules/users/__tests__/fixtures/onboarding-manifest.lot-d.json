@@ -1,0 +1,2948 @@
+{
+  "PUBLISHER:INDIVIDUAL:full": {
+    "party": "PUBLISHER",
+    "accountType": "INDIVIDUAL",
+    "mode": "full",
+    "verification": {
+      "digio": {
+        "available": false,
+        "provider": "DEGRADED",
+        "retryAfter": 300
+      },
+      "liveness": {
+        "required": true,
+        "status": "PENDING"
+      },
+      "kycStatus": "PENDING",
+      "reviewNote": null
+    },
+    "steps": [
+      {
+        "key": "account-type",
+        "kind": "account-type",
+        "title": "Account type"
+      },
+      {
+        "key": "details",
+        "kind": "form",
+        "title": "Publisher details",
+        "subtitle": "Legal name, PAN, and GSTIN as printed on your documents"
+      },
+      {
+        "key": "kyc-intro",
+        "kind": "kyc-intro",
+        "title": "Verify your identity",
+        "subtitle": "Five quick uploads. Encrypted, used only for verification.",
+        "bands": [
+          {
+            "label": "Identity",
+            "value": "Aadhaar · Passport · DL"
+          },
+          {
+            "label": "Tax",
+            "value": "PAN card"
+          },
+          {
+            "label": "Address",
+            "value": "Utility bill · Rent agreement"
+          },
+          {
+            "label": "Match",
+            "value": "Live selfie"
+          }
+        ],
+        "cta": "Start verification"
+      },
+      {
+        "key": "gov-id-front",
+        "kind": "capture",
+        "title": "Government ID · Front",
+        "subtitle": "Aadhaar, passport, or driving licence. Clear photo, no glare.",
+        "documents": [
+          {
+            "key": "aadhaar",
+            "label": "Aadhaar card",
+            "hint": "Front face with 12-digit number visible",
+            "field": "govIdFrontUrl",
+            "source": "library",
+            "sets": {
+              "field": "govIdType",
+              "value": "AADHAAR"
+            }
+          },
+          {
+            "key": "passport",
+            "label": "Passport",
+            "hint": "Bio-page. Non-expired.",
+            "field": "govIdFrontUrl",
+            "source": "library",
+            "sets": {
+              "field": "govIdType",
+              "value": "PASSPORT"
+            }
+          },
+          {
+            "key": "driving-licence",
+            "label": "Driving licence",
+            "hint": "Both sides. Non-expired.",
+            "field": "govIdFrontUrl",
+            "source": "library",
+            "sets": {
+              "field": "govIdType",
+              "value": "DRIVING_LICENCE"
+            }
+          }
+        ],
+        "cta": "Use this photo"
+      },
+      {
+        "key": "gov-id-back",
+        "kind": "capture",
+        "title": "Government ID · Back",
+        "subtitle": "The reverse of the same document. Address side, all corners visible.",
+        "documents": [
+          {
+            "key": "aadhaar-back",
+            "label": "Aadhaar card",
+            "hint": "Back face with the address",
+            "field": "govIdBackUrl",
+            "source": "library",
+            "onlyWhen": {
+              "field": "govIdType",
+              "value": "AADHAAR"
+            }
+          },
+          {
+            "key": "passport-back",
+            "label": "Passport",
+            "hint": "Not applicable — back not required",
+            "field": "govIdBackUrl",
+            "source": "library",
+            "inert": true,
+            "onlyWhen": {
+              "field": "govIdType",
+              "value": "PASSPORT"
+            }
+          },
+          {
+            "key": "driving-licence-back",
+            "label": "Driving licence",
+            "hint": "Back face, all corners visible",
+            "field": "govIdBackUrl",
+            "source": "library",
+            "onlyWhen": {
+              "field": "govIdType",
+              "value": "DRIVING_LICENCE"
+            }
+          }
+        ],
+        "skippableWhen": {
+          "field": "govIdType",
+          "value": "PASSPORT"
+        },
+        "cta": "Use this photo"
+      },
+      {
+        "key": "pan",
+        "kind": "capture",
+        "title": "PAN card",
+        "subtitle": "Photo of your PAN card. All four corners visible.",
+        "text": {
+          "field": "panNumber",
+          "label": "PAN number",
+          "hint": "10-character alphanumeric",
+          "pattern": "^[A-Z]{5}[0-9]{4}[A-Z]$",
+          "maxLength": 10
+        },
+        "documents": [
+          {
+            "key": "pan-photo",
+            "label": "Photograph",
+            "hint": "Clear and non-obscured",
+            "field": "panFrontUrl",
+            "source": "library"
+          },
+          {
+            "key": "pan-signature",
+            "label": "Signature",
+            "hint": "Bottom-right, matching your signed documents",
+            "field": "panSignatureUrl",
+            "source": "library"
+          }
+        ],
+        "cta": "Use this photo"
+      },
+      {
+        "key": "address-proof",
+        "kind": "capture",
+        "title": "Address proof",
+        "subtitle": "A document showing your current address. Issued in the last three months.",
+        "documents": [
+          {
+            "key": "utility-bill",
+            "label": "Utility bill",
+            "hint": "Electricity, water or gas, in your name",
+            "field": "addressProofUrl",
+            "source": "library",
+            "pdf": true,
+            "sets": {
+              "field": "addressProofType",
+              "value": "UTILITY_BILL"
+            }
+          },
+          {
+            "key": "rent-agreement",
+            "label": "Rent agreement",
+            "hint": "Registered, with your name and the address",
+            "field": "addressProofUrl",
+            "source": "library",
+            "pdf": true,
+            "sets": {
+              "field": "addressProofType",
+              "value": "RENT_AGREEMENT"
+            }
+          },
+          {
+            "key": "bank-statement",
+            "label": "Bank statement",
+            "hint": "First page, with the address",
+            "field": "addressProofUrl",
+            "source": "library",
+            "pdf": true,
+            "sets": {
+              "field": "addressProofType",
+              "value": "BANK_STATEMENT"
+            }
+          }
+        ],
+        "cta": "Upload document"
+      },
+      {
+        "key": "selfie",
+        "kind": "capture",
+        "title": "Selfie verification",
+        "subtitle": "A quick selfie so we can match your ID to you.",
+        "guidance": [
+          {
+            "label": "Position",
+            "hint": "Face centered, both eyes clearly visible"
+          },
+          {
+            "label": "Lighting",
+            "hint": "Bright, no shadows or filters"
+          },
+          {
+            "label": "Match",
+            "hint": "We compare it with your Government ID photo"
+          }
+        ],
+        "documents": [
+          {
+            "key": "selfie",
+            "label": "Your selfie",
+            "hint": "Taken now, with the front camera",
+            "field": "selfieUrl",
+            "source": "camera",
+            "front": true
+          }
+        ],
+        "cta": "Take selfie"
+      },
+      {
+        "key": "liveness",
+        "kind": "capture",
+        "title": "Record a short video",
+        "subtitle": "A five-second clip of you, so we know the person behind the documents is here.",
+        "guidance": [
+          {
+            "label": "Face",
+            "hint": "Look at the camera, face centred"
+          },
+          {
+            "label": "Say",
+            "hint": "Say your name and the date"
+          },
+          {
+            "label": "Length",
+            "hint": "Five seconds is enough"
+          }
+        ],
+        "documents": [
+          {
+            "key": "liveness-video",
+            "label": "Your video",
+            "hint": "Recorded now, with the front camera",
+            "field": "selfVideoUrl",
+            "source": "camera",
+            "front": true,
+            "video": true
+          }
+        ],
+        "cta": "Record video"
+      },
+      {
+        "key": "checklist",
+        "kind": "checklist",
+        "title": "Review your KYC",
+        "subtitle": "Check everything before submitting. You can retake any document.",
+        "cta": "Submit for review"
+      }
+    ]
+  },
+  "PUBLISHER:INDIVIDUAL:partial": {
+    "party": "PUBLISHER",
+    "accountType": "INDIVIDUAL",
+    "mode": "partial",
+    "verification": {
+      "digio": {
+        "available": true,
+        "provider": "DIGIO",
+        "retryAfter": null
+      },
+      "liveness": {
+        "required": true,
+        "status": "REJECTED"
+      },
+      "kycStatus": "NEEDS_INFO",
+      "reviewNote": "Two documents were unreadable."
+    },
+    "steps": [
+      {
+        "key": "gov-id-front",
+        "kind": "capture",
+        "title": "Government ID · Front",
+        "subtitle": "Aadhaar, passport, or driving licence. Clear photo, no glare.",
+        "documents": [
+          {
+            "key": "aadhaar",
+            "label": "Aadhaar card",
+            "hint": "Front face with 12-digit number visible",
+            "field": "govIdFrontUrl",
+            "source": "library",
+            "sets": {
+              "field": "govIdType",
+              "value": "AADHAAR"
+            },
+            "flagged": true,
+            "note": "Glare over the number"
+          },
+          {
+            "key": "passport",
+            "label": "Passport",
+            "hint": "Bio-page. Non-expired.",
+            "field": "govIdFrontUrl",
+            "source": "library",
+            "sets": {
+              "field": "govIdType",
+              "value": "PASSPORT"
+            },
+            "flagged": true,
+            "note": "Glare over the number"
+          },
+          {
+            "key": "driving-licence",
+            "label": "Driving licence",
+            "hint": "Both sides. Non-expired.",
+            "field": "govIdFrontUrl",
+            "source": "library",
+            "sets": {
+              "field": "govIdType",
+              "value": "DRIVING_LICENCE"
+            },
+            "flagged": true,
+            "note": "Glare over the number"
+          }
+        ],
+        "cta": "Use this photo"
+      },
+      {
+        "key": "address-proof",
+        "kind": "capture",
+        "title": "Address proof",
+        "subtitle": "A document showing your current address. Issued in the last three months.",
+        "documents": [
+          {
+            "key": "utility-bill",
+            "label": "Utility bill",
+            "hint": "Electricity, water or gas, in your name",
+            "field": "addressProofUrl",
+            "source": "library",
+            "pdf": true,
+            "sets": {
+              "field": "addressProofType",
+              "value": "UTILITY_BILL"
+            },
+            "flagged": true,
+            "note": "Expired"
+          },
+          {
+            "key": "rent-agreement",
+            "label": "Rent agreement",
+            "hint": "Registered, with your name and the address",
+            "field": "addressProofUrl",
+            "source": "library",
+            "pdf": true,
+            "sets": {
+              "field": "addressProofType",
+              "value": "RENT_AGREEMENT"
+            },
+            "flagged": true,
+            "note": "Expired"
+          },
+          {
+            "key": "bank-statement",
+            "label": "Bank statement",
+            "hint": "First page, with the address",
+            "field": "addressProofUrl",
+            "source": "library",
+            "pdf": true,
+            "sets": {
+              "field": "addressProofType",
+              "value": "BANK_STATEMENT"
+            },
+            "flagged": true,
+            "note": "Expired"
+          }
+        ],
+        "cta": "Upload document"
+      },
+      {
+        "key": "selfie",
+        "kind": "capture",
+        "title": "Selfie verification",
+        "subtitle": "A quick selfie so we can match your ID to you.",
+        "guidance": [
+          {
+            "label": "Position",
+            "hint": "Face centered, both eyes clearly visible"
+          },
+          {
+            "label": "Lighting",
+            "hint": "Bright, no shadows or filters"
+          },
+          {
+            "label": "Match",
+            "hint": "We compare it with your Government ID photo"
+          }
+        ],
+        "documents": [
+          {
+            "key": "selfie",
+            "label": "Your selfie",
+            "hint": "Taken now, with the front camera",
+            "field": "selfieUrl",
+            "source": "camera",
+            "front": true,
+            "flagged": true,
+            "note": "Two documents were unreadable."
+          }
+        ],
+        "cta": "Take selfie"
+      },
+      {
+        "key": "liveness",
+        "kind": "capture",
+        "title": "Record a short video",
+        "subtitle": "A five-second clip of you, so we know the person behind the documents is here.",
+        "guidance": [
+          {
+            "label": "Face",
+            "hint": "Look at the camera, face centred"
+          },
+          {
+            "label": "Say",
+            "hint": "Say your name and the date"
+          },
+          {
+            "label": "Length",
+            "hint": "Five seconds is enough"
+          }
+        ],
+        "documents": [
+          {
+            "key": "liveness-video",
+            "label": "Your video",
+            "hint": "Recorded now, with the front camera",
+            "field": "selfVideoUrl",
+            "source": "camera",
+            "front": true,
+            "video": true,
+            "flagged": true,
+            "note": "Too dark"
+          }
+        ],
+        "cta": "Record video"
+      },
+      {
+        "key": "checklist",
+        "kind": "checklist",
+        "title": "Send the flagged documents again",
+        "subtitle": "Two documents were unreadable.",
+        "cta": "Resubmit for review"
+      }
+    ]
+  },
+  "PUBLISHER:BUSINESS:full": {
+    "party": "PUBLISHER",
+    "accountType": "BUSINESS",
+    "mode": "full",
+    "verification": {
+      "digio": {
+        "available": false,
+        "provider": "DEGRADED",
+        "retryAfter": 300
+      },
+      "liveness": {
+        "required": true,
+        "status": "PENDING"
+      },
+      "kycStatus": "PENDING",
+      "reviewNote": null
+    },
+    "steps": [
+      {
+        "key": "account-type",
+        "kind": "account-type",
+        "title": "Account type"
+      },
+      {
+        "key": "details",
+        "kind": "form",
+        "title": "Publisher details",
+        "subtitle": "Legal name, PAN, and GSTIN as printed on your documents"
+      },
+      {
+        "key": "business",
+        "kind": "form",
+        "title": "Business information",
+        "subtitle": "Registered name, GSTIN and where it is"
+      },
+      {
+        "key": "contact",
+        "kind": "form",
+        "title": "Contact person",
+        "subtitle": "Who ADX should reach about this account"
+      },
+      {
+        "key": "kyc-intro",
+        "kind": "kyc-intro",
+        "title": "Verify your identity",
+        "subtitle": "Five quick uploads. Encrypted, used only for verification.",
+        "bands": [
+          {
+            "label": "Identity",
+            "value": "Aadhaar · Passport · DL"
+          },
+          {
+            "label": "Tax",
+            "value": "PAN card"
+          },
+          {
+            "label": "Address",
+            "value": "Utility bill · Rent agreement"
+          },
+          {
+            "label": "Match",
+            "value": "Live selfie"
+          }
+        ],
+        "cta": "Start verification"
+      },
+      {
+        "key": "gov-id-front",
+        "kind": "capture",
+        "title": "Government ID · Front",
+        "subtitle": "Aadhaar, passport, or driving licence. Clear photo, no glare.",
+        "documents": [
+          {
+            "key": "aadhaar",
+            "label": "Aadhaar card",
+            "hint": "Front face with 12-digit number visible",
+            "field": "govIdFrontUrl",
+            "source": "library",
+            "sets": {
+              "field": "govIdType",
+              "value": "AADHAAR"
+            }
+          },
+          {
+            "key": "passport",
+            "label": "Passport",
+            "hint": "Bio-page. Non-expired.",
+            "field": "govIdFrontUrl",
+            "source": "library",
+            "sets": {
+              "field": "govIdType",
+              "value": "PASSPORT"
+            }
+          },
+          {
+            "key": "driving-licence",
+            "label": "Driving licence",
+            "hint": "Both sides. Non-expired.",
+            "field": "govIdFrontUrl",
+            "source": "library",
+            "sets": {
+              "field": "govIdType",
+              "value": "DRIVING_LICENCE"
+            }
+          }
+        ],
+        "cta": "Use this photo"
+      },
+      {
+        "key": "gov-id-back",
+        "kind": "capture",
+        "title": "Government ID · Back",
+        "subtitle": "The reverse of the same document. Address side, all corners visible.",
+        "documents": [
+          {
+            "key": "aadhaar-back",
+            "label": "Aadhaar card",
+            "hint": "Back face with the address",
+            "field": "govIdBackUrl",
+            "source": "library",
+            "onlyWhen": {
+              "field": "govIdType",
+              "value": "AADHAAR"
+            }
+          },
+          {
+            "key": "passport-back",
+            "label": "Passport",
+            "hint": "Not applicable — back not required",
+            "field": "govIdBackUrl",
+            "source": "library",
+            "inert": true,
+            "onlyWhen": {
+              "field": "govIdType",
+              "value": "PASSPORT"
+            }
+          },
+          {
+            "key": "driving-licence-back",
+            "label": "Driving licence",
+            "hint": "Back face, all corners visible",
+            "field": "govIdBackUrl",
+            "source": "library",
+            "onlyWhen": {
+              "field": "govIdType",
+              "value": "DRIVING_LICENCE"
+            }
+          }
+        ],
+        "skippableWhen": {
+          "field": "govIdType",
+          "value": "PASSPORT"
+        },
+        "cta": "Use this photo"
+      },
+      {
+        "key": "pan",
+        "kind": "capture",
+        "title": "PAN card",
+        "subtitle": "Photo of your PAN card. All four corners visible.",
+        "text": {
+          "field": "panNumber",
+          "label": "PAN number",
+          "hint": "10-character alphanumeric",
+          "pattern": "^[A-Z]{5}[0-9]{4}[A-Z]$",
+          "maxLength": 10
+        },
+        "documents": [
+          {
+            "key": "pan-photo",
+            "label": "Photograph",
+            "hint": "Clear and non-obscured",
+            "field": "panFrontUrl",
+            "source": "library"
+          },
+          {
+            "key": "pan-signature",
+            "label": "Signature",
+            "hint": "Bottom-right, matching your signed documents",
+            "field": "panSignatureUrl",
+            "source": "library"
+          }
+        ],
+        "cta": "Use this photo"
+      },
+      {
+        "key": "address-proof",
+        "kind": "capture",
+        "title": "Address proof",
+        "subtitle": "A document showing your current address. Issued in the last three months.",
+        "documents": [
+          {
+            "key": "utility-bill",
+            "label": "Utility bill",
+            "hint": "Electricity, water or gas, in your name",
+            "field": "addressProofUrl",
+            "source": "library",
+            "pdf": true,
+            "sets": {
+              "field": "addressProofType",
+              "value": "UTILITY_BILL"
+            }
+          },
+          {
+            "key": "rent-agreement",
+            "label": "Rent agreement",
+            "hint": "Registered, with your name and the address",
+            "field": "addressProofUrl",
+            "source": "library",
+            "pdf": true,
+            "sets": {
+              "field": "addressProofType",
+              "value": "RENT_AGREEMENT"
+            }
+          },
+          {
+            "key": "bank-statement",
+            "label": "Bank statement",
+            "hint": "First page, with the address",
+            "field": "addressProofUrl",
+            "source": "library",
+            "pdf": true,
+            "sets": {
+              "field": "addressProofType",
+              "value": "BANK_STATEMENT"
+            }
+          }
+        ],
+        "cta": "Upload document"
+      },
+      {
+        "key": "selfie",
+        "kind": "capture",
+        "title": "Selfie verification",
+        "subtitle": "A quick selfie so we can match your ID to you.",
+        "guidance": [
+          {
+            "label": "Position",
+            "hint": "Face centered, both eyes clearly visible"
+          },
+          {
+            "label": "Lighting",
+            "hint": "Bright, no shadows or filters"
+          },
+          {
+            "label": "Match",
+            "hint": "We compare it with your Government ID photo"
+          }
+        ],
+        "documents": [
+          {
+            "key": "selfie",
+            "label": "Your selfie",
+            "hint": "Taken now, with the front camera",
+            "field": "selfieUrl",
+            "source": "camera",
+            "front": true
+          }
+        ],
+        "cta": "Take selfie"
+      },
+      {
+        "key": "liveness",
+        "kind": "capture",
+        "title": "Record a short video",
+        "subtitle": "A five-second clip of you, so we know the person behind the documents is here.",
+        "guidance": [
+          {
+            "label": "Face",
+            "hint": "Look at the camera, face centred"
+          },
+          {
+            "label": "Say",
+            "hint": "Say your name and the date"
+          },
+          {
+            "label": "Length",
+            "hint": "Five seconds is enough"
+          }
+        ],
+        "documents": [
+          {
+            "key": "liveness-video",
+            "label": "Your video",
+            "hint": "Recorded now, with the front camera",
+            "field": "selfVideoUrl",
+            "source": "camera",
+            "front": true,
+            "video": true
+          }
+        ],
+        "cta": "Record video"
+      },
+      {
+        "key": "checklist",
+        "kind": "checklist",
+        "title": "Review your KYC",
+        "subtitle": "Check everything before submitting. You can retake any document.",
+        "cta": "Submit for review"
+      }
+    ]
+  },
+  "PUBLISHER:BUSINESS:partial": {
+    "party": "PUBLISHER",
+    "accountType": "BUSINESS",
+    "mode": "partial",
+    "verification": {
+      "digio": {
+        "available": true,
+        "provider": "DIGIO",
+        "retryAfter": null
+      },
+      "liveness": {
+        "required": true,
+        "status": "REJECTED"
+      },
+      "kycStatus": "NEEDS_INFO",
+      "reviewNote": "Two documents were unreadable."
+    },
+    "steps": [
+      {
+        "key": "gov-id-front",
+        "kind": "capture",
+        "title": "Government ID · Front",
+        "subtitle": "Aadhaar, passport, or driving licence. Clear photo, no glare.",
+        "documents": [
+          {
+            "key": "aadhaar",
+            "label": "Aadhaar card",
+            "hint": "Front face with 12-digit number visible",
+            "field": "govIdFrontUrl",
+            "source": "library",
+            "sets": {
+              "field": "govIdType",
+              "value": "AADHAAR"
+            },
+            "flagged": true,
+            "note": "Glare over the number"
+          },
+          {
+            "key": "passport",
+            "label": "Passport",
+            "hint": "Bio-page. Non-expired.",
+            "field": "govIdFrontUrl",
+            "source": "library",
+            "sets": {
+              "field": "govIdType",
+              "value": "PASSPORT"
+            },
+            "flagged": true,
+            "note": "Glare over the number"
+          },
+          {
+            "key": "driving-licence",
+            "label": "Driving licence",
+            "hint": "Both sides. Non-expired.",
+            "field": "govIdFrontUrl",
+            "source": "library",
+            "sets": {
+              "field": "govIdType",
+              "value": "DRIVING_LICENCE"
+            },
+            "flagged": true,
+            "note": "Glare over the number"
+          }
+        ],
+        "cta": "Use this photo"
+      },
+      {
+        "key": "address-proof",
+        "kind": "capture",
+        "title": "Address proof",
+        "subtitle": "A document showing your current address. Issued in the last three months.",
+        "documents": [
+          {
+            "key": "utility-bill",
+            "label": "Utility bill",
+            "hint": "Electricity, water or gas, in your name",
+            "field": "addressProofUrl",
+            "source": "library",
+            "pdf": true,
+            "sets": {
+              "field": "addressProofType",
+              "value": "UTILITY_BILL"
+            },
+            "flagged": true,
+            "note": "Expired"
+          },
+          {
+            "key": "rent-agreement",
+            "label": "Rent agreement",
+            "hint": "Registered, with your name and the address",
+            "field": "addressProofUrl",
+            "source": "library",
+            "pdf": true,
+            "sets": {
+              "field": "addressProofType",
+              "value": "RENT_AGREEMENT"
+            },
+            "flagged": true,
+            "note": "Expired"
+          },
+          {
+            "key": "bank-statement",
+            "label": "Bank statement",
+            "hint": "First page, with the address",
+            "field": "addressProofUrl",
+            "source": "library",
+            "pdf": true,
+            "sets": {
+              "field": "addressProofType",
+              "value": "BANK_STATEMENT"
+            },
+            "flagged": true,
+            "note": "Expired"
+          }
+        ],
+        "cta": "Upload document"
+      },
+      {
+        "key": "selfie",
+        "kind": "capture",
+        "title": "Selfie verification",
+        "subtitle": "A quick selfie so we can match your ID to you.",
+        "guidance": [
+          {
+            "label": "Position",
+            "hint": "Face centered, both eyes clearly visible"
+          },
+          {
+            "label": "Lighting",
+            "hint": "Bright, no shadows or filters"
+          },
+          {
+            "label": "Match",
+            "hint": "We compare it with your Government ID photo"
+          }
+        ],
+        "documents": [
+          {
+            "key": "selfie",
+            "label": "Your selfie",
+            "hint": "Taken now, with the front camera",
+            "field": "selfieUrl",
+            "source": "camera",
+            "front": true,
+            "flagged": true,
+            "note": "Two documents were unreadable."
+          }
+        ],
+        "cta": "Take selfie"
+      },
+      {
+        "key": "liveness",
+        "kind": "capture",
+        "title": "Record a short video",
+        "subtitle": "A five-second clip of you, so we know the person behind the documents is here.",
+        "guidance": [
+          {
+            "label": "Face",
+            "hint": "Look at the camera, face centred"
+          },
+          {
+            "label": "Say",
+            "hint": "Say your name and the date"
+          },
+          {
+            "label": "Length",
+            "hint": "Five seconds is enough"
+          }
+        ],
+        "documents": [
+          {
+            "key": "liveness-video",
+            "label": "Your video",
+            "hint": "Recorded now, with the front camera",
+            "field": "selfVideoUrl",
+            "source": "camera",
+            "front": true,
+            "video": true,
+            "flagged": true,
+            "note": "Too dark"
+          }
+        ],
+        "cta": "Record video"
+      },
+      {
+        "key": "checklist",
+        "kind": "checklist",
+        "title": "Send the flagged documents again",
+        "subtitle": "Two documents were unreadable.",
+        "cta": "Resubmit for review"
+      }
+    ]
+  },
+  "PUBLISHER:ORGANISATION:full": {
+    "party": "PUBLISHER",
+    "accountType": "ORGANISATION",
+    "mode": "full",
+    "verification": {
+      "digio": {
+        "available": false,
+        "provider": "DEGRADED",
+        "retryAfter": 300
+      },
+      "liveness": {
+        "required": true,
+        "status": "PENDING"
+      },
+      "kycStatus": "PENDING",
+      "reviewNote": null
+    },
+    "steps": [
+      {
+        "key": "account-type",
+        "kind": "account-type",
+        "title": "Account type"
+      },
+      {
+        "key": "details",
+        "kind": "form",
+        "title": "Publisher details",
+        "subtitle": "Legal name, PAN, and GSTIN as printed on your documents"
+      },
+      {
+        "key": "business",
+        "kind": "form",
+        "title": "Organisation information",
+        "subtitle": "Registered name, GSTIN and where it is"
+      },
+      {
+        "key": "contact",
+        "kind": "form",
+        "title": "Contact person",
+        "subtitle": "Who ADX should reach about this account"
+      },
+      {
+        "key": "kyc-intro",
+        "kind": "kyc-intro",
+        "title": "Verify your identity",
+        "subtitle": "Five quick uploads. Encrypted, used only for verification.",
+        "bands": [
+          {
+            "label": "Identity",
+            "value": "Aadhaar · Passport · DL"
+          },
+          {
+            "label": "Tax",
+            "value": "PAN card"
+          },
+          {
+            "label": "Address",
+            "value": "Utility bill · Rent agreement"
+          },
+          {
+            "label": "Match",
+            "value": "Live selfie"
+          }
+        ],
+        "cta": "Start verification"
+      },
+      {
+        "key": "gov-id-front",
+        "kind": "capture",
+        "title": "Government ID · Front",
+        "subtitle": "Aadhaar, passport, or driving licence. Clear photo, no glare.",
+        "documents": [
+          {
+            "key": "aadhaar",
+            "label": "Aadhaar card",
+            "hint": "Front face with 12-digit number visible",
+            "field": "govIdFrontUrl",
+            "source": "library",
+            "sets": {
+              "field": "govIdType",
+              "value": "AADHAAR"
+            }
+          },
+          {
+            "key": "passport",
+            "label": "Passport",
+            "hint": "Bio-page. Non-expired.",
+            "field": "govIdFrontUrl",
+            "source": "library",
+            "sets": {
+              "field": "govIdType",
+              "value": "PASSPORT"
+            }
+          },
+          {
+            "key": "driving-licence",
+            "label": "Driving licence",
+            "hint": "Both sides. Non-expired.",
+            "field": "govIdFrontUrl",
+            "source": "library",
+            "sets": {
+              "field": "govIdType",
+              "value": "DRIVING_LICENCE"
+            }
+          }
+        ],
+        "cta": "Use this photo"
+      },
+      {
+        "key": "gov-id-back",
+        "kind": "capture",
+        "title": "Government ID · Back",
+        "subtitle": "The reverse of the same document. Address side, all corners visible.",
+        "documents": [
+          {
+            "key": "aadhaar-back",
+            "label": "Aadhaar card",
+            "hint": "Back face with the address",
+            "field": "govIdBackUrl",
+            "source": "library",
+            "onlyWhen": {
+              "field": "govIdType",
+              "value": "AADHAAR"
+            }
+          },
+          {
+            "key": "passport-back",
+            "label": "Passport",
+            "hint": "Not applicable — back not required",
+            "field": "govIdBackUrl",
+            "source": "library",
+            "inert": true,
+            "onlyWhen": {
+              "field": "govIdType",
+              "value": "PASSPORT"
+            }
+          },
+          {
+            "key": "driving-licence-back",
+            "label": "Driving licence",
+            "hint": "Back face, all corners visible",
+            "field": "govIdBackUrl",
+            "source": "library",
+            "onlyWhen": {
+              "field": "govIdType",
+              "value": "DRIVING_LICENCE"
+            }
+          }
+        ],
+        "skippableWhen": {
+          "field": "govIdType",
+          "value": "PASSPORT"
+        },
+        "cta": "Use this photo"
+      },
+      {
+        "key": "pan",
+        "kind": "capture",
+        "title": "PAN card",
+        "subtitle": "Photo of your PAN card. All four corners visible.",
+        "text": {
+          "field": "panNumber",
+          "label": "PAN number",
+          "hint": "10-character alphanumeric",
+          "pattern": "^[A-Z]{5}[0-9]{4}[A-Z]$",
+          "maxLength": 10
+        },
+        "documents": [
+          {
+            "key": "pan-photo",
+            "label": "Photograph",
+            "hint": "Clear and non-obscured",
+            "field": "panFrontUrl",
+            "source": "library"
+          },
+          {
+            "key": "pan-signature",
+            "label": "Signature",
+            "hint": "Bottom-right, matching your signed documents",
+            "field": "panSignatureUrl",
+            "source": "library"
+          }
+        ],
+        "cta": "Use this photo"
+      },
+      {
+        "key": "address-proof",
+        "kind": "capture",
+        "title": "Address proof",
+        "subtitle": "A document showing your current address. Issued in the last three months.",
+        "documents": [
+          {
+            "key": "utility-bill",
+            "label": "Utility bill",
+            "hint": "Electricity, water or gas, in your name",
+            "field": "addressProofUrl",
+            "source": "library",
+            "pdf": true,
+            "sets": {
+              "field": "addressProofType",
+              "value": "UTILITY_BILL"
+            }
+          },
+          {
+            "key": "rent-agreement",
+            "label": "Rent agreement",
+            "hint": "Registered, with your name and the address",
+            "field": "addressProofUrl",
+            "source": "library",
+            "pdf": true,
+            "sets": {
+              "field": "addressProofType",
+              "value": "RENT_AGREEMENT"
+            }
+          },
+          {
+            "key": "bank-statement",
+            "label": "Bank statement",
+            "hint": "First page, with the address",
+            "field": "addressProofUrl",
+            "source": "library",
+            "pdf": true,
+            "sets": {
+              "field": "addressProofType",
+              "value": "BANK_STATEMENT"
+            }
+          }
+        ],
+        "cta": "Upload document"
+      },
+      {
+        "key": "selfie",
+        "kind": "capture",
+        "title": "Selfie verification",
+        "subtitle": "A quick selfie so we can match your ID to you.",
+        "guidance": [
+          {
+            "label": "Position",
+            "hint": "Face centered, both eyes clearly visible"
+          },
+          {
+            "label": "Lighting",
+            "hint": "Bright, no shadows or filters"
+          },
+          {
+            "label": "Match",
+            "hint": "We compare it with your Government ID photo"
+          }
+        ],
+        "documents": [
+          {
+            "key": "selfie",
+            "label": "Your selfie",
+            "hint": "Taken now, with the front camera",
+            "field": "selfieUrl",
+            "source": "camera",
+            "front": true
+          }
+        ],
+        "cta": "Take selfie"
+      },
+      {
+        "key": "liveness",
+        "kind": "capture",
+        "title": "Record a short video",
+        "subtitle": "A five-second clip of you, so we know the person behind the documents is here.",
+        "guidance": [
+          {
+            "label": "Face",
+            "hint": "Look at the camera, face centred"
+          },
+          {
+            "label": "Say",
+            "hint": "Say your name and the date"
+          },
+          {
+            "label": "Length",
+            "hint": "Five seconds is enough"
+          }
+        ],
+        "documents": [
+          {
+            "key": "liveness-video",
+            "label": "Your video",
+            "hint": "Recorded now, with the front camera",
+            "field": "selfVideoUrl",
+            "source": "camera",
+            "front": true,
+            "video": true
+          }
+        ],
+        "cta": "Record video"
+      },
+      {
+        "key": "checklist",
+        "kind": "checklist",
+        "title": "Review your KYC",
+        "subtitle": "Check everything before submitting. You can retake any document.",
+        "cta": "Submit for review"
+      }
+    ]
+  },
+  "PUBLISHER:ORGANISATION:partial": {
+    "party": "PUBLISHER",
+    "accountType": "ORGANISATION",
+    "mode": "partial",
+    "verification": {
+      "digio": {
+        "available": true,
+        "provider": "DIGIO",
+        "retryAfter": null
+      },
+      "liveness": {
+        "required": true,
+        "status": "REJECTED"
+      },
+      "kycStatus": "NEEDS_INFO",
+      "reviewNote": "Two documents were unreadable."
+    },
+    "steps": [
+      {
+        "key": "gov-id-front",
+        "kind": "capture",
+        "title": "Government ID · Front",
+        "subtitle": "Aadhaar, passport, or driving licence. Clear photo, no glare.",
+        "documents": [
+          {
+            "key": "aadhaar",
+            "label": "Aadhaar card",
+            "hint": "Front face with 12-digit number visible",
+            "field": "govIdFrontUrl",
+            "source": "library",
+            "sets": {
+              "field": "govIdType",
+              "value": "AADHAAR"
+            },
+            "flagged": true,
+            "note": "Glare over the number"
+          },
+          {
+            "key": "passport",
+            "label": "Passport",
+            "hint": "Bio-page. Non-expired.",
+            "field": "govIdFrontUrl",
+            "source": "library",
+            "sets": {
+              "field": "govIdType",
+              "value": "PASSPORT"
+            },
+            "flagged": true,
+            "note": "Glare over the number"
+          },
+          {
+            "key": "driving-licence",
+            "label": "Driving licence",
+            "hint": "Both sides. Non-expired.",
+            "field": "govIdFrontUrl",
+            "source": "library",
+            "sets": {
+              "field": "govIdType",
+              "value": "DRIVING_LICENCE"
+            },
+            "flagged": true,
+            "note": "Glare over the number"
+          }
+        ],
+        "cta": "Use this photo"
+      },
+      {
+        "key": "address-proof",
+        "kind": "capture",
+        "title": "Address proof",
+        "subtitle": "A document showing your current address. Issued in the last three months.",
+        "documents": [
+          {
+            "key": "utility-bill",
+            "label": "Utility bill",
+            "hint": "Electricity, water or gas, in your name",
+            "field": "addressProofUrl",
+            "source": "library",
+            "pdf": true,
+            "sets": {
+              "field": "addressProofType",
+              "value": "UTILITY_BILL"
+            },
+            "flagged": true,
+            "note": "Expired"
+          },
+          {
+            "key": "rent-agreement",
+            "label": "Rent agreement",
+            "hint": "Registered, with your name and the address",
+            "field": "addressProofUrl",
+            "source": "library",
+            "pdf": true,
+            "sets": {
+              "field": "addressProofType",
+              "value": "RENT_AGREEMENT"
+            },
+            "flagged": true,
+            "note": "Expired"
+          },
+          {
+            "key": "bank-statement",
+            "label": "Bank statement",
+            "hint": "First page, with the address",
+            "field": "addressProofUrl",
+            "source": "library",
+            "pdf": true,
+            "sets": {
+              "field": "addressProofType",
+              "value": "BANK_STATEMENT"
+            },
+            "flagged": true,
+            "note": "Expired"
+          }
+        ],
+        "cta": "Upload document"
+      },
+      {
+        "key": "selfie",
+        "kind": "capture",
+        "title": "Selfie verification",
+        "subtitle": "A quick selfie so we can match your ID to you.",
+        "guidance": [
+          {
+            "label": "Position",
+            "hint": "Face centered, both eyes clearly visible"
+          },
+          {
+            "label": "Lighting",
+            "hint": "Bright, no shadows or filters"
+          },
+          {
+            "label": "Match",
+            "hint": "We compare it with your Government ID photo"
+          }
+        ],
+        "documents": [
+          {
+            "key": "selfie",
+            "label": "Your selfie",
+            "hint": "Taken now, with the front camera",
+            "field": "selfieUrl",
+            "source": "camera",
+            "front": true,
+            "flagged": true,
+            "note": "Two documents were unreadable."
+          }
+        ],
+        "cta": "Take selfie"
+      },
+      {
+        "key": "liveness",
+        "kind": "capture",
+        "title": "Record a short video",
+        "subtitle": "A five-second clip of you, so we know the person behind the documents is here.",
+        "guidance": [
+          {
+            "label": "Face",
+            "hint": "Look at the camera, face centred"
+          },
+          {
+            "label": "Say",
+            "hint": "Say your name and the date"
+          },
+          {
+            "label": "Length",
+            "hint": "Five seconds is enough"
+          }
+        ],
+        "documents": [
+          {
+            "key": "liveness-video",
+            "label": "Your video",
+            "hint": "Recorded now, with the front camera",
+            "field": "selfVideoUrl",
+            "source": "camera",
+            "front": true,
+            "video": true,
+            "flagged": true,
+            "note": "Too dark"
+          }
+        ],
+        "cta": "Record video"
+      },
+      {
+        "key": "checklist",
+        "kind": "checklist",
+        "title": "Send the flagged documents again",
+        "subtitle": "Two documents were unreadable.",
+        "cta": "Resubmit for review"
+      }
+    ]
+  },
+  "ADVERTISER:INDIVIDUAL:full": {
+    "party": "ADVERTISER",
+    "accountType": "INDIVIDUAL",
+    "mode": "full",
+    "verification": {
+      "digio": {
+        "available": false,
+        "provider": "DEGRADED",
+        "retryAfter": 300
+      },
+      "liveness": {
+        "required": true,
+        "status": "PENDING"
+      },
+      "kycStatus": "PENDING",
+      "reviewNote": null
+    },
+    "steps": [
+      {
+        "key": "account-type",
+        "kind": "account-type",
+        "title": "Account type"
+      },
+      {
+        "key": "details",
+        "kind": "form",
+        "title": "Advertiser details",
+        "subtitle": "Legal name, PAN, and GSTIN as printed on your documents"
+      },
+      {
+        "key": "kyc-intro",
+        "kind": "kyc-intro",
+        "title": "Verify your identity",
+        "subtitle": "Five quick uploads. Encrypted, used only for verification.",
+        "bands": [
+          {
+            "label": "Identity",
+            "value": "Aadhaar · Passport · DL"
+          },
+          {
+            "label": "Tax",
+            "value": "PAN card"
+          },
+          {
+            "label": "Address",
+            "value": "Utility bill · Rent agreement"
+          },
+          {
+            "label": "Match",
+            "value": "Live selfie"
+          }
+        ],
+        "cta": "Start verification"
+      },
+      {
+        "key": "gov-id-front",
+        "kind": "capture",
+        "title": "Government ID · Front",
+        "subtitle": "Aadhaar, passport, or driving licence. Clear photo, no glare.",
+        "documents": [
+          {
+            "key": "aadhaar",
+            "label": "Aadhaar card",
+            "hint": "Front face with 12-digit number visible",
+            "field": "govIdFrontUrl",
+            "source": "library",
+            "sets": {
+              "field": "govIdType",
+              "value": "AADHAAR"
+            }
+          },
+          {
+            "key": "passport",
+            "label": "Passport",
+            "hint": "Bio-page. Non-expired.",
+            "field": "govIdFrontUrl",
+            "source": "library",
+            "sets": {
+              "field": "govIdType",
+              "value": "PASSPORT"
+            }
+          },
+          {
+            "key": "driving-licence",
+            "label": "Driving licence",
+            "hint": "Both sides. Non-expired.",
+            "field": "govIdFrontUrl",
+            "source": "library",
+            "sets": {
+              "field": "govIdType",
+              "value": "DRIVING_LICENCE"
+            }
+          }
+        ],
+        "cta": "Use this photo"
+      },
+      {
+        "key": "gov-id-back",
+        "kind": "capture",
+        "title": "Government ID · Back",
+        "subtitle": "The reverse of the same document. Address side, all corners visible.",
+        "documents": [
+          {
+            "key": "aadhaar-back",
+            "label": "Aadhaar card",
+            "hint": "Back face with the address",
+            "field": "govIdBackUrl",
+            "source": "library",
+            "onlyWhen": {
+              "field": "govIdType",
+              "value": "AADHAAR"
+            }
+          },
+          {
+            "key": "passport-back",
+            "label": "Passport",
+            "hint": "Not applicable — back not required",
+            "field": "govIdBackUrl",
+            "source": "library",
+            "inert": true,
+            "onlyWhen": {
+              "field": "govIdType",
+              "value": "PASSPORT"
+            }
+          },
+          {
+            "key": "driving-licence-back",
+            "label": "Driving licence",
+            "hint": "Back face, all corners visible",
+            "field": "govIdBackUrl",
+            "source": "library",
+            "onlyWhen": {
+              "field": "govIdType",
+              "value": "DRIVING_LICENCE"
+            }
+          }
+        ],
+        "skippableWhen": {
+          "field": "govIdType",
+          "value": "PASSPORT"
+        },
+        "cta": "Use this photo"
+      },
+      {
+        "key": "pan",
+        "kind": "capture",
+        "title": "PAN card",
+        "subtitle": "Photo of your PAN card. All four corners visible.",
+        "text": {
+          "field": "panNumber",
+          "label": "PAN number",
+          "hint": "10-character alphanumeric",
+          "pattern": "^[A-Z]{5}[0-9]{4}[A-Z]$",
+          "maxLength": 10
+        },
+        "documents": [
+          {
+            "key": "pan-photo",
+            "label": "Photograph",
+            "hint": "Clear and non-obscured",
+            "field": "panFrontUrl",
+            "source": "library"
+          },
+          {
+            "key": "pan-signature",
+            "label": "Signature",
+            "hint": "Bottom-right, matching your signed documents",
+            "field": "panSignatureUrl",
+            "source": "library"
+          }
+        ],
+        "cta": "Use this photo"
+      },
+      {
+        "key": "address-proof",
+        "kind": "capture",
+        "title": "Address proof",
+        "subtitle": "A document showing your current address. Issued in the last three months.",
+        "documents": [
+          {
+            "key": "utility-bill",
+            "label": "Utility bill",
+            "hint": "Electricity, water or gas, in your name",
+            "field": "addressProofUrl",
+            "source": "library",
+            "pdf": true,
+            "sets": {
+              "field": "addressProofType",
+              "value": "UTILITY_BILL"
+            }
+          },
+          {
+            "key": "rent-agreement",
+            "label": "Rent agreement",
+            "hint": "Registered, with your name and the address",
+            "field": "addressProofUrl",
+            "source": "library",
+            "pdf": true,
+            "sets": {
+              "field": "addressProofType",
+              "value": "RENT_AGREEMENT"
+            }
+          },
+          {
+            "key": "bank-statement",
+            "label": "Bank statement",
+            "hint": "First page, with the address",
+            "field": "addressProofUrl",
+            "source": "library",
+            "pdf": true,
+            "sets": {
+              "field": "addressProofType",
+              "value": "BANK_STATEMENT"
+            }
+          }
+        ],
+        "cta": "Upload document"
+      },
+      {
+        "key": "selfie",
+        "kind": "capture",
+        "title": "Selfie verification",
+        "subtitle": "A quick selfie so we can match your ID to you.",
+        "guidance": [
+          {
+            "label": "Position",
+            "hint": "Face centered, both eyes clearly visible"
+          },
+          {
+            "label": "Lighting",
+            "hint": "Bright, no shadows or filters"
+          },
+          {
+            "label": "Match",
+            "hint": "We compare it with your Government ID photo"
+          }
+        ],
+        "documents": [
+          {
+            "key": "selfie",
+            "label": "Your selfie",
+            "hint": "Taken now, with the front camera",
+            "field": "selfieUrl",
+            "source": "camera",
+            "front": true
+          }
+        ],
+        "cta": "Take selfie"
+      },
+      {
+        "key": "liveness",
+        "kind": "capture",
+        "title": "Record a short video",
+        "subtitle": "A five-second clip of you, so we know the person behind the documents is here.",
+        "guidance": [
+          {
+            "label": "Face",
+            "hint": "Look at the camera, face centred"
+          },
+          {
+            "label": "Say",
+            "hint": "Say your name and the date"
+          },
+          {
+            "label": "Length",
+            "hint": "Five seconds is enough"
+          }
+        ],
+        "documents": [
+          {
+            "key": "liveness-video",
+            "label": "Your video",
+            "hint": "Recorded now, with the front camera",
+            "field": "selfVideoUrl",
+            "source": "camera",
+            "front": true,
+            "video": true
+          }
+        ],
+        "cta": "Record video"
+      },
+      {
+        "key": "checklist",
+        "kind": "checklist",
+        "title": "Review your KYC",
+        "subtitle": "Check everything before submitting. You can retake any document.",
+        "cta": "Submit for review"
+      }
+    ]
+  },
+  "ADVERTISER:INDIVIDUAL:partial": {
+    "party": "ADVERTISER",
+    "accountType": "INDIVIDUAL",
+    "mode": "partial",
+    "verification": {
+      "digio": {
+        "available": true,
+        "provider": "DIGIO",
+        "retryAfter": null
+      },
+      "liveness": {
+        "required": true,
+        "status": "REJECTED"
+      },
+      "kycStatus": "NEEDS_INFO",
+      "reviewNote": "Two documents were unreadable."
+    },
+    "steps": [
+      {
+        "key": "gov-id-front",
+        "kind": "capture",
+        "title": "Government ID · Front",
+        "subtitle": "Aadhaar, passport, or driving licence. Clear photo, no glare.",
+        "documents": [
+          {
+            "key": "aadhaar",
+            "label": "Aadhaar card",
+            "hint": "Front face with 12-digit number visible",
+            "field": "govIdFrontUrl",
+            "source": "library",
+            "sets": {
+              "field": "govIdType",
+              "value": "AADHAAR"
+            },
+            "flagged": true,
+            "note": "Glare over the number"
+          },
+          {
+            "key": "passport",
+            "label": "Passport",
+            "hint": "Bio-page. Non-expired.",
+            "field": "govIdFrontUrl",
+            "source": "library",
+            "sets": {
+              "field": "govIdType",
+              "value": "PASSPORT"
+            },
+            "flagged": true,
+            "note": "Glare over the number"
+          },
+          {
+            "key": "driving-licence",
+            "label": "Driving licence",
+            "hint": "Both sides. Non-expired.",
+            "field": "govIdFrontUrl",
+            "source": "library",
+            "sets": {
+              "field": "govIdType",
+              "value": "DRIVING_LICENCE"
+            },
+            "flagged": true,
+            "note": "Glare over the number"
+          }
+        ],
+        "cta": "Use this photo"
+      },
+      {
+        "key": "address-proof",
+        "kind": "capture",
+        "title": "Address proof",
+        "subtitle": "A document showing your current address. Issued in the last three months.",
+        "documents": [
+          {
+            "key": "utility-bill",
+            "label": "Utility bill",
+            "hint": "Electricity, water or gas, in your name",
+            "field": "addressProofUrl",
+            "source": "library",
+            "pdf": true,
+            "sets": {
+              "field": "addressProofType",
+              "value": "UTILITY_BILL"
+            },
+            "flagged": true,
+            "note": "Expired"
+          },
+          {
+            "key": "rent-agreement",
+            "label": "Rent agreement",
+            "hint": "Registered, with your name and the address",
+            "field": "addressProofUrl",
+            "source": "library",
+            "pdf": true,
+            "sets": {
+              "field": "addressProofType",
+              "value": "RENT_AGREEMENT"
+            },
+            "flagged": true,
+            "note": "Expired"
+          },
+          {
+            "key": "bank-statement",
+            "label": "Bank statement",
+            "hint": "First page, with the address",
+            "field": "addressProofUrl",
+            "source": "library",
+            "pdf": true,
+            "sets": {
+              "field": "addressProofType",
+              "value": "BANK_STATEMENT"
+            },
+            "flagged": true,
+            "note": "Expired"
+          }
+        ],
+        "cta": "Upload document"
+      },
+      {
+        "key": "selfie",
+        "kind": "capture",
+        "title": "Selfie verification",
+        "subtitle": "A quick selfie so we can match your ID to you.",
+        "guidance": [
+          {
+            "label": "Position",
+            "hint": "Face centered, both eyes clearly visible"
+          },
+          {
+            "label": "Lighting",
+            "hint": "Bright, no shadows or filters"
+          },
+          {
+            "label": "Match",
+            "hint": "We compare it with your Government ID photo"
+          }
+        ],
+        "documents": [
+          {
+            "key": "selfie",
+            "label": "Your selfie",
+            "hint": "Taken now, with the front camera",
+            "field": "selfieUrl",
+            "source": "camera",
+            "front": true,
+            "flagged": true,
+            "note": "Two documents were unreadable."
+          }
+        ],
+        "cta": "Take selfie"
+      },
+      {
+        "key": "liveness",
+        "kind": "capture",
+        "title": "Record a short video",
+        "subtitle": "A five-second clip of you, so we know the person behind the documents is here.",
+        "guidance": [
+          {
+            "label": "Face",
+            "hint": "Look at the camera, face centred"
+          },
+          {
+            "label": "Say",
+            "hint": "Say your name and the date"
+          },
+          {
+            "label": "Length",
+            "hint": "Five seconds is enough"
+          }
+        ],
+        "documents": [
+          {
+            "key": "liveness-video",
+            "label": "Your video",
+            "hint": "Recorded now, with the front camera",
+            "field": "selfVideoUrl",
+            "source": "camera",
+            "front": true,
+            "video": true,
+            "flagged": true,
+            "note": "Too dark"
+          }
+        ],
+        "cta": "Record video"
+      },
+      {
+        "key": "checklist",
+        "kind": "checklist",
+        "title": "Send the flagged documents again",
+        "subtitle": "Two documents were unreadable.",
+        "cta": "Resubmit for review"
+      }
+    ]
+  },
+  "ADVERTISER:BUSINESS:full": {
+    "party": "ADVERTISER",
+    "accountType": "BUSINESS",
+    "mode": "full",
+    "verification": {
+      "digio": {
+        "available": false,
+        "provider": "DEGRADED",
+        "retryAfter": 300
+      },
+      "liveness": {
+        "required": true,
+        "status": "PENDING"
+      },
+      "kycStatus": "PENDING",
+      "reviewNote": null
+    },
+    "steps": [
+      {
+        "key": "account-type",
+        "kind": "account-type",
+        "title": "Account type"
+      },
+      {
+        "key": "details",
+        "kind": "form",
+        "title": "Advertiser details",
+        "subtitle": "Legal name, PAN, and GSTIN as printed on your documents"
+      },
+      {
+        "key": "business",
+        "kind": "form",
+        "title": "Business information",
+        "subtitle": "Registered name, GSTIN and where it is"
+      },
+      {
+        "key": "contact",
+        "kind": "form",
+        "title": "Contact person",
+        "subtitle": "Who ADX should reach about this account"
+      },
+      {
+        "key": "kyc-intro",
+        "kind": "kyc-intro",
+        "title": "Verify your identity",
+        "subtitle": "Five quick uploads. Encrypted, used only for verification.",
+        "bands": [
+          {
+            "label": "Identity",
+            "value": "Aadhaar · Passport · DL"
+          },
+          {
+            "label": "Tax",
+            "value": "PAN card"
+          },
+          {
+            "label": "Address",
+            "value": "Utility bill · Rent agreement"
+          },
+          {
+            "label": "Match",
+            "value": "Live selfie"
+          }
+        ],
+        "cta": "Start verification"
+      },
+      {
+        "key": "gov-id-front",
+        "kind": "capture",
+        "title": "Government ID · Front",
+        "subtitle": "Aadhaar, passport, or driving licence. Clear photo, no glare.",
+        "documents": [
+          {
+            "key": "aadhaar",
+            "label": "Aadhaar card",
+            "hint": "Front face with 12-digit number visible",
+            "field": "govIdFrontUrl",
+            "source": "library",
+            "sets": {
+              "field": "govIdType",
+              "value": "AADHAAR"
+            }
+          },
+          {
+            "key": "passport",
+            "label": "Passport",
+            "hint": "Bio-page. Non-expired.",
+            "field": "govIdFrontUrl",
+            "source": "library",
+            "sets": {
+              "field": "govIdType",
+              "value": "PASSPORT"
+            }
+          },
+          {
+            "key": "driving-licence",
+            "label": "Driving licence",
+            "hint": "Both sides. Non-expired.",
+            "field": "govIdFrontUrl",
+            "source": "library",
+            "sets": {
+              "field": "govIdType",
+              "value": "DRIVING_LICENCE"
+            }
+          }
+        ],
+        "cta": "Use this photo"
+      },
+      {
+        "key": "gov-id-back",
+        "kind": "capture",
+        "title": "Government ID · Back",
+        "subtitle": "The reverse of the same document. Address side, all corners visible.",
+        "documents": [
+          {
+            "key": "aadhaar-back",
+            "label": "Aadhaar card",
+            "hint": "Back face with the address",
+            "field": "govIdBackUrl",
+            "source": "library",
+            "onlyWhen": {
+              "field": "govIdType",
+              "value": "AADHAAR"
+            }
+          },
+          {
+            "key": "passport-back",
+            "label": "Passport",
+            "hint": "Not applicable — back not required",
+            "field": "govIdBackUrl",
+            "source": "library",
+            "inert": true,
+            "onlyWhen": {
+              "field": "govIdType",
+              "value": "PASSPORT"
+            }
+          },
+          {
+            "key": "driving-licence-back",
+            "label": "Driving licence",
+            "hint": "Back face, all corners visible",
+            "field": "govIdBackUrl",
+            "source": "library",
+            "onlyWhen": {
+              "field": "govIdType",
+              "value": "DRIVING_LICENCE"
+            }
+          }
+        ],
+        "skippableWhen": {
+          "field": "govIdType",
+          "value": "PASSPORT"
+        },
+        "cta": "Use this photo"
+      },
+      {
+        "key": "pan",
+        "kind": "capture",
+        "title": "PAN card",
+        "subtitle": "Photo of your PAN card. All four corners visible.",
+        "text": {
+          "field": "panNumber",
+          "label": "PAN number",
+          "hint": "10-character alphanumeric",
+          "pattern": "^[A-Z]{5}[0-9]{4}[A-Z]$",
+          "maxLength": 10
+        },
+        "documents": [
+          {
+            "key": "pan-photo",
+            "label": "Photograph",
+            "hint": "Clear and non-obscured",
+            "field": "panFrontUrl",
+            "source": "library"
+          },
+          {
+            "key": "pan-signature",
+            "label": "Signature",
+            "hint": "Bottom-right, matching your signed documents",
+            "field": "panSignatureUrl",
+            "source": "library"
+          }
+        ],
+        "cta": "Use this photo"
+      },
+      {
+        "key": "address-proof",
+        "kind": "capture",
+        "title": "Address proof",
+        "subtitle": "A document showing your current address. Issued in the last three months.",
+        "documents": [
+          {
+            "key": "utility-bill",
+            "label": "Utility bill",
+            "hint": "Electricity, water or gas, in your name",
+            "field": "addressProofUrl",
+            "source": "library",
+            "pdf": true,
+            "sets": {
+              "field": "addressProofType",
+              "value": "UTILITY_BILL"
+            }
+          },
+          {
+            "key": "rent-agreement",
+            "label": "Rent agreement",
+            "hint": "Registered, with your name and the address",
+            "field": "addressProofUrl",
+            "source": "library",
+            "pdf": true,
+            "sets": {
+              "field": "addressProofType",
+              "value": "RENT_AGREEMENT"
+            }
+          },
+          {
+            "key": "bank-statement",
+            "label": "Bank statement",
+            "hint": "First page, with the address",
+            "field": "addressProofUrl",
+            "source": "library",
+            "pdf": true,
+            "sets": {
+              "field": "addressProofType",
+              "value": "BANK_STATEMENT"
+            }
+          }
+        ],
+        "cta": "Upload document"
+      },
+      {
+        "key": "selfie",
+        "kind": "capture",
+        "title": "Selfie verification",
+        "subtitle": "A quick selfie so we can match your ID to you.",
+        "guidance": [
+          {
+            "label": "Position",
+            "hint": "Face centered, both eyes clearly visible"
+          },
+          {
+            "label": "Lighting",
+            "hint": "Bright, no shadows or filters"
+          },
+          {
+            "label": "Match",
+            "hint": "We compare it with your Government ID photo"
+          }
+        ],
+        "documents": [
+          {
+            "key": "selfie",
+            "label": "Your selfie",
+            "hint": "Taken now, with the front camera",
+            "field": "selfieUrl",
+            "source": "camera",
+            "front": true
+          }
+        ],
+        "cta": "Take selfie"
+      },
+      {
+        "key": "liveness",
+        "kind": "capture",
+        "title": "Record a short video",
+        "subtitle": "A five-second clip of you, so we know the person behind the documents is here.",
+        "guidance": [
+          {
+            "label": "Face",
+            "hint": "Look at the camera, face centred"
+          },
+          {
+            "label": "Say",
+            "hint": "Say your name and the date"
+          },
+          {
+            "label": "Length",
+            "hint": "Five seconds is enough"
+          }
+        ],
+        "documents": [
+          {
+            "key": "liveness-video",
+            "label": "Your video",
+            "hint": "Recorded now, with the front camera",
+            "field": "selfVideoUrl",
+            "source": "camera",
+            "front": true,
+            "video": true
+          }
+        ],
+        "cta": "Record video"
+      },
+      {
+        "key": "checklist",
+        "kind": "checklist",
+        "title": "Review your KYC",
+        "subtitle": "Check everything before submitting. You can retake any document.",
+        "cta": "Submit for review"
+      }
+    ]
+  },
+  "ADVERTISER:BUSINESS:partial": {
+    "party": "ADVERTISER",
+    "accountType": "BUSINESS",
+    "mode": "partial",
+    "verification": {
+      "digio": {
+        "available": true,
+        "provider": "DIGIO",
+        "retryAfter": null
+      },
+      "liveness": {
+        "required": true,
+        "status": "REJECTED"
+      },
+      "kycStatus": "NEEDS_INFO",
+      "reviewNote": "Two documents were unreadable."
+    },
+    "steps": [
+      {
+        "key": "gov-id-front",
+        "kind": "capture",
+        "title": "Government ID · Front",
+        "subtitle": "Aadhaar, passport, or driving licence. Clear photo, no glare.",
+        "documents": [
+          {
+            "key": "aadhaar",
+            "label": "Aadhaar card",
+            "hint": "Front face with 12-digit number visible",
+            "field": "govIdFrontUrl",
+            "source": "library",
+            "sets": {
+              "field": "govIdType",
+              "value": "AADHAAR"
+            },
+            "flagged": true,
+            "note": "Glare over the number"
+          },
+          {
+            "key": "passport",
+            "label": "Passport",
+            "hint": "Bio-page. Non-expired.",
+            "field": "govIdFrontUrl",
+            "source": "library",
+            "sets": {
+              "field": "govIdType",
+              "value": "PASSPORT"
+            },
+            "flagged": true,
+            "note": "Glare over the number"
+          },
+          {
+            "key": "driving-licence",
+            "label": "Driving licence",
+            "hint": "Both sides. Non-expired.",
+            "field": "govIdFrontUrl",
+            "source": "library",
+            "sets": {
+              "field": "govIdType",
+              "value": "DRIVING_LICENCE"
+            },
+            "flagged": true,
+            "note": "Glare over the number"
+          }
+        ],
+        "cta": "Use this photo"
+      },
+      {
+        "key": "address-proof",
+        "kind": "capture",
+        "title": "Address proof",
+        "subtitle": "A document showing your current address. Issued in the last three months.",
+        "documents": [
+          {
+            "key": "utility-bill",
+            "label": "Utility bill",
+            "hint": "Electricity, water or gas, in your name",
+            "field": "addressProofUrl",
+            "source": "library",
+            "pdf": true,
+            "sets": {
+              "field": "addressProofType",
+              "value": "UTILITY_BILL"
+            },
+            "flagged": true,
+            "note": "Expired"
+          },
+          {
+            "key": "rent-agreement",
+            "label": "Rent agreement",
+            "hint": "Registered, with your name and the address",
+            "field": "addressProofUrl",
+            "source": "library",
+            "pdf": true,
+            "sets": {
+              "field": "addressProofType",
+              "value": "RENT_AGREEMENT"
+            },
+            "flagged": true,
+            "note": "Expired"
+          },
+          {
+            "key": "bank-statement",
+            "label": "Bank statement",
+            "hint": "First page, with the address",
+            "field": "addressProofUrl",
+            "source": "library",
+            "pdf": true,
+            "sets": {
+              "field": "addressProofType",
+              "value": "BANK_STATEMENT"
+            },
+            "flagged": true,
+            "note": "Expired"
+          }
+        ],
+        "cta": "Upload document"
+      },
+      {
+        "key": "selfie",
+        "kind": "capture",
+        "title": "Selfie verification",
+        "subtitle": "A quick selfie so we can match your ID to you.",
+        "guidance": [
+          {
+            "label": "Position",
+            "hint": "Face centered, both eyes clearly visible"
+          },
+          {
+            "label": "Lighting",
+            "hint": "Bright, no shadows or filters"
+          },
+          {
+            "label": "Match",
+            "hint": "We compare it with your Government ID photo"
+          }
+        ],
+        "documents": [
+          {
+            "key": "selfie",
+            "label": "Your selfie",
+            "hint": "Taken now, with the front camera",
+            "field": "selfieUrl",
+            "source": "camera",
+            "front": true,
+            "flagged": true,
+            "note": "Two documents were unreadable."
+          }
+        ],
+        "cta": "Take selfie"
+      },
+      {
+        "key": "liveness",
+        "kind": "capture",
+        "title": "Record a short video",
+        "subtitle": "A five-second clip of you, so we know the person behind the documents is here.",
+        "guidance": [
+          {
+            "label": "Face",
+            "hint": "Look at the camera, face centred"
+          },
+          {
+            "label": "Say",
+            "hint": "Say your name and the date"
+          },
+          {
+            "label": "Length",
+            "hint": "Five seconds is enough"
+          }
+        ],
+        "documents": [
+          {
+            "key": "liveness-video",
+            "label": "Your video",
+            "hint": "Recorded now, with the front camera",
+            "field": "selfVideoUrl",
+            "source": "camera",
+            "front": true,
+            "video": true,
+            "flagged": true,
+            "note": "Too dark"
+          }
+        ],
+        "cta": "Record video"
+      },
+      {
+        "key": "checklist",
+        "kind": "checklist",
+        "title": "Send the flagged documents again",
+        "subtitle": "Two documents were unreadable.",
+        "cta": "Resubmit for review"
+      }
+    ]
+  },
+  "ADVERTISER:ORGANISATION:full": {
+    "party": "ADVERTISER",
+    "accountType": "ORGANISATION",
+    "mode": "full",
+    "verification": {
+      "digio": {
+        "available": false,
+        "provider": "DEGRADED",
+        "retryAfter": 300
+      },
+      "liveness": {
+        "required": true,
+        "status": "PENDING"
+      },
+      "kycStatus": "PENDING",
+      "reviewNote": null
+    },
+    "steps": [
+      {
+        "key": "account-type",
+        "kind": "account-type",
+        "title": "Account type"
+      },
+      {
+        "key": "details",
+        "kind": "form",
+        "title": "Advertiser details",
+        "subtitle": "Legal name, PAN, and GSTIN as printed on your documents"
+      },
+      {
+        "key": "business",
+        "kind": "form",
+        "title": "Organisation information",
+        "subtitle": "Registered name, GSTIN and where it is"
+      },
+      {
+        "key": "contact",
+        "kind": "form",
+        "title": "Contact person",
+        "subtitle": "Who ADX should reach about this account"
+      },
+      {
+        "key": "kyc-intro",
+        "kind": "kyc-intro",
+        "title": "Verify your identity",
+        "subtitle": "Five quick uploads. Encrypted, used only for verification.",
+        "bands": [
+          {
+            "label": "Identity",
+            "value": "Aadhaar · Passport · DL"
+          },
+          {
+            "label": "Tax",
+            "value": "PAN card"
+          },
+          {
+            "label": "Address",
+            "value": "Utility bill · Rent agreement"
+          },
+          {
+            "label": "Match",
+            "value": "Live selfie"
+          }
+        ],
+        "cta": "Start verification"
+      },
+      {
+        "key": "gov-id-front",
+        "kind": "capture",
+        "title": "Government ID · Front",
+        "subtitle": "Aadhaar, passport, or driving licence. Clear photo, no glare.",
+        "documents": [
+          {
+            "key": "aadhaar",
+            "label": "Aadhaar card",
+            "hint": "Front face with 12-digit number visible",
+            "field": "govIdFrontUrl",
+            "source": "library",
+            "sets": {
+              "field": "govIdType",
+              "value": "AADHAAR"
+            }
+          },
+          {
+            "key": "passport",
+            "label": "Passport",
+            "hint": "Bio-page. Non-expired.",
+            "field": "govIdFrontUrl",
+            "source": "library",
+            "sets": {
+              "field": "govIdType",
+              "value": "PASSPORT"
+            }
+          },
+          {
+            "key": "driving-licence",
+            "label": "Driving licence",
+            "hint": "Both sides. Non-expired.",
+            "field": "govIdFrontUrl",
+            "source": "library",
+            "sets": {
+              "field": "govIdType",
+              "value": "DRIVING_LICENCE"
+            }
+          }
+        ],
+        "cta": "Use this photo"
+      },
+      {
+        "key": "gov-id-back",
+        "kind": "capture",
+        "title": "Government ID · Back",
+        "subtitle": "The reverse of the same document. Address side, all corners visible.",
+        "documents": [
+          {
+            "key": "aadhaar-back",
+            "label": "Aadhaar card",
+            "hint": "Back face with the address",
+            "field": "govIdBackUrl",
+            "source": "library",
+            "onlyWhen": {
+              "field": "govIdType",
+              "value": "AADHAAR"
+            }
+          },
+          {
+            "key": "passport-back",
+            "label": "Passport",
+            "hint": "Not applicable — back not required",
+            "field": "govIdBackUrl",
+            "source": "library",
+            "inert": true,
+            "onlyWhen": {
+              "field": "govIdType",
+              "value": "PASSPORT"
+            }
+          },
+          {
+            "key": "driving-licence-back",
+            "label": "Driving licence",
+            "hint": "Back face, all corners visible",
+            "field": "govIdBackUrl",
+            "source": "library",
+            "onlyWhen": {
+              "field": "govIdType",
+              "value": "DRIVING_LICENCE"
+            }
+          }
+        ],
+        "skippableWhen": {
+          "field": "govIdType",
+          "value": "PASSPORT"
+        },
+        "cta": "Use this photo"
+      },
+      {
+        "key": "pan",
+        "kind": "capture",
+        "title": "PAN card",
+        "subtitle": "Photo of your PAN card. All four corners visible.",
+        "text": {
+          "field": "panNumber",
+          "label": "PAN number",
+          "hint": "10-character alphanumeric",
+          "pattern": "^[A-Z]{5}[0-9]{4}[A-Z]$",
+          "maxLength": 10
+        },
+        "documents": [
+          {
+            "key": "pan-photo",
+            "label": "Photograph",
+            "hint": "Clear and non-obscured",
+            "field": "panFrontUrl",
+            "source": "library"
+          },
+          {
+            "key": "pan-signature",
+            "label": "Signature",
+            "hint": "Bottom-right, matching your signed documents",
+            "field": "panSignatureUrl",
+            "source": "library"
+          }
+        ],
+        "cta": "Use this photo"
+      },
+      {
+        "key": "address-proof",
+        "kind": "capture",
+        "title": "Address proof",
+        "subtitle": "A document showing your current address. Issued in the last three months.",
+        "documents": [
+          {
+            "key": "utility-bill",
+            "label": "Utility bill",
+            "hint": "Electricity, water or gas, in your name",
+            "field": "addressProofUrl",
+            "source": "library",
+            "pdf": true,
+            "sets": {
+              "field": "addressProofType",
+              "value": "UTILITY_BILL"
+            }
+          },
+          {
+            "key": "rent-agreement",
+            "label": "Rent agreement",
+            "hint": "Registered, with your name and the address",
+            "field": "addressProofUrl",
+            "source": "library",
+            "pdf": true,
+            "sets": {
+              "field": "addressProofType",
+              "value": "RENT_AGREEMENT"
+            }
+          },
+          {
+            "key": "bank-statement",
+            "label": "Bank statement",
+            "hint": "First page, with the address",
+            "field": "addressProofUrl",
+            "source": "library",
+            "pdf": true,
+            "sets": {
+              "field": "addressProofType",
+              "value": "BANK_STATEMENT"
+            }
+          }
+        ],
+        "cta": "Upload document"
+      },
+      {
+        "key": "selfie",
+        "kind": "capture",
+        "title": "Selfie verification",
+        "subtitle": "A quick selfie so we can match your ID to you.",
+        "guidance": [
+          {
+            "label": "Position",
+            "hint": "Face centered, both eyes clearly visible"
+          },
+          {
+            "label": "Lighting",
+            "hint": "Bright, no shadows or filters"
+          },
+          {
+            "label": "Match",
+            "hint": "We compare it with your Government ID photo"
+          }
+        ],
+        "documents": [
+          {
+            "key": "selfie",
+            "label": "Your selfie",
+            "hint": "Taken now, with the front camera",
+            "field": "selfieUrl",
+            "source": "camera",
+            "front": true
+          }
+        ],
+        "cta": "Take selfie"
+      },
+      {
+        "key": "liveness",
+        "kind": "capture",
+        "title": "Record a short video",
+        "subtitle": "A five-second clip of you, so we know the person behind the documents is here.",
+        "guidance": [
+          {
+            "label": "Face",
+            "hint": "Look at the camera, face centred"
+          },
+          {
+            "label": "Say",
+            "hint": "Say your name and the date"
+          },
+          {
+            "label": "Length",
+            "hint": "Five seconds is enough"
+          }
+        ],
+        "documents": [
+          {
+            "key": "liveness-video",
+            "label": "Your video",
+            "hint": "Recorded now, with the front camera",
+            "field": "selfVideoUrl",
+            "source": "camera",
+            "front": true,
+            "video": true
+          }
+        ],
+        "cta": "Record video"
+      },
+      {
+        "key": "checklist",
+        "kind": "checklist",
+        "title": "Review your KYC",
+        "subtitle": "Check everything before submitting. You can retake any document.",
+        "cta": "Submit for review"
+      }
+    ]
+  },
+  "ADVERTISER:ORGANISATION:partial": {
+    "party": "ADVERTISER",
+    "accountType": "ORGANISATION",
+    "mode": "partial",
+    "verification": {
+      "digio": {
+        "available": true,
+        "provider": "DIGIO",
+        "retryAfter": null
+      },
+      "liveness": {
+        "required": true,
+        "status": "REJECTED"
+      },
+      "kycStatus": "NEEDS_INFO",
+      "reviewNote": "Two documents were unreadable."
+    },
+    "steps": [
+      {
+        "key": "gov-id-front",
+        "kind": "capture",
+        "title": "Government ID · Front",
+        "subtitle": "Aadhaar, passport, or driving licence. Clear photo, no glare.",
+        "documents": [
+          {
+            "key": "aadhaar",
+            "label": "Aadhaar card",
+            "hint": "Front face with 12-digit number visible",
+            "field": "govIdFrontUrl",
+            "source": "library",
+            "sets": {
+              "field": "govIdType",
+              "value": "AADHAAR"
+            },
+            "flagged": true,
+            "note": "Glare over the number"
+          },
+          {
+            "key": "passport",
+            "label": "Passport",
+            "hint": "Bio-page. Non-expired.",
+            "field": "govIdFrontUrl",
+            "source": "library",
+            "sets": {
+              "field": "govIdType",
+              "value": "PASSPORT"
+            },
+            "flagged": true,
+            "note": "Glare over the number"
+          },
+          {
+            "key": "driving-licence",
+            "label": "Driving licence",
+            "hint": "Both sides. Non-expired.",
+            "field": "govIdFrontUrl",
+            "source": "library",
+            "sets": {
+              "field": "govIdType",
+              "value": "DRIVING_LICENCE"
+            },
+            "flagged": true,
+            "note": "Glare over the number"
+          }
+        ],
+        "cta": "Use this photo"
+      },
+      {
+        "key": "address-proof",
+        "kind": "capture",
+        "title": "Address proof",
+        "subtitle": "A document showing your current address. Issued in the last three months.",
+        "documents": [
+          {
+            "key": "utility-bill",
+            "label": "Utility bill",
+            "hint": "Electricity, water or gas, in your name",
+            "field": "addressProofUrl",
+            "source": "library",
+            "pdf": true,
+            "sets": {
+              "field": "addressProofType",
+              "value": "UTILITY_BILL"
+            },
+            "flagged": true,
+            "note": "Expired"
+          },
+          {
+            "key": "rent-agreement",
+            "label": "Rent agreement",
+            "hint": "Registered, with your name and the address",
+            "field": "addressProofUrl",
+            "source": "library",
+            "pdf": true,
+            "sets": {
+              "field": "addressProofType",
+              "value": "RENT_AGREEMENT"
+            },
+            "flagged": true,
+            "note": "Expired"
+          },
+          {
+            "key": "bank-statement",
+            "label": "Bank statement",
+            "hint": "First page, with the address",
+            "field": "addressProofUrl",
+            "source": "library",
+            "pdf": true,
+            "sets": {
+              "field": "addressProofType",
+              "value": "BANK_STATEMENT"
+            },
+            "flagged": true,
+            "note": "Expired"
+          }
+        ],
+        "cta": "Upload document"
+      },
+      {
+        "key": "selfie",
+        "kind": "capture",
+        "title": "Selfie verification",
+        "subtitle": "A quick selfie so we can match your ID to you.",
+        "guidance": [
+          {
+            "label": "Position",
+            "hint": "Face centered, both eyes clearly visible"
+          },
+          {
+            "label": "Lighting",
+            "hint": "Bright, no shadows or filters"
+          },
+          {
+            "label": "Match",
+            "hint": "We compare it with your Government ID photo"
+          }
+        ],
+        "documents": [
+          {
+            "key": "selfie",
+            "label": "Your selfie",
+            "hint": "Taken now, with the front camera",
+            "field": "selfieUrl",
+            "source": "camera",
+            "front": true,
+            "flagged": true,
+            "note": "Two documents were unreadable."
+          }
+        ],
+        "cta": "Take selfie"
+      },
+      {
+        "key": "liveness",
+        "kind": "capture",
+        "title": "Record a short video",
+        "subtitle": "A five-second clip of you, so we know the person behind the documents is here.",
+        "guidance": [
+          {
+            "label": "Face",
+            "hint": "Look at the camera, face centred"
+          },
+          {
+            "label": "Say",
+            "hint": "Say your name and the date"
+          },
+          {
+            "label": "Length",
+            "hint": "Five seconds is enough"
+          }
+        ],
+        "documents": [
+          {
+            "key": "liveness-video",
+            "label": "Your video",
+            "hint": "Recorded now, with the front camera",
+            "field": "selfVideoUrl",
+            "source": "camera",
+            "front": true,
+            "video": true,
+            "flagged": true,
+            "note": "Too dark"
+          }
+        ],
+        "cta": "Record video"
+      },
+      {
+        "key": "checklist",
+        "kind": "checklist",
+        "title": "Send the flagged documents again",
+        "subtitle": "Two documents were unreadable.",
+        "cta": "Resubmit for review"
+      }
+    ]
+  }
+}

@@ -19,9 +19,18 @@ export const prismaDigioRepository: DigioRepository = {
   },
 
   applyWebhook(kycRowId: string, update: DigioWebhookUpdate) {
+    // Lot N: Digio's completion is the recording — nobody at ADX held the
+    // documents. N2-B: an approval puts the row on the Digio path whatever
+    // was sent by hand while the session was open.
     return prisma.publisherKyc.update({
       where: { id: kycRowId },
-      data: { ...update, digioPayload: update.digioPayload as any },
+      data: {
+        ...update,
+        digioPayload: update.digioPayload as any,
+        recordedVia: 'DIGIO',
+        recordedById: null,
+        ...(update.status === 'VERIFIED' ? { method: 'DIGIO' } : {}),
+      },
     });
   },
 

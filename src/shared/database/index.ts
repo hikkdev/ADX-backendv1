@@ -12,5 +12,6 @@
  * Model types should be imported with `import type`, which erases at compile
  * time and costs nothing at runtime.
  */
-export { prisma } from './prisma';
+export { closeDatabase, prisma } from './prisma';
+export { pingDatabase } from './ping';
 export * from '../../generated/prisma';
