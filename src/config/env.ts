@@ -141,6 +141,18 @@ const envSchema = z.object({
   AZIRA_CLIENT_ID: z.string().optional(),
   AZIRA_BASE_URL: z.string().optional(),
   /**
+   * QR-1: the QR engine. GenQR is our own QR platform, hosted on its own and
+   * reached over its public API with an Enterprise key. The provider switch
+   * (LOCAL | GENQR) is on the integrations row and defaults to LOCAL, so a
+   * deployment with none of these set draws every code the way it always
+   * did. `GENQR_SHORT_BASE_URL` is the ADX-branded origin printed on
+   * hoardings (proxied to GenQR's `/r/`); it is set on the GenQR account
+   * and recorded here only so the console can say what is printed.
+   */
+  GENQR_BASE_URL: z.string().optional(),
+  GENQR_API_KEY: z.string().optional(),
+  GENQR_SHORT_BASE_URL: z.string().optional(),
+  /**
    * G6 (Q103/133): push through FCM HTTP v1. The Firebase service-account
    * JSON, raw or base64 — the sender mints its own OAuth2 token from it with
    * node:crypto (RS256 JWT grant), no SDK. Unset, every push answers

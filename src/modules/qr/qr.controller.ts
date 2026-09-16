@@ -23,7 +23,7 @@ import {
   regenerateQr,
   imageUrls,
 } from './qr.service';
-import { IMAGE_CACHE_CONTROL, clampSize, toDataUrl, toPngBuffer, toSvg } from './qr.image';
+import { IMAGE_CACHE_CONTROL, clampSize, renderQrImage, toDataUrl } from './qr.image';
 
 /**
  * The service throws opaque QR_* sentinels so it stays free of HTTP concerns;
@@ -173,24 +173,37 @@ export async function regenerateQrHandler(req: Request, res: Response): Promise<
   });
 }
 
-// GET /qr/:qrId/image.png — serves raw PNG
+/** QR-1: what a printed code's frame says — the code's purpose, never its ref. */
+const PRINT_CAPTIONS: Partial<Record<QrType, string>> = {
+  SITE: 'Scan to check in',
+  AGENT: 'Scan to refer',
+  ORDER: 'Scan to collect',
+  AD: 'Scan to report',
+};
+
+// GET /qr/:qrId/image.png — QR-1: the engine's artwork for a printed type,
+// the house style otherwise. `X-QR-Engine` / `X-QR-Styled` say which.
 export async function qrImagePngHandler(req: Request, res: Response): Promise<void> {
   const qr = await requireActiveQr(req.params['qrId'] as string);
-  const buffer = await toPngBuffer(qr.token, clampSize(req.query['size']));
+  const image = await renderQrImage(qr, 'png', clampSize(req.query['size']), PRINT_CAPTIONS[qr.type]);
 
-  res.set('Content-Type', 'image/png');
+  res.set('Content-Type', image.contentType);
   res.set('Cache-Control', IMAGE_CACHE_CONTROL);
-  res.send(buffer);
+  res.set('X-QR-Engine', image.engine);
+  res.set('X-QR-Styled', image.styled ? 'true' : 'false');
+  res.send(image.body);
 }
 
-// GET /qr/:qrId/image.svg — serves SVG string
+// GET /qr/:qrId/image.svg — the same, as the vector a print designer wants.
 export async function qrImageSvgHandler(req: Request, res: Response): Promise<void> {
   const qr = await requireActiveQr(req.params['qrId'] as string);
-  const svg = await toSvg(qr.token);
+  const image = await renderQrImage(qr, 'svg', clampSize(req.query['size']), PRINT_CAPTIONS[qr.type]);
 
-  res.set('Content-Type', 'image/svg+xml');
+  res.set('Content-Type', image.contentType);
   res.set('Cache-Control', IMAGE_CACHE_CONTROL);
-  res.send(svg);
+  res.set('X-QR-Engine', image.engine);
+  res.set('X-QR-Styled', image.styled ? 'true' : 'false');
+  res.send(image.body);
 }
 
 // GET /qr/:qrId — token + metadata + a data URL for embedding

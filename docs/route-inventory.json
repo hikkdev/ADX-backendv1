@@ -1,6 +1,6 @@
 {
   "generatedBy": "scripts/route-inventory.ts",
-  "routeCount": 1037,
+  "routeCount": 1040,
   "routes": [
     {
       "method": "GET",
@@ -7571,8 +7571,37 @@
       ]
     },
     {
+      "method": "POST",
+      "path": "/api/v1/campaigns/:id/tracking-codes/sync-engine",
+      "chain": [
+        "requestId",
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "auditAdminWrites",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "syncTrackingCodesHandler"
+      ]
+    },
+    {
       "method": "GET",
       "path": "/api/v1/campaigns/:id/tracking-codes/:code/image.png",
+      "chain": [
+        "requestId",
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "auditAdminWrites",
+        "authenticate",
+        "trackingCodeImageHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/campaigns/:id/tracking-codes/:code/image.svg",
       "chain": [
         "requestId",
         "corsMiddleware",
@@ -11781,6 +11810,22 @@
         "requireRole(ADMIN)",
         "requirePermission(settings.edit)",
         "testEmailDoorHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/integrations/qr-engine/test",
+      "chain": [
+        "requestId",
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "auditAdminWrites",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "requirePermission(settings.edit)",
+        "testQrEngineHandler"
       ]
     },
     {

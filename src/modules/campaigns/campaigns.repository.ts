@@ -427,6 +427,8 @@ export interface CampaignsRepository {
   ): Promise<TrackingCodeRow[]>;
   findTrackingCode(code: string): Promise<(TrackingCodeRow & { campaign: { id: string; status: CampaignStatus } }) | null>;
   codeExists(code: string): Promise<boolean>;
+  /** QR-1: records the engine's hold on each code — its id and the URL the hoarding carries. */
+  linkTrackingCodesToEngine(rows: { id: string; engineCodeId: string; shortUrl: string }[], at: Date): Promise<void>;
   recordTrackingEvent(data: {
     codeId: string;
     type: TrackingEventType;

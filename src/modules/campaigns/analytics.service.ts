@@ -9,6 +9,7 @@ import {
   type BlendedAudienceCatchment,
 } from '../../shared/audience';
 import { audienceForSpots, currentPeriod, type SpotAudience } from '../listings';
+import { dynamicCodeAnalytics, type Breakdown } from '../../shared/qr-engine';
 import { prismaCampaignsRepository as repository } from './prisma-campaigns.repository';
 import type { CampaignAggregate, MetricRow } from './campaigns.repository';
 import { flightDays, type Actor } from './campaigns.service';
@@ -125,7 +126,87 @@ export type CampaignAnalytics = {
   audience: CampaignAudience | null;
   /** E11-2: the deltas the frame prints — this window against the one before it, from the stored daily metrics. */
   comparison: WindowComparison;
+  /**
+   * QR-1: what the QR engine saw on the dynamic codes it hosts in front of
+   * this campaign's `/t/` codes — folded across the codes. A second log of
+   * the same scans, kept BESIDE `scans` (ADX's own, MEASURED) and never in
+   * its place: the engine sees the phone's country, city, browser and OS
+   * that ADX deliberately does not read. Provenance `ENGINE` and the
+   * engine's name; null when no engine hosts any of the campaign's codes.
+   */
+  engine: CampaignEngineView | null;
 };
+
+export type CampaignEngineView = {
+  provenance: 'ENGINE';
+  engine: 'GENQR';
+  basis: string;
+  /** Codes the engine hosts, of the campaign's QR codes. */
+  codesLinked: number;
+  codesTotal: number;
+  /** Codes the engine could not answer for on this read — the fold is over the rest. */
+  codesUnanswered: number;
+  days: number;
+  totalScans: number;
+  scansInWindow: number;
+  scansByDay: { date: string; count: number }[];
+  hourlyBreakdown: { hour: number; count: number }[];
+  deviceBreakdown: Breakdown;
+  browserBreakdown: Breakdown;
+  osBreakdown: Breakdown;
+  countryBreakdown: { label: string; code: string | null; count: number }[];
+  cityBreakdown: Breakdown;
+};
+
+/** Sums labelled breakdowns across codes, most first. */
+function foldBreakdown<T extends { label: string; count: number }>(rows: T[][]): T[] {
+  const out = new Map<string, T>();
+  for (const list of rows) {
+    for (const row of list) {
+      const found = out.get(row.label);
+      if (found) found.count += row.count;
+      else out.set(row.label, { ...row });
+    }
+  }
+  return [...out.values()].sort((a, b) => b.count - a.count);
+}
+
+/**
+ * QR-1: the engine's view of the campaign, folded over its hosted codes.
+ * Null when nothing is hosted; a code the engine cannot answer for is
+ * counted in `codesUnanswered` rather than failing the panel.
+ */
+export async function campaignEngineView(codes: CampaignAggregate['codes'], days: number): Promise<CampaignEngineView | null> {
+  const qrCodes = codes.filter((code) => code.method === 'QR_OR_DEEPLINK');
+  const hosted = qrCodes.filter((code) => code.engineCodeId);
+  if (hosted.length === 0) return null;
+  const answers = await dynamicCodeAnalytics(hosted.map((code) => code.engineCodeId!), days);
+  const got = [...answers.values()];
+  const byDate = new Map<string, number>();
+  const byHour = new Map<number, number>();
+  for (const answer of got) {
+    for (const point of answer.scansByDay) byDate.set(point.date, (byDate.get(point.date) ?? 0) + point.count);
+    for (const point of answer.hourlyBreakdown) byHour.set(point.hour, (byHour.get(point.hour) ?? 0) + point.count);
+  }
+  return {
+    provenance: 'ENGINE',
+    engine: 'GENQR',
+    basis: `Scans of the ${hosted.length} hosted code${hosted.length === 1 ? '' : 's'} as GenQR recorded them before sending the person to ADX — a second log of the same scans, with the phone's geography and browser`,
+    codesLinked: hosted.length,
+    codesTotal: qrCodes.length,
+    codesUnanswered: hosted.length - got.length,
+    days,
+    totalScans: got.reduce((sum, answer) => sum + answer.totalScans, 0),
+    scansInWindow: got.reduce((sum, answer) => sum + answer.scansInWindow, 0),
+    scansByDay: [...byDate.entries()].map(([date, count]) => ({ date, count })).sort((a, b) => a.date.localeCompare(b.date)),
+    hourlyBreakdown: Array.from({ length: 24 }, (_, hour) => ({ hour, count: byHour.get(hour) ?? 0 })),
+    deviceBreakdown: foldBreakdown(got.map((answer) => answer.deviceBreakdown)),
+    browserBreakdown: foldBreakdown(got.map((answer) => answer.browserBreakdown)),
+    osBreakdown: foldBreakdown(got.map((answer) => answer.osBreakdown)),
+    countryBreakdown: foldBreakdown(got.map((answer) => answer.countryBreakdown)),
+    cityBreakdown: foldBreakdown(got.map((answer) => answer.cityBreakdown)),
+  };
+}
 
 /* ------------------------------------------------------------------ */
 /* G7 (Q109): the audience panel, folded over the spots                */
@@ -434,7 +515,7 @@ export async function campaignAnalytics(
    * comparison once across every campaign rather than once per campaign.
    * `days` is the comparison window, seven by default.
    */
-  options: { interactions?: boolean; comparison?: boolean; days?: number | undefined; audience?: boolean } = {}
+  options: { interactions?: boolean; comparison?: boolean; days?: number | undefined; audience?: boolean; engine?: boolean } = {}
 ): Promise<CampaignAnalytics> {
   const daysTotal = flightDays(campaign.startDate, campaign.endDate);
   const start = campaign.startDate;
@@ -471,6 +552,9 @@ export async function campaignAnalytics(
   // G7 (Q109): the vendor panel, through the per-spot snapshots. Skipped for
   // the portfolio view, which has no panel for it and fifty campaigns to fold.
   const audience = options.audience === false ? null : await campaignAudienceFor(booked, start, end, now);
+  // QR-1: the engine's log of the same scans — skipped for the portfolio
+  // view, which has no panel for it and would ask the engine fifty times.
+  const engine = options.engine === false ? null : await campaignEngineView(campaign.codes, Math.min(Math.max(daysTotal || 30, 1), 365));
 
   /* Reach: publisher-stated footfall, over the days each spot has run. Null when
      no booked site states one — which is common, and worth saying out loud. */
@@ -652,6 +736,7 @@ export async function campaignAnalytics(
     },
     audience,
     comparison,
+    engine,
   };
 }
 
@@ -714,7 +799,7 @@ export async function portfolioAnalytics(
     // Drafts have nothing to report and would drag the averages toward zero.
     if (row.status === 'DRAFT') continue;
     const campaign = await repository.findCampaign(row.id);
-    if (campaign) analytics.push(await campaignAnalytics(campaign, now, { interactions: false, comparison: false, audience: false }));
+    if (campaign) analytics.push(await campaignAnalytics(campaign, now, { interactions: false, comparison: false, audience: false, engine: false }));
   }
   // E11-2: one read over both windows for every campaign the tiles count.
   const comparison = await comparisonFor(
@@ -832,7 +917,7 @@ export async function snapshotDailyMetrics(now = new Date()): Promise<{ written:
   for (const row of rows) {
     const campaign = await repository.findCampaign(row.id);
     if (!campaign) continue;
-    const analytics = await campaignAnalytics(campaign, now, { audience: false });
+    const analytics = await campaignAnalytics(campaign, now, { audience: false, engine: false });
     const today = analytics.series[analytics.series.length - 1];
 
     await repository.upsertDailyMetric({

@@ -7,6 +7,7 @@ import {
   EMAIL_PRIMARIES,
   HRMS_PROVIDERS,
   MAPS_PROVIDERS,
+  QR_ENGINE_PROVIDERS,
   WORK_TOOL_PROVIDERS,
   type HrmsProvider,
   type IntegrationsConfig,
@@ -27,7 +28,33 @@ export const audienceTestSchema = z.object({ vendor: z.enum(AUDIENCE_VENDORS) })
 /** AE-B: `POST /integrations/email/test { to }` — where the one test message goes; strict, so nothing else rides along. */
 export const emailTestSchema = z.strictObject({ to: z.string().trim().email().max(200) });
 
-export const sectionSchema = z.enum(['sms', 'email', 'storage', 'kyc', 'twilio', 'resend', 'googleMaps', 'razorpay', 'cashfree', 'ccavenue', 'stripe', 'branding', 'ai', 'hrms', 'workTool', 'maps', 'audience']);
+export const sectionSchema = z.enum(['sms', 'email', 'storage', 'kyc', 'twilio', 'resend', 'googleMaps', 'razorpay', 'cashfree', 'ccavenue', 'stripe', 'branding', 'ai', 'hrms', 'workTool', 'maps', 'audience', 'qrEngine']);
+
+/** QR-1: a hex colour as GenQR validates it. */
+const HEX_COLOR = z.string().trim().regex(/^#[0-9a-fA-F]{6}$/, 'Must be a #rrggbb colour');
+/**
+ * QR-1: the style every printed code is drawn with on GenQR. Strict — a
+ * stray key is refused — and `null` on a field clears it back to GenQR's
+ * default. The logo must be https or a same-origin path, as GenQR insists.
+ */
+export const qrEngineStyleSchema = z.preprocess(
+  // A blank field means "keep", as it does a level up on the row; it is
+  // dropped here so the colour and URL rules only see a value someone typed.
+  (value) =>
+    value && typeof value === 'object' && !Array.isArray(value)
+      ? Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([, v]) => v !== ''))
+      : value,
+  z
+    .strictObject({
+      foregroundColor: HEX_COLOR.nullable().optional(),
+      backgroundColor: HEX_COLOR.nullable().optional(),
+      dotStyle: z.enum(['square', 'dots', 'rounded']).nullable().optional(),
+      frameStyle: z.enum(['none', 'simple', 'label-below', 'label-above']).nullable().optional(),
+      frameCaption: z.string().trim().max(120).nullable().optional(),
+      logoUrl: z.string().trim().max(500).regex(/^(https:\/\/[^\s]+|\/[^\s]*)$/, 'Must be an https URL or a same-origin path').nullable().optional(),
+    })
+    .partial(),
+);
 
 export const patchSchemas = {
   sms: z.object({
@@ -213,6 +240,17 @@ export const patchSchemas = {
    * `affinity.<name>`) to the catalogue ids the account was sold — a field
    * with no id is null.
    */
+  /**
+   * QR-1: the QR engine — the switch, GenQR's host and key, the short
+   * origin printed on hoardings, and the style. Strict: a stray key is 400.
+   */
+  qrEngine: z.strictObject({
+    provider: z.enum(QR_ENGINE_PROVIDERS).optional(),
+    baseUrl: HTTP_URL.optional(),
+    apiKey: z.string().trim().max(200).optional(),
+    shortBaseUrl: HTTP_URL.nullable().optional(),
+    style: qrEngineStyleSchema.optional(),
+  }),
   audience: z.object({
     provider: z.enum(AUDIENCE_PROVIDERS).optional(),
     providers: z

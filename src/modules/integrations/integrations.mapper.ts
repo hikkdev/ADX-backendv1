@@ -225,6 +225,21 @@ export function toIntegrationsResponse(cfg: IntegrationsConfig, extras: Integrat
         aziraBaseUrl: cfg.audience?.aziraBaseUrl ?? env.AZIRA_BASE_URL ?? null,
         catchmentRadiusM: cfg.audience?.catchmentRadiusM ?? DEFAULT_AUDIENCE_CATCHMENT_RADIUS_M,
       },
+      // QR-1: the QR engine. LOCAL until ops choose GenQR; the key masked;
+      // the host, the short origin and the style drawn as-is. `hostsDynamic`
+      // is the verdict the campaign screens need: GenQR chosen AND reachable
+      // credentials present — the seam's `dynamicCodesAvailable` from the
+      // same fields, so the screen and the code agree.
+      qrEngine: {
+        provider: cfg.qrEngine?.provider ?? 'LOCAL',
+        baseUrl: cfg.qrEngine?.baseUrl || env.GENQR_BASE_URL || null,
+        apiKey: maskSecret(cfg.qrEngine?.apiKey || env.GENQR_API_KEY),
+        shortBaseUrl: cfg.qrEngine?.shortBaseUrl || env.GENQR_SHORT_BASE_URL || null,
+        style: cfg.qrEngine?.style ?? {},
+        hostsDynamic:
+          (cfg.qrEngine?.provider ?? 'LOCAL') === 'GENQR' &&
+          Boolean((cfg.qrEngine?.baseUrl || env.GENQR_BASE_URL) && (cfg.qrEngine?.apiKey || env.GENQR_API_KEY)),
+      },
       // G11-2: read-only — the key comes from the environment, never from
       // this screen; the section says whether the rail can send.
       push: pushConfiguration(),

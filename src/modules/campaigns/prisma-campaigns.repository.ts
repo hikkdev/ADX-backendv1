@@ -495,6 +495,18 @@ export const prismaCampaignsRepository: CampaignsRepository = {
     return (await prisma.campaignTrackingCode.count({ where: { code } })) > 0;
   },
 
+  async linkTrackingCodesToEngine(rows, at) {
+    if (rows.length === 0) return;
+    await prisma.$transaction(
+      rows.map((row) =>
+        prisma.campaignTrackingCode.update({
+          where: { id: row.id },
+          data: { engineCodeId: row.engineCodeId, shortUrl: row.shortUrl, engineLinkedAt: at },
+        }),
+      ),
+    );
+  },
+
   async recordTrackingEvent(data) {
     await prisma.trackingEvent.create({
       data: {

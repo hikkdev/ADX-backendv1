@@ -306,6 +306,38 @@ export interface WorkToolConfig {
   name?: string;
 }
 
+/**
+ * QR-1: the QR engine seam. LOCAL draws with the `qrcode` package in the
+ * house style; GENQR reaches our own QR platform over its public API for
+ * styled print artwork, the dynamic code in front of every campaign
+ * hoarding, and the engine's own scan breakdowns.
+ */
+export const QR_ENGINE_PROVIDERS = ['LOCAL', 'GENQR'] as const;
+export type QrEngineProvider = (typeof QR_ENGINE_PROVIDERS)[number];
+
+export interface QrEngineConfig {
+  provider?: QrEngineProvider;
+  baseUrl?: string;
+  apiKey?: string;
+  /** The ADX-branded origin printed on hoardings; set on the GenQR account, recorded here for the console. */
+  shortBaseUrl?: string;
+  /**
+   * The style every printed code is drawn with on GenQR: colours, dot
+   * shape, frame, caption, logo. Sent with each render; nothing is stored
+   * on GenQR for a static code.
+   */
+  style?: QrEngineStyle;
+}
+
+export interface QrEngineStyle {
+  foregroundColor?: string;
+  backgroundColor?: string;
+  dotStyle?: 'square' | 'dots' | 'rounded';
+  frameStyle?: 'none' | 'simple' | 'label-below' | 'label-above';
+  frameCaption?: string;
+  logoUrl?: string;
+}
+
 export interface IntegrationsConfig {
   sms?: SmsConfig;
   email?: EmailConfig;
@@ -324,6 +356,7 @@ export interface IntegrationsConfig {
   workTool?: WorkToolConfig;
   maps?: MapsConfig;
   audience?: AudienceConfig;
+  qrEngine?: QrEngineConfig;
 }
 
 const CONFIG_KEY = 'integrations';
@@ -525,6 +558,25 @@ export async function getEffectiveAudienceConfig(): Promise<
     aziraClientId: audience.aziraClientId || env.AZIRA_CLIENT_ID,
     aziraBaseUrl: (audience.aziraBaseUrl || env.AZIRA_BASE_URL || '').replace(/\/+$/, '') || undefined,
     catchmentRadiusM: audience.catchmentRadiusM ?? DEFAULT_AUDIENCE_CATCHMENT_RADIUS_M,
+  };
+}
+
+/**
+ * QR-1: the QR engine in force. LOCAL unless ops chose GenQR; the key and
+ * host fall back to the environment so a deployment that never opened the
+ * section still reaches GenQR once the env is set and the switch flipped.
+ */
+export async function getEffectiveQrEngineConfig(): Promise<
+  Required<Pick<QrEngineConfig, 'provider' | 'style'>> & Omit<QrEngineConfig, 'provider' | 'style'>
+> {
+  const cfg = await getIntegrationsConfig();
+  const row = cfg.qrEngine ?? {};
+  return {
+    provider: row.provider ?? 'LOCAL',
+    baseUrl: (row.baseUrl || env.GENQR_BASE_URL || '').replace(/\/+$/, '') || undefined,
+    apiKey: row.apiKey || env.GENQR_API_KEY,
+    shortBaseUrl: (row.shortBaseUrl || env.GENQR_SHORT_BASE_URL || '').replace(/\/+$/, '') || undefined,
+    style: row.style ?? {},
   };
 }
 

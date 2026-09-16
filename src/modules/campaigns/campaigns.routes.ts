@@ -35,6 +35,7 @@ import {
   scanHandler,
   setCartHandler,
   submitForPaymentHandler,
+  syncTrackingCodesHandler,
   trackingCodeImageHandler,
   trackingCodesHandler,
   uploadCreativeHandler,
@@ -102,8 +103,11 @@ campaignRouter.post('/:id/cancel', asyncHandler(cancelHandler));
 
 campaignRouter.get('/:id/analytics', asyncHandler(campaignAnalyticsHandler));
 campaignRouter.get('/:id/tracking-codes', asyncHandler(trackingCodesHandler));
-/* Lot D (Q139): the code's QR, drawn through the qr module, for the artwork to embed. */
+/* QR-1: ops put the engine's dynamic code in front of codes issued while it was down. */
+campaignRouter.post('/:id/tracking-codes/sync-engine', requireRole('ADMIN'), asyncHandler(syncTrackingCodesHandler));
+/* Lot D (Q139) / QR-1: the code's QR — the engine's styled artwork when it hosts the code — for the artwork to embed. */
 campaignRouter.get('/:id/tracking-codes/:code/image.png', asyncHandler(trackingCodeImageHandler));
+campaignRouter.get('/:id/tracking-codes/:code/image.svg', asyncHandler(trackingCodeImageHandler));
 campaignRouter.post('/:id/redemptions', asyncHandler(redemptionsHandler));
 
 /* Lot E (Q7/Q106): the landing-page builder. The advertiser or their agent

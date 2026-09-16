@@ -1,6 +1,8 @@
 import { randomBytes } from 'crypto';
 import { ApiError } from '../../shared/errors';
 import { env } from '../../config/env';
+import { logger } from '../../shared/logging';
+import { dynamicCodesAvailable, registerDynamicCodes } from '../../shared/qr-engine';
 import { prismaCampaignsRepository as repository } from './prisma-campaigns.repository';
 import type { TrackingCodeRow } from './campaigns.repository';
 
@@ -56,6 +58,48 @@ export const trackingUrl = (code: string): string => {
   return `${base.replace(/\/$/, '')}/t/${code}`;
 };
 
+/**
+ * QR-1: the URL the hoarding actually carries. The engine's short URL when
+ * the code is hosted (GenQR `/r/XXXX`, which 302s to `/t/XXXX`), else `/t/`
+ * itself. Everything that prints or draws a code asks this, so the two
+ * never disagree.
+ */
+export const printedUrl = (code: Pick<TrackingCodeRow, 'code' | 'shortUrl'>): string => code.shortUrl ?? trackingUrl(code.code);
+
+/** QR-1: what the engine names a code — the campaign's reference and the spot, for the desk on GenQR's side. */
+function engineName(campaign: { reference: string }, code: TrackingCodeRow, spotTitle: string | null): string {
+  return `${campaign.reference} · ${spotTitle ?? code.code}`;
+}
+
+/**
+ * QR-1: puts the engine's dynamic code in front of every QR tracking code
+ * the campaign has that is not yet hosted. Idempotent — a linked code is
+ * skipped — and quiet when no engine hosts codes: the hoarding then carries
+ * `/t/` and the sync route links it later. A failure of the engine itself
+ * is thrown, so a deliberate sync can say what went wrong; `issueTrackingCodes`
+ * catches it, because paying for a campaign must not fail on a vendor.
+ *
+ * Returns the codes linked on this call.
+ */
+export async function linkCodesToEngine(campaignId: string): Promise<TrackingCodeRow[]> {
+  if (!(await dynamicCodesAvailable())) return [];
+  const campaign = await repository.findCampaign(campaignId);
+  if (!campaign) throw new ApiError(404, 'NOT_FOUND', 'Campaign not found');
+  const pending = campaign.codes.filter((code) => code.method === 'QR_OR_DEEPLINK' && !code.engineCodeId);
+  if (pending.length === 0) return [];
+
+  const titles = new Map(campaign.spots.map((spot) => [spot.id, spot.listing?.title ?? null] as const));
+  const minted = await registerDynamicCodes(
+    pending.map((code) => ({ name: engineName(campaign, code, code.spotId ? (titles.get(code.spotId) ?? null) : null), target: trackingUrl(code.code) })),
+  );
+  const at = new Date();
+  await repository.linkTrackingCodesToEngine(
+    pending.map((code, index) => ({ id: code.id, engineCodeId: minted[index]!.engineCodeId, shortUrl: minted[index]!.shortUrl })),
+    at,
+  );
+  return pending.map((code, index) => ({ ...code, engineCodeId: minted[index]!.engineCodeId, shortUrl: minted[index]!.shortUrl, engineLinkedAt: at }));
+}
+
 type QrConfig = { destinationUrl?: string; utmCampaign?: string };
 type VanityConfig = { vanityUrl?: string; promoCode?: string; redemptionWindow?: string };
 
@@ -92,6 +136,26 @@ export function withUtm(destination: string, utmCampaign: string | null, code: s
  * Idempotent: a campaign that already has codes gets none.
  */
 export async function issueTrackingCodes(campaignId: string): Promise<TrackingCodeRow[]> {
+  const rows = await issueTrackingCodesLocally(campaignId);
+  // QR-1: best effort — the engine's hold on the codes. A vendor that does
+  // not answer at payment time is logged, not fatal; the hoarding carries
+  // /t/ until the sync route links it.
+  if (rows.some((row) => row.method === 'QR_OR_DEEPLINK' && !row.engineCodeId)) {
+    try {
+      const linked = await linkCodesToEngine(campaignId);
+      if (linked.length > 0) {
+        const byId = new Map(linked.map((row) => [row.id, row]));
+        return rows.map((row) => byId.get(row.id) ?? row);
+      }
+    } catch (cause) {
+      const reason = cause instanceof ApiError ? `${cause.code}: ${cause.message}` : String(cause);
+      logger.warn('QR engine did not take the campaign codes; the hoarding carries /t/ until synced', { campaignId, reason });
+    }
+  }
+  return rows;
+}
+
+async function issueTrackingCodesLocally(campaignId: string): Promise<TrackingCodeRow[]> {
   const campaign = await repository.findCampaign(campaignId);
   if (!campaign) throw new ApiError(404, 'NOT_FOUND', 'Campaign not found');
   if (campaign.codes.length > 0) return campaign.codes;

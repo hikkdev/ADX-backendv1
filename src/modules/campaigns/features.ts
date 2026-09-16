@@ -52,7 +52,7 @@ feature('campaigns.tracking', {
   kind: 'FEATURE',
   launch: 'on',
   description:
-    'Tracking codes and their QR images, the scan redirect on the hoarding, redemptions.',
+    'Tracking codes and their QR images (QR-1: drawn by the QR engine, hosted on GenQR in front of /t/, the SVG for print, the sync for codes issued while the engine was down), the scan redirect on the hoarding, redemptions.',
   routes: [
     '/t/:code',
     '/api/v1/campaigns/:id/tracking-codes',

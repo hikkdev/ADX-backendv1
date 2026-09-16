@@ -8,6 +8,17 @@ referrals.
 
 Mounted at `/api/v1/qr`.
 
+QR-1 (16 Sep 2026): the two image routes draw the **printed** types — SITE
+(a listing's plaque), AGENT (a referral card), ORDER (a pickup label), AD (a
+health code) — through the QR engine seam (`shared/qr-engine`'s
+`renderPrinted`: GenQR's styled artwork when it is the engine, the house
+style otherwise; a print job never fails to draw) with a caption naming the
+code's purpose ("Scan to check in", "Scan to refer", "Scan to collect",
+"Scan to report"). The rest — PUBLISHER, ADVERTISER, ACCESS_GRANT, the
+ninety-second codes on a phone screen — are drawn locally and their signed
+token never leaves ADX. `X-QR-Engine` and `X-QR-Styled` on the response say
+which. `PRINTED_QR_TYPES` / `isPrintedType` / `renderQrImage` in `qr.image.ts`.
+
 | Method | Path | Guard |
 | --- | --- | --- |
 | GET | `/:qrId/image.png` | **none** |

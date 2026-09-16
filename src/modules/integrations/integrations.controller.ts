@@ -15,6 +15,7 @@ import {
 } from '../../shared/integrations';
 import { AUDIENCE_FIELD_CATALOGUE, AUDIENCE_FIELD_GROUPS, AUDIENCE_FIELD_PATTERN, AUDIENCE_TEST_POINT, testAudienceVendor } from '../../shared/audience';
 import { readEtherealAccount, testEmailDoor } from '../../shared/email';
+import { testQrEngine } from '../../shared/qr-engine';
 import { toIntegrationsResponse, type IntegrationsReadExtras } from './integrations.mapper';
 import { audienceTestSchema, emailTestSchema, patchSchemas, sectionSchema } from './integrations.schema';
 
@@ -104,6 +105,21 @@ export async function updateIntegrationsHandler(req: Request, res: Response): Pr
       });
     }
   }
+  // QR-1: the style is a sub-object: laid over the stored one, blank keeps,
+  // `null` clears — the same rule the row's own merge applies a level up.
+  if (section === 'qrEngine') {
+    const { style: stylePatch, ...rest } = patchParsed.data as z.output<(typeof patchSchemas)['qrEngine']>;
+    patch = { ...rest };
+    if (stylePatch !== undefined) {
+      const merged: Record<string, unknown> = { ...(before.qrEngine?.style ?? {}) };
+      for (const [key, value] of Object.entries(stylePatch)) {
+        if (value === null) delete merged[key];
+        else if (value !== undefined && value !== '') merged[key] = value;
+      }
+      patch.style = merged;
+    }
+  }
+
   await updateIntegrationsConfig(section, patch);
   await logActivity(req.user!.sub, 'INTEGRATION_CONFIG_UPDATED', req, { section, fields: Object.keys(patchParsed.data) });
 
@@ -163,6 +179,20 @@ export async function updateIntegrationsHandler(req: Request, res: Response): Pr
       targetId: 'integrations',
       module: 'integrations',
       diff: auditDiff({ provider: before.maps?.provider ?? 'GOOGLE' }, { provider: patchParsed.data.provider }),
+      metadata: { fields: Object.keys(patchParsed.data) },
+    });
+  }
+  // QR-1: a change of the QR engine moves every printed code and every
+  // campaign's hoarding artwork — named in the trail with what it was and
+  // what it became, never the key.
+  const qrPatch = section === 'qrEngine' ? patchParsed.data as z.output<(typeof patchSchemas)['qrEngine']> : undefined;
+  if (qrPatch?.provider && qrPatch.provider !== (before.qrEngine?.provider ?? 'LOCAL')) {
+    await logActivity(req.user!.sub, 'QR_ENGINE_CHANGED', {
+      req,
+      targetType: 'AppConfig',
+      targetId: 'integrations',
+      module: 'integrations',
+      diff: auditDiff({ provider: before.qrEngine?.provider ?? 'LOCAL' }, { provider: qrPatch.provider }),
       metadata: { fields: Object.keys(patchParsed.data) },
     });
   }
@@ -240,6 +270,34 @@ export async function audienceFieldsHandler(_req: Request, res: Response): Promi
 // verdict, never this route's 5xx. Audited INTEGRATION_TESTED with the
 // vendor and the verdict — the verdict carries no key, and neither does
 // the trail.
+// QR-1: POST /integrations/qr-engine/test — one `GET /api/v1/me` on the
+// stored key (nothing minted, nothing spent) and a verdict the card prints:
+// reachable, authorised, the account and plan, the scopes the key lacks for
+// the whole integration, and whether GenQR's redirect base matches the
+// short origin ADX prints. Never a key. LOCAL has nothing to test and says so.
+export async function testQrEngineHandler(req: Request, res: Response): Promise<void> {
+  const verdict = await testQrEngine();
+  await logActivity(req.user!.sub, 'INTEGRATION_TESTED', {
+    req,
+    targetType: 'AppConfig',
+    targetId: 'integrations',
+    module: 'integrations',
+    metadata: {
+      section: 'qrEngine',
+      engine: verdict.engine,
+      verdict: {
+        configured: verdict.configured,
+        reachable: verdict.reachable,
+        authorized: verdict.authorized,
+        status: verdict.status,
+        scopesMissing: verdict.scopesMissing,
+        shortBaseMatches: verdict.shortBaseMatches,
+      },
+    },
+  });
+  res.json({ success: true, data: verdict });
+}
+
 export async function testAudienceVendorHandler(req: Request, res: Response): Promise<void> {
   const parsed = audienceTestSchema.safeParse(req.body ?? {});
   if (!parsed.success) {

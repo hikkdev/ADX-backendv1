@@ -18,7 +18,8 @@ the arithmetic is `revenue`'s, fulfilment is `orders`'.
 | `GET /campaigns/creatives/:creativeId` | ADMIN | one artwork with its campaign, spot, checks and flags |
 | `PATCH /campaigns/:id/creatives/:creativeId/review { decision, note?, checks? }` | ADMIN | APPROVED \| REJECTED \| CHANGES_REQUESTED; a note is required unless approved; audited `CREATIVE_REVIEWED` |
 | `POST /campaigns/creatives/review { creativeIds, decision, note? }` | ADMIN | the same decision across up to fifty; one audit row and notification each |
-| `GET /campaigns/:id/tracking-codes/:code/image.png?size=` | same | Lot D (Q139): the code's QR, drawn through `qr`, for the artwork to embed |
+| `GET /campaigns/:id/tracking-codes/:code/image.png?size=`, `…/image.svg` | same | Lot D (Q139): the code's QR for the artwork to embed. QR-1: drawn by the QR engine when it hosts the code — GenQR's styled artwork (the SVG carries dots, frame, caption, logo; the PNG colours only) encoding the short URL the hoarding carries — and locally otherwise, of the stored short URL when one exists, else of `/t/`; `X-QR-Engine: LOCAL \| GENQR` and `X-QR-Styled` say which |
+| `POST /campaigns/:id/tracking-codes/sync-engine` | ADMIN | QR-1: puts the engine's hosted dynamic code in front of every QR code not yet hosted — for a campaign paid for while GenQR was down or before it was configured. Idempotent; the engine's own refusal comes back as it is (503 not configured, 409 quota, 502 down); audited `TRACKING_CODES_ENGINE_LINKED` with the codes linked. Answers `{ linked, codes }` |
 | `POST /t/:code/e { type: VIEW\|CTA_CLICK\|FORM_SUBMIT, ctaLabel? }` | public, metered by IP | Lot D (Q7): an interaction on the landing page |
 | `POST /campaigns/:id/landing-page/generate` | advertiser, their agent, admin (`assertMayAct`) | Lot E (Q7/Q106): drafts the five blocks from the brief through `shared/ai`; **201**; 409 on a PUBLISHED page; 503 `AI_UNAVAILABLE` / 502 `AI_FAILED`; E7-2: 429 `QUOTA_EXHAUSTED` under `ai`'s landing-page quota, an `AiGeneration` row per draft; audited `LANDING_PAGE_GENERATED` with vendor and model; E11-2: answers `url: /p/:slug` beside the blocks, as every builder read does (`withLandingUrl`) |
 | `GET /campaigns/:id/landing-page` | same | the page, with `url: /p/:slug` |
@@ -219,6 +220,43 @@ server-side by `agreements` from the live template and the campaign's spots.
   /campaigns/:id/analytics` folds them under `interactions` (`byDevice`,
   `byHour`, `byCity`, `byCta`, provenance MEASURED) and keeps
   `demographics` UNAVAILABLE. The portfolio view skips the fold.
+
+## QR-1 (16 Sep 2026): the QR engine in front of the hoarding
+
+The owner's decision: GenQR — our own QR platform, on its own deployment —
+hosts a dynamic code in front of every campaign hoarding, and the scan path
+is **`GenQR /r/XXXX → ADX /t/XXXX → destination`**. Nothing about ADX's
+counting moved: `/t/:code` is still where the scan is recorded, the bot
+filter, the IST hour, the landing beacon and the measured-vs-reported rule
+stand as they were. What GenQR adds is the styled print artwork, a short
+printed URL on the ADX-branded origin (never GenQR's own host), and a second
+log of the same scans with the phone's country, city, browser and OS — which
+ADX deliberately does not read itself.
+
+- **At payment** (`issueTrackingCodes`): the codes are minted exactly as
+  before, then `linkCodesToEngine` puts one GenQR dynamic code in front of
+  each QR code — named `<reference> · <spot title>` for GenQR's desk,
+  targeting `trackingUrl(code)` — and records `engineCodeId`, `shortUrl`,
+  `engineLinkedAt` on the row. **Best effort**: no engine configured, or an
+  engine that does not answer, is logged and the campaign is paid for with
+  the hoarding carrying `/t/`; the sync route links it later. A vanity /
+  promo campaign has nothing for the engine.
+- **`printedUrl(code)`** is what the hoarding carries — `shortUrl` when
+  hosted, else `trackingUrl` — and every read (`tracking-codes`, `authorize`)
+  answers it beside `url` with `engine: LOCAL | GENQR`.
+- **Analytics** (`campaignEngineView`): `engine` on `GET /campaigns/:id/analytics`
+  — `{ provenance: 'ENGINE', engine: 'GENQR', basis, codesLinked, codesTotal,
+  codesUnanswered, days, totalScans, scansInWindow, scansByDay, hourlyBreakdown,
+  deviceBreakdown, browserBreakdown, osBreakdown, countryBreakdown,
+  cityBreakdown }`, folded across the hosted codes (breakdowns summed, most
+  first; the hours zero-filled), null when nothing is hosted. A code GenQR
+  cannot answer for on that read is counted in `codesUnanswered` rather
+  than failing the panel. The portfolio and the daily-metrics writer skip
+  it (`engine: false`).
+- **Never in place of**: `scans` stays ADX's MEASURED number. The engine's
+  figure is the same scans seen a hop earlier and can only be higher (a
+  scan GenQR recorded that never reached `/t/` — a browser that refused the
+  redirect).
 
 ## Lot E (Q7/Q106/Q139): the landing page — `landing-page.service.ts`
 

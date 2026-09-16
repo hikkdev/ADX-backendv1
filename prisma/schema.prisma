@@ -5899,6 +5899,13 @@ model CampaignTrackingCode {
   clicks      Int @default(0)
   redemptions Int @default(0)
 
+  /// QR-1: the QR engine's id for the dynamic code in front of /t/, when one
+  /// hosts it — GenQR's code id. Null means the hoarding carries /t/ itself.
+  engineCodeId   String?   @unique
+  /// The URL printed on the hoarding: the ADX-branded short origin + /r/<shortCode>.
+  shortUrl       String?
+  engineLinkedAt DateTime?
+
   createdAt DateTime @default(now())
 
   campaign Campaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)

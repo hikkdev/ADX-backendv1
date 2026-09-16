@@ -6,7 +6,7 @@ import { Decimal } from '../../shared/money';
 import { getAdvertiserForUser } from '../advertisers';
 import { findAgentProfile } from '../agents';
 import { listContentCategories } from '../listings';
-import { IMAGE_CACHE_CONTROL, clampSize, toPngBuffer } from '../qr';
+import { IMAGE_CACHE_CONTROL, clampSize } from '../qr';
 import { withSpotReviews } from './spot-review.port';
 import {
   analyticsQuerySchema,
@@ -63,7 +63,8 @@ import {
 import { authorizeCampaign, authorizeOnBehalf, cancelCampaign, reviewCampaign, setCart, submitForPayment } from './checkout.service';
 import { matchingInventory } from './inventory.service';
 import { campaignAnalytics, portfolioAnalytics } from './analytics.service';
-import { recordInteraction, recordRedemptions, resolveScan, trackingUrl } from './tracking.service';
+import { linkCodesToEngine, printedUrl, recordInteraction, recordRedemptions, resolveScan, trackingUrl } from './tracking.service';
+import { renderDynamic } from '../../shared/qr-engine';
 import type { CampaignAggregate } from './campaigns.repository';
 import { prismaCampaignsRepository as repository } from './prisma-campaigns.repository';
 
@@ -415,6 +416,9 @@ export async function authorizeHandler(req: Request, res: Response): Promise<voi
         spotId: code.spotId,
         code: code.code,
         url: trackingUrl(code.code),
+        // QR-1: what the hoarding carries — the engine's short URL when hosted.
+        printedUrl: printedUrl(code),
+        engine: code.engineCodeId ? ('GENQR' as const) : ('LOCAL' as const),
         promoCode: code.promoCode,
       })),
     },
@@ -447,39 +451,74 @@ export async function portfolioAnalyticsHandler(req: Request, res: Response): Pr
   res.json({ success: true, data: await portfolioAnalytics(actor, query) });
 }
 
+const codeView = (code: CampaignAggregate['codes'][number]) => ({
+  id: code.id,
+  spotId: code.spotId,
+  code: code.code,
+  url: trackingUrl(code.code),
+  // QR-1: what the hoarding carries, and who hosts the code in front of /t/.
+  printedUrl: printedUrl(code),
+  engine: code.engineCodeId ? ('GENQR' as const) : ('LOCAL' as const),
+  shortUrl: code.shortUrl,
+  engineLinkedAt: code.engineLinkedAt,
+  method: code.method,
+  destination: code.destination,
+  promoCode: code.promoCode,
+  scans: code.scans,
+  clicks: code.clicks,
+  redemptions: code.redemptions,
+});
+
 export async function trackingCodesHandler(req: Request, res: Response): Promise<void> {
   const actor = await resolveActor(req);
   const campaign = await getCampaign(req.params['id'] as string, actor);
-  res.json({
-    success: true,
-    data: campaign.codes.map((code) => ({
-      id: code.id,
-      spotId: code.spotId,
-      code: code.code,
-      url: trackingUrl(code.code),
-      method: code.method,
-      destination: code.destination,
-      promoCode: code.promoCode,
-      scans: code.scans,
-      clicks: code.clicks,
-      redemptions: code.redemptions,
-    })),
-  });
+  res.json({ success: true, data: campaign.codes.map(codeView) });
 }
 
 /**
- * Lot D (Q139): the QR for one tracking code, drawn in the house style, so
- * the artwork can embed it. The token is the scan URL itself.
+ * QR-1: `POST /campaigns/:id/tracking-codes/sync-engine` — puts the
+ * engine's dynamic code in front of every QR code the campaign has that is
+ * not yet hosted. For a campaign paid for while the engine was down or
+ * before it was configured. Ops only; idempotent; the engine's own refusal
+ * is thrown as it is (503 not configured, 409 quota, 502 down).
+ */
+export async function syncTrackingCodesHandler(req: Request, res: Response): Promise<void> {
+  const actor = await resolveActor(req);
+  const campaign = await getCampaign(req.params['id'] as string, actor);
+  const linked = await linkCodesToEngine(campaign.id);
+  if (linked.length > 0) {
+    await logActivity(req.user!.sub, 'TRACKING_CODES_ENGINE_LINKED', {
+      req,
+      targetType: 'Campaign',
+      targetId: campaign.id,
+      module: 'campaigns',
+      metadata: { reference: campaign.reference, linked: linked.length, codes: linked.map((code) => code.code) },
+    });
+  }
+  const after = await getCampaign(campaign.id, actor);
+  res.json({ success: true, data: { linked: linked.length, codes: after.codes.map(codeView) } });
+}
+
+/**
+ * Lot D (Q139): the QR for one tracking code, so the artwork can embed it.
+ * QR-1: `.png` (the default, as before) or `.svg`, drawn by the engine when
+ * one hosts the code — GenQR's styled artwork encoding the short URL — and
+ * locally otherwise, of the short URL when one is stored, else of `/t/`.
+ * `X-QR-Engine` and `X-QR-Styled` say what came back.
  */
 export async function trackingCodeImageHandler(req: Request, res: Response): Promise<void> {
   const actor = await resolveActor(req);
   const campaign = await getCampaign(req.params['id'] as string, actor);
   const code = campaign.codes.find((row) => row.code === req.params['code']);
   if (!code) throw new ApiError(404, 'NOT_FOUND', 'That code is not part of this campaign.');
-  const buffer = await toPngBuffer(trackingUrl(code.code), clampSize(req.query['size']));
-  res.set('Content-Type', 'image/png');
+  // Two literal routes share this handler; the extension on the path says which.
+  const format = req.path.endsWith('.svg') ? 'svg' : 'png';
+  const image = await renderDynamic(code, trackingUrl(code.code), format, clampSize(req.query['size']));
+  res.set('Content-Type', image.contentType);
   res.set('Cache-Control', IMAGE_CACHE_CONTROL);
-  res.send(buffer);
+  res.set('X-QR-Engine', image.engine);
+  res.set('X-QR-Styled', image.styled ? 'true' : 'false');
+  res.send(image.body);
 }
 
 export async function redemptionsHandler(req: Request, res: Response): Promise<void> {

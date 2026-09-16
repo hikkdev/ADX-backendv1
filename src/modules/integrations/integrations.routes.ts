@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { asyncHandler } from '../../shared/http';
 import { authenticate, requirePermission, requireRole } from '../../shared/auth';
-import { audienceFieldsHandler, getIntegrationsHandler, testAudienceVendorHandler, testEmailDoorHandler, updateIntegrationsHandler } from './integrations.controller';
+import { audienceFieldsHandler, getIntegrationsHandler, testAudienceVendorHandler, testEmailDoorHandler, testQrEngineHandler, updateIntegrationsHandler } from './integrations.controller';
 
 export const integrationsRouter = Router();
 
@@ -18,3 +18,6 @@ integrationsRouter.post('/audience/test', requirePermission('settings.edit'), as
 // AE-B: the email card's test — one message through the one door on the
 // stored credentials, the same power as editing the row.
 integrationsRouter.post('/email/test', requirePermission('settings.edit'), asyncHandler(testEmailDoorHandler));
+// QR-1: the QR engine card's test — one read of the account on the stored
+// key, the same power as editing the row.
+integrationsRouter.post('/qr-engine/test', requirePermission('settings.edit'), asyncHandler(testQrEngineHandler));
