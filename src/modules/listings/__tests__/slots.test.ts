@@ -35,6 +35,8 @@ const passThroughFeatureGates = vi.hoisted(() => () => ({
   requireFeatureWhen: () => (_req: unknown, _res: unknown, next: () => void) => next(),
 }));
 vi.mock('../prisma-listings.repository', () => ({ prismaListingsRepository: repository }));
+// QR-8: a created listing draws its reference from the LISTING series; stubbed so nothing reaches the database.
+vi.mock('../../identifiers', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../identifiers')>()), allocateIdentifier: async () => 'LST-0909-2603' }));
 /** Lot X-B: the city key beside the typed city — Bengaluru (and its old spelling) is catalogued, the rest are typed towns. */
 const cityKeyFor = vi.hoisted(() => async (name: string | null | undefined) => (name && /^(bengaluru|bangalore)$/i.test(name.trim()) ? { cityId: 'city_bengaluru', slug: 'bengaluru' } : null));
 const withCityKey = vi.hoisted(() => async (data: { city?: string | null }) => (data.city === undefined ? data : { ...data, cityId: /^(bengaluru|bangalore)$/i.test((data.city ?? '').trim()) ? 'city_bengaluru' : null }));

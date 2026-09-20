@@ -1,10 +1,12 @@
 import crypto from 'crypto';
+import { normalizeMobile } from '../../../shared/validation';
 import bcrypt from 'bcryptjs';
 import { env } from '../../../config/env';
 import { ApiError } from '../../../shared/errors';
 import { logger } from '../../../shared/logging';
 import { sendSms } from '../../../shared/sms';
 import { notify } from '../../notifications';
+import { allocateIdentifier } from '../../identifiers';
 import type { OtpPurpose, Role } from '../../../shared/database';
 import { logActivity } from '../../../shared/audit';
 import { mobileWasErased } from '../auth.ports';
@@ -22,13 +24,9 @@ const OTP_TTL_MINUTES = 10;
 /** Wrong guesses one code will take. The per-number lock in otp-security is the real ceiling. */
 const MAX_ATTEMPTS = 5;
 
-// Canonicalize to +91XXXXXXXXXX regardless of what the client sends.
-export function normalizeMobile(mobile: string): string {
-  const digits = mobile.replace(/\D/g, '');
-  if (digits.length === 10) return `+91${digits}`;
-  if (digits.length === 12 && digits.startsWith('91')) return `+${digits}`;
-  return mobile; // Already normalized or unknown format.
-}
+// Canonicalize to +91XXXXXXXXXX regardless of what the client sends. QR-13:
+// the rule lives in shared/validation now — the desk opens accounts with it too.
+export { normalizeMobile };
 
 function generateOtp(): string {
   return String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
@@ -139,13 +137,15 @@ export async function sendOtp(mobile: string, purpose: OtpPurpose = 'LOGIN'): Pr
 
   const budget = await reserveOtpSend(mobile);
 
+  // QR-4: an account gets its own ADX-… id the moment it is made — before
+  // a party, before a name — so there is always one number to quote.
   if (purpose === 'REGISTER') {
-    user = await repository.createPublisherUser(mobile);
+    user = await repository.createPublisherUser(mobile, await allocateIdentifier('USER'));
   } else if (!user && purpose === 'LOGIN') {
     const devRole = resolveDevLoginRole(mobile);
     if (devRole) {
       logger.info('Creating dev login user from allowlist', { mobile, role: devRole });
-      user = await repository.createDevLoginUser(mobile, devRole);
+      user = await repository.createDevLoginUser(mobile, devRole, await allocateIdentifier('USER'));
       // Q-B: an admin minted by the allowlist is written to the account's
       // own audit trail — the only place the door leaves a mark.
       if (devRole === 'ADMIN') {
@@ -158,7 +158,7 @@ export async function sendOtp(mobile: string, purpose: OtpPurpose = 'LOGIN'): Pr
       }
     } else {
       logger.info('Registering unknown mobile as a roleless user', { mobile });
-      user = await repository.createUnregisteredUser(mobile);
+      user = await repository.createUnregisteredUser(mobile, await allocateIdentifier('USER'));
     }
   }
 

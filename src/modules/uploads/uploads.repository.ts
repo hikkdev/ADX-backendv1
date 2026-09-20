@@ -21,4 +21,6 @@ export interface UploadsRepository {
   record(data: UploadRecord): Promise<UploadedFile>;
   findById(id: string): Promise<UploadedFile | null>;
   remove(id: string): Promise<unknown>;
+  /** QR-7: every file a person uploaded for a purpose — the previous avatars, to purge. */
+  listByUserAndPurpose(userId: string, purpose: string): Promise<UploadedFile[]>;
 }

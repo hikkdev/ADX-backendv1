@@ -21,6 +21,9 @@ export type { VerificationState } from './supply.service';
  * it twice in a window changes nothing the first run did not already do.
  */
 export { runEnforcementSweep } from './supply.service';
+// QR-24: the rights renewal tick, and the state the console and the app print.
+export { runRightsSweep, rightsState, RIGHTS_REMINDER_DAYS, RIGHTS_DOCUMENT_KINDS } from './supply.service';
+export type { RightsState } from './supply.service';
 
 /**
  * Lot U: the listing importer (`party-imports`) opens one attempt per batch

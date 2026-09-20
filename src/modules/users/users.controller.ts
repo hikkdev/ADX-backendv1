@@ -14,6 +14,7 @@ import {
   revokeInvite,
   revokeOtherSessions,
   revokeSessionById,
+  reissueAccessToken,
 } from '../auth';
 import { assignRoleConfig, assignRoleConfigSchema, consoleStandingFor } from '../access-control';
 import type { Role } from '../../shared/database';
@@ -39,6 +40,14 @@ export async function getMe(req: Request, res: Response): Promise<void> {
   const standing = await consoleStandingFor(user.id, user.roles.map((r) => r.role));
   // E6: the second-factor state rides on /me only.
   res.json({ success: true, data: { ...profilePayload(user), ...twoFactorState(user), ...standing } });
+}
+
+/** QR-6: POST /users/me/consent — the terms and privacy click, stamped with the versions live now. */
+export async function recordMyConsent(req: Request, res: Response): Promise<void> {
+  const userId = req.user!.sub;
+  const user = await service.recordConsent(userId);
+  await logActivity(userId, 'CONSENT_RECORDED', req, { termsVersion: user.consentTermsVersion, privacyVersion: user.consentPrivacyVersion });
+  res.json({ success: true, data: profilePayload(user) });
 }
 
 export async function updateMe(req: Request, res: Response): Promise<void> {
@@ -73,7 +82,14 @@ export async function chooseParty(req: Request, res: Response): Promise<void> {
     });
   }
 
-  res.status(choice.created ? 201 : 200).json({ success: true, data: choice });
+  // QR-2: the role this call granted lives inside the access token, and the
+  // one the caller holds was signed before it existed — so the publisher's
+  // own home answered 403 until the token expired. The same session's token
+  // is re-signed with the roles as they are now and handed back; the app
+  // adopts it and the next request already carries PUBLISHER / ADVERTISER.
+  const accessToken = req.user?.sid ? await reissueAccessToken(userId, req.user.sid) : undefined;
+
+  res.status(choice.created ? 201 : 200).json({ success: true, data: { ...choice, ...(accessToken ? { accessToken } : {}) } });
 }
 
 // GET /users/me/onboarding-manifest?party=&version= — the ladder for the caller's own side

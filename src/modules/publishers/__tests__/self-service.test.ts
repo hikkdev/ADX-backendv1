@@ -18,6 +18,8 @@ const { repository, kyc } = vi.hoisted(() => ({
   },
   repository: {
     findByUserId: vi.fn(),
+    // QR-13: the settle rule's read — null leaves the status alone.
+    findByIdWithUser: vi.fn().mockResolvedValue(null),
     findByUserIdWithKyc: vi.fn(),
     update: vi.fn(),
     submitKyc: vi.fn(),

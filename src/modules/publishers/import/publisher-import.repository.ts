@@ -13,6 +13,14 @@ export type ImportPublisherFields = {
   contactMobile?: string;
   contactEmail?: string;
   panNumber?: string;
+  /** QR-13: the person behind the account, opened with the row when a first name is given. */
+  firstName?: string;
+  lastName?: string;
+  dateOfBirth?: string;
+  gender?: string;
+  /** QR-13: the address pin. */
+  latitude?: number;
+  longitude?: number;
 };
 
 /** What the planner needs to know about a publisher already on the book. */
@@ -60,7 +68,16 @@ export type ImportWithRows = PublisherImport & { rows: PublisherImportRow[] };
  */
 export type CommitAction =
   | { rowId: string; action: 'MERGE'; publisherId: string; fill: ImportPublisherFields; cityId?: string | null }
-  | { rowId: string; action: 'CREATE'; publisher: ImportPublisherFields & { mobile: string; name: string; displayId: string }; cityId?: string | null };
+  | {
+      rowId: string;
+      action: 'CREATE';
+      publisher: ImportPublisherFields & { mobile: string; name: string; displayId: string };
+      cityId?: string | null;
+      /** QR-13: the account to open (or adopt) for the row, with its own identifier; absent when the row names no person. */
+      account?: { displayId: string };
+      /** QR-14: who uploaded the batch, and their role at the time. */
+      onboardedBy?: { userId: string; role: string };
+    };
 
 export interface PublisherImportRepository {
   findPublishersByMobiles(mobiles: string[]): Promise<MatchedPublisher[]>;

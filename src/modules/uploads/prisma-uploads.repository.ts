@@ -20,4 +20,7 @@ export const prismaUploadsRepository: UploadsRepository = {
   remove(id: string) {
     return prisma.uploadedFile.delete({ where: { id } });
   },
+  listByUserAndPurpose(userId: string, purpose: string) {
+    return prisma.uploadedFile.findMany({ where: { userId, purpose: purpose as never }, orderBy: { createdAt: 'asc' } });
+  },
 };

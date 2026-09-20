@@ -1,3 +1,4 @@
+import { dateOfBirthToString } from '../../shared/validation';
 import type { Role, User } from '../../shared/database';
 
 type WithRoles = User & { roles: { role: Role }[] };
@@ -17,8 +18,20 @@ type ProfileRow = WithRoles & {
 export function profilePayload(user: ProfileRow) {
   return {
     id: user.id,
+    // QR-4: the person's own ADX-… id and their two names.
+    displayId: user.displayId,
     mobile: user.mobile,
     name: user.name,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    // QR-5: the person's date of birth (YYYY-MM-DD) and gender.
+    dateOfBirth: dateOfBirthToString(user.dateOfBirth),
+    gender: user.gender,
+    // QR-6: the terms and privacy consent — null until the first screen after
+    // the OTP is answered; the app gates on it.
+    consentAcceptedAt: user.consentAcceptedAt,
+    consentTermsVersion: user.consentTermsVersion,
+    consentPrivacyVersion: user.consentPrivacyVersion,
     email: user.email,
     avatarUrl: user.avatarUrl,
     hasPassword: !!user.passwordHash,

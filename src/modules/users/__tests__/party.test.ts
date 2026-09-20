@@ -104,11 +104,12 @@ describe('opening the advertiser side', () => {
   it('registers through the advertisers module in its vocabulary, named by its number until told otherwise', async () => {
     const choice = await chooseParty('usr_1', { party: 'ADVERTISER', accountType: 'BUSINESS' });
 
-    expect(advertisers.registerAdvertiser).toHaveBeenCalledWith({
+    // QR-15: the app's own door stamps SELF beside these (pinned in qr15-party-self-stamp).
+    expect(advertisers.registerAdvertiser).toHaveBeenCalledWith(expect.objectContaining({
       userId: 'usr_1',
       name: '+919876543210',
       type: 'COMMERCIAL',
-    });
+    }));
     expect(repository.grantRole).toHaveBeenCalledWith('usr_1', 'ADVERTISER');
     expect(choice).toEqual({
       party: 'ADVERTISER',

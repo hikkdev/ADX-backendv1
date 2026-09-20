@@ -82,3 +82,14 @@ export const listSchedulesQuerySchema = listQuerySchema(SCHEDULE_STATUSES, REPOR
 });
 
 export const scheduleIdParamSchema = z.object({ id: z.string().trim().min(1).max(64) });
+
+/** QR-14: the board's window — a preset, or a from/to pair — and its two optional cuts. */
+export const onboardingBoardQuerySchema = z
+  .object({
+    preset: z.enum(WINDOW_PRESETS).optional(),
+    from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    via: z.enum(['SELF', 'AGENT', 'QR', 'DESK', 'IMPORT']).optional(),
+    role: z.string().trim().min(1).max(60).optional(),
+  })
+  .refine((v) => Boolean(v.preset) || Boolean(v.from && v.to), { message: 'A preset, or from and to' });

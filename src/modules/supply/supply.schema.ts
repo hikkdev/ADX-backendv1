@@ -1,5 +1,8 @@
 import { z } from 'zod';
 
+/** A calendar day, YYYY-MM-DD — the way a permit prints its end date. */
+const isoDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
+
 export const acceptPlatformSchema = z.object({
   publisherId: z.string().min(1),
 });
@@ -63,7 +66,26 @@ export const submitDocumentSchema = z.object({
     'OTHER',
   ]),
   url: z.string().url(),
+  /** QR-24: when this permit or agreement runs out — a renewal carries the new date; approved, it extends the listing's term. */
+  expiresAt: isoDay.optional(),
 });
+
+/* ── QR-24: the right to sell a space, and its term ──────────────────── */
+
+export const RIGHTS_BASES = ['OWNED', 'LEASED', 'LICENSED', 'PERMIT'] as const;
+
+export const rightsSchema = z
+  .object({
+    basis: z.enum(RIGHTS_BASES),
+    /** The day the lease, licence or permit runs out; none for a space the publisher owns. */
+    validUntil: isoDay.nullable().optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.basis !== 'OWNED' && !value.validUntil) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['validUntil'], message: 'A lease, licence or permit needs the day it runs out.' });
+    }
+  });
+export type RightsInput = z.infer<typeof rightsSchema>;
 
 export const reviewDocumentSchema = z
   .object({

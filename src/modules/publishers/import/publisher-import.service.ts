@@ -43,17 +43,21 @@ type Plan =
 const fieldsOf = (row: ImportRow): ImportPublisherFields => {
   const { mobile: _mobile, ...rest } = row;
   const fields: ImportPublisherFields = {};
-  for (const [key, value] of Object.entries(rest)) if (value !== undefined) (fields as Record<string, string>)[key] = value as string;
+  for (const [key, value] of Object.entries(rest)) if (value !== undefined) (fields as Record<string, unknown>)[key] = value;
   return fields;
 };
 
 /** The fields of `incoming` the publisher does not already hold — and that an earlier row of this batch has not already claimed. */
+/** QR-13: the columns that live on the person or the pin — a merge leaves an existing publisher's account alone. */
+export const PERSON_OR_PIN_COLUMNS = new Set<string>(['firstName', 'lastName', 'dateOfBirth', 'gender', 'latitude', 'longitude']);
+
 function blanksOf(publisher: MatchedPublisher, incoming: ImportPublisherFields, claimed: Set<string>): ImportPublisherFields {
   const fill: ImportPublisherFields = {};
-  for (const [key, value] of Object.entries(incoming) as [keyof ImportPublisherFields, string][]) {
-    const current = key === 'panNumber' ? publisher.kyc?.panNumber : publisher[key];
+  for (const [key, value] of Object.entries(incoming) as [keyof ImportPublisherFields, unknown][]) {
+    if (PERSON_OR_PIN_COLUMNS.has(key)) continue;
+    const current = key === 'panNumber' ? publisher.kyc?.panNumber : publisher[key as keyof MatchedPublisher];
     const empty = current === null || current === undefined || current === '';
-    if (empty && !claimed.has(`${publisher.id}:${key}`)) fill[key] = value;
+    if (empty && !claimed.has(`${publisher.id}:${key}`)) fill[key] = value as never;
   }
   return fill;
 }
@@ -182,7 +186,7 @@ export async function getImport(id: string) {
  * plan written at validation is what runs, row by row, in one transaction.
  * Identifiers are minted here, ahead of the transaction, one per create.
  */
-export async function commitImport(id: string, byUserId: string, req?: Request) {
+export async function commitImport(id: string, byUserId: string, req?: Request, byRole = 'Admin') {
   const found = await getImport(id);
   if (found.status !== 'VALIDATED') {
     throw new ApiError(409, 'CONFLICT', found.status === 'COMMITTED' ? 'This import has already been committed' : 'This import was revoked');
@@ -206,7 +210,14 @@ export async function commitImport(id: string, byUserId: string, req?: Request) 
       const value = data[column];
       if (typeof value === 'string' && value !== '') (fields as Record<string, string>)[column] = value;
     }
-    const mobile = String(data['mobile']);
+    // QR-13: the same number the OTP door canonicalises to, so the account
+    // the import opens is the one the person signs in as.
+    const mobile = normalizeMobile(String(data['mobile']));
+    // The pin and the person ride as their own types, not strings.
+    for (const numeric of ['latitude', 'longitude'] as const) {
+      const value = data[numeric];
+      if (typeof value === 'number') (fields as Record<string, unknown>)[numeric] = value;
+    }
     // Lot X-B: the key the row's city (canonical slug, or as typed) resolves to; cached a minute per spelling.
     const cityId = fields.city !== undefined ? ((await cityKeyFor(fields.city))?.cityId ?? null) : undefined;
     actions.push({
@@ -214,6 +225,10 @@ export async function commitImport(id: string, byUserId: string, req?: Request) 
       action: 'CREATE',
       publisher: { ...fields, mobile, name: fields.name ?? mobile, displayId: await allocateIdentifier('PUBLISHER') },
       ...(cityId !== undefined ? { cityId } : {}),
+      // QR-13: a row that names the person opens their account with the publisher.
+      ...(fields.firstName !== undefined ? { account: { displayId: await allocateIdentifier('USER') } } : {}),
+      // QR-14: the batch's uploader is who onboarded the row.
+      onboardedBy: { userId: byUserId, role: byRole },
     });
   }
 

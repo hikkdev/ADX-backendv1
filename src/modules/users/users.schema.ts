@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { upperEnum } from '../../shared/validation';
+import { dateOfBirthSchema, genderSchema, upperEnum } from '../../shared/validation';
 
 export const ASSIGNABLE_ROLES = [
   'AGENT_PUBLISHER',
@@ -14,9 +14,16 @@ const mobileNumber = z.string().regex(/^\+?[1-9]\d{9,14}$/, 'Invalid mobile numb
 
 export const updateProfileSchema = z.object({
   name: z.string().min(1).optional(),
+  /** QR-4: asked right after the first OTP. Either alone is accepted; the display name is composed from what is on file. */
+  firstName: z.string().trim().min(1).max(60).optional(),
+  lastName: z.string().trim().min(1).max(60).optional(),
   email: z.string().email().optional(),
   language: z.string().optional(),
-  avatarUrl: z.string().url().optional(),
+  /** QR-7: the profile picture — an upload of purpose AVATAR; null removes it. */
+  avatarUrl: z.string().url().nullable().optional(),
+  /** QR-5: the person's date of birth (YYYY-MM-DD, 18+) and gender; the same two columns `PATCH /publishers/me` writes. */
+  dateOfBirth: dateOfBirthSchema.optional(),
+  gender: genderSchema.optional(),
 });
 
 export const updateUserByAdminSchema = z.object({

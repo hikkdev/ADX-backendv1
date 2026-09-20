@@ -243,7 +243,36 @@ export interface CashfreeConfig { appId?: string; secretKey?: string; webhookSec
 export interface CcavenueConfig { merchantId?: string; accessCode?: string; workingKey?: string; testMode?: boolean }
 export interface StripeConfig { publishableKey?: string; secretKey?: string; webhookSecret?: string }
 export interface ResendConfig { apiKey?: string; fromEmail?: string }
-export interface BrandingConfig { platformName?: string; headerLogoUrl?: string; authLogoUrl?: string }
+/**
+ * QR-9: the brand the console may retune — DR 11 is the default for every
+ * field left empty (`shared/integrations/branding.ts`). `headerLogoUrl` and
+ * `authLogoUrl` are the two older fields, read as the wordmark and the mark.
+ */
+export interface BrandingConfig {
+  platformName?: string;
+  tagline?: string;
+  headerLogoUrl?: string;
+  authLogoUrl?: string;
+  primaryColor?: string;
+  deepColor?: string;
+  inkColor?: string;
+  groundColor?: string;
+  wordmarkUrl?: string;
+  wordmarkInverseUrl?: string;
+  markUrl?: string;
+  markInverseUrl?: string;
+  iconUrl?: string;
+  /** QR-11: the website kit — the lines the hero rotates, its image, the share card, the favicon set. */
+  taglines?: string[];
+  heroImageUrl?: string;
+  ogImageUrl?: string;
+  faviconUrl?: string;
+  /** QR-12: per-surface basics — the phones' launcher icon for the next build, the console's tab title, the site's title and description. */
+  appIconUrl?: string;
+  consoleTitle?: string;
+  siteTitle?: string;
+  siteDescription?: string;
+}
 
 /**
  * Which model writes listing descriptions and translates the marketplace.

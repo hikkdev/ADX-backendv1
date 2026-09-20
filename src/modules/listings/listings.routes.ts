@@ -6,10 +6,15 @@ import { requireFeatureWhen } from '../feature-flags';
 import {
   acceptSuggestedRateHandler,
   browseCategoriesHandler,
+  browseVenuesHandler,
   browseListingHandler,
   browseListingsHandler,
   contentCategoriesHandler,
   createListingHandler,
+  deleteListingDraftHandler,
+  deskListingDraftsHandler,
+  listMyListingDraftsHandler,
+  saveListingDraftHandler,
   getAllListingsHandler,
   listingContentRulesHandler,
   getListingHandler,
@@ -51,6 +56,8 @@ listingRouter.get('/browse', asyncHandler(browseListingsHandler));
 /* G12-B: the category grid for the place. Above `/browse/:listingId` so
  * "categories" is never read as a listing id. */
 listingRouter.get('/browse/categories', asyncHandler(browseCategoriesHandler));
+/* QR-20: the sub-category (venue) tiles for the place — the home strip and the Explore grid. */
+listingRouter.get('/browse/venues', asyncHandler(browseVenuesHandler));
 listingRouter.get('/browse/:listingId', asyncHandler(browseListingHandler));
 /* Lot D (Q5): the heart. Any signed-in advertiser, or their agent under a
  * live grant naming the advertiser — the handler resolves whose book the
@@ -85,6 +92,15 @@ listingRouter.get('/', requireRole('ADMIN'), asyncHandler(getAllListingsHandler)
  * door: the handler resolves their publisher record from the login and ignores
  * any `publisherId` in the body, so it cannot be used to file a spot under
  * somebody else's account. */
+/* QR-8: listing drafts — the publisher's own, saved half-way to finish
+   later, and the desk's view of every publisher's. Registered before
+   `/:listingId` so "drafts" is never read as an id. */
+listingRouter.get('/drafts/desk', requireRole('ADMIN'), asyncHandler(deskListingDraftsHandler));
+listingRouter.get('/drafts', requireRole('PUBLISHER'), asyncHandler(listMyListingDraftsHandler));
+listingRouter.post('/drafts', requireRole('PUBLISHER'), asyncHandler(saveListingDraftHandler));
+listingRouter.put('/drafts/:draftId', requireRole('PUBLISHER'), asyncHandler(saveListingDraftHandler));
+listingRouter.delete('/drafts/:draftId', requireRole('PUBLISHER'), asyncHandler(deleteListingDraftHandler));
+
 listingRouter.post(
   '/',
   requireRole('AGENT_PUBLISHER', 'PUBLISHER', 'ADMIN'),

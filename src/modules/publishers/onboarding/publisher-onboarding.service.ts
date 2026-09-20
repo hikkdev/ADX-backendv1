@@ -1,4 +1,6 @@
 import { ApiError } from '../../../shared/errors';
+import { isVerifiedParty, publisherReadiness } from '../../../shared/kyc-state';
+import { dateOfBirthToDate, dateOfBirthToString } from '../../../shared/validation';
 import { money, type Money } from '../../../shared/money';
 import type { PublisherType } from '../../../shared/database';
 import { allocateIdentifier } from '../../identifiers';
@@ -79,7 +81,24 @@ export async function getMyProfile(userId: string) {
   if (!publisher) {
     throw new ApiError(404, 'NOT_FOUND', 'Publisher profile not found. Complete registration first.');
   }
-  return publisher;
+  // QR-3: the one figure the home draws and the checklist behind it — the
+  // basics, the identity check, the terms — and the verified mark. Derived
+  // here from the row so the app and the listing door read the same rule.
+  const { user, ...row } = publisher;
+  const dateOfBirth = dateOfBirthToString(user?.dateOfBirth);
+  return {
+    ...row,
+    dateOfBirth,
+    gender: user?.gender ?? null,
+    // QR-7: the person's profile picture, off the User row, for the home's
+    // avatar and the side menu.
+    avatarUrl: user?.avatarUrl ?? null,
+    readiness: publisherReadiness({ ...row, dateOfBirth }),
+    // QR-22: the terms are taken at sign-up now; the home and the ladder's
+    // last screen read this rather than asking twice.
+    platformAgreementAcceptedAt: await repository.findPlatformAgreementAcceptedAt(publisher.id),
+    verified: isVerifiedParty(publisher.kycStatus),
+  };
 }
 
 /**
@@ -356,10 +375,25 @@ export async function getMyAccessLog(userId: string) {
 }
 
 /** Steps 2–4: what the publisher types about themselves. */
-export async function updateMyProfile(userId: string, patch: PublisherPatch) {
+export async function updateMyProfile(userId: string, input: PublisherPatch & { dateOfBirth?: string; gender?: string }) {
   // Lot X-B: the city key rides with the typed city.
   const publisher = await mine(userId);
-  return repository.update(publisher.id, await withCityKey(patch));
+  // QR-5: the person's own details go to their User row; the rest is the
+  // publisher's. A pin is both halves or neither.
+  const { dateOfBirth, gender, ...patch } = input;
+  if ((patch.latitude === undefined) !== (patch.longitude === undefined)) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Send latitude and longitude together, or neither.');
+  }
+  if (dateOfBirth !== undefined || gender !== undefined) {
+    await repository.setUserDetails(userId, {
+      ...(dateOfBirth !== undefined ? { dateOfBirth: dateOfBirthToDate(dateOfBirth) } : {}),
+      ...(gender !== undefined ? { gender } : {}),
+    });
+  }
+  const updated = await repository.update(publisher.id, await withCityKey(patch));
+  // QR-13: the basics in, the onboarding is done — no separate call needed.
+  await settleOnboardingIfReady(publisher.id);
+  return { ...updated, ...(dateOfBirth !== undefined ? { dateOfBirth } : {}), ...(gender !== undefined ? { gender } : {}) };
 }
 
 /** The KYC row, or null before the first submission — a state the ladder routes on. */
@@ -411,12 +445,36 @@ export async function completeMyOnboarding(userId: string) {
   if (publisher.onboardingStatus === 'IN_ONBOARDING') {
     throw new ApiError(409, 'CONFLICT', 'An agent is completing your onboarding with you.');
   }
-  if (!publisher.kyc?.submittedAt) {
-    throw new ApiError(400, 'BAD_REQUEST', 'Submit your KYC documents first.');
+  // QR-13 (the owner, 17 Sep): KYC ranks, it does not gate — the basics are
+  // what completes an onboarding, on this path and at the desk alike. A
+  // publisher whose documents are already in has given them along the way.
+  if (!onboardingBasicsIn(publisher) && !publisher.kyc?.submittedAt) {
+    throw new ApiError(400, 'BAD_REQUEST', 'Your name, email, address and date of birth are needed first.');
   }
   const completed = await repository.completeOnboarding(publisher.id);
   await closeOnboardingGrants({ publisherId: publisher.id });
   // Q101: the agent who scanned them in is paid even when the owner finished alone.
   const incentive = await recordOnboardingCommission(publisher);
   return { ...(completed as object), incentive };
+}
+
+/** The four basics the readiness rule counts, off the row the KYC read joins. */
+function onboardingBasicsIn(publisher: { name: string | null; email: string | null; address: string | null; user?: { dateOfBirth?: Date | null } | null }): boolean {
+  return Boolean(publisher.name && publisher.email && publisher.address && publisher.user?.dateOfBirth);
+}
+
+/**
+ * QR-13: an onboarding completes itself the moment the basics are in —
+ * from the app's own profile edit or the desk's — with everything the
+ * explicit call does (grants closed, the scanning agent paid). A row that
+ * is complete, or that an agent is walking through, is left alone.
+ */
+export async function settleOnboardingIfReady(publisherId: string): Promise<boolean> {
+  const publisher = await repository.findByIdWithUser(publisherId);
+  if (!publisher || publisher.onboardingStatus !== 'PENDING_ONBOARDING') return false;
+  if (!onboardingBasicsIn(publisher)) return false;
+  await repository.completeOnboarding(publisher.id);
+  await closeOnboardingGrants({ publisherId: publisher.id });
+  await recordOnboardingCommission(publisher as never);
+  return true;
 }

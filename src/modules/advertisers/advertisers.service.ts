@@ -1,11 +1,14 @@
 import { randomUUID } from 'node:crypto';
+import { onboardingFactsOf, type OnboardingFacts } from '../../shared/onboarding';
 import { ApiError } from '../../shared/errors';
 import { logger } from '../../shared/logging';
 import { Decimal, money } from '../../shared/money';
+import { dateOfBirthToDate, dateOfBirthToString, normalizeMobile } from '../../shared/validation';
 import type {
   Advertiser,
   AgreementKind,
   Brand,
+  Gender,
   KycStatus,
   RefundDestination,
   RefundReason,
@@ -23,7 +26,7 @@ import { findPayoutMethod, recordIncentiveOnce } from '../payouts';
 import { withCityKey } from '../pricing';
 import { findWallet, move } from '../wallets';
 import { prismaAdvertisersRepository as repository } from './prisma-advertisers.repository';
-import type { CreateAdvertiserInput, Money, RefundRequestDeskRow, TopUpDeskQuery, WalletSnapshot } from './advertisers.repository';
+import type { AdvertiserRosterQuery, CreateAdvertiserInput, Money, PersonRow, RefundRequestDeskRow, TopUpDeskQuery, WalletSnapshot } from './advertisers.repository';
 
 /**
  * The demand-side lifecycle. Specification: docs/advertiser-onboarding.md.
@@ -56,15 +59,24 @@ export function isProfileComplete(advertiser: Advertiser): boolean {
 export type BookingEligibility = {
   eligible: boolean;
   /**
-   * Every unmet gate, not just the first, so the app can show the whole path.
-   * SUSPENDED is Lot A's BLOCK_NEW: nothing new starts until it is lifted.
+   * Every unmet BOOKING gate, not just the first, so the app can show the
+   * whole path. SUSPENDED is Lot A's BLOCK_NEW: nothing new starts until it
+   * is lifted. QR-16: KYC is no longer among these — it gates the launch.
    */
   blockedBy: Array<'SUSPENDED' | 'PROFILE' | 'KYC' | 'AGREEMENT' | 'FUNDS'>;
+  /**
+   * QR-16 (the owner, 17 Sep 2026): what stops a PAID campaign from going
+   * live. An unverified advertiser browses, fills a cart and pays; the
+   * campaign stays SCHEDULED until KYC — identity, and the business
+   * documents for a business — is verified, and the lifecycle tick launches
+   * it then. Today the one entry is KYC.
+   */
+  launchBlockedBy: Array<'KYC'>;
   wallet: WalletSnapshot | null;
 };
 
 /**
- * Gates 2 through 5, evaluated together.
+ * Gates 2, 4 and 5 for the booking, gate 3 for the launch, evaluated together.
  *
  * `amount` is optional: without it this answers "can this advertiser book at
  * all", with it, "can they afford this campaign".
@@ -83,7 +95,8 @@ export async function bookingEligibility(
   const blockedBy: BookingEligibility['blockedBy'] = [];
   if ((advertiser.suspensionScopes ?? []).includes('BLOCK_NEW')) blockedBy.push('SUSPENDED');
   if (!isProfileComplete(advertiser)) blockedBy.push('PROFILE');
-  if (advertiser.kycStatus !== 'VERIFIED') blockedBy.push('KYC');
+  // QR-16: verification holds the launch, not the booking — see `launchBlockedBy`.
+  const launchBlockedBy: BookingEligibility['launchBlockedBy'] = advertiser.kycStatus === 'VERIFIED' ? [] : ['KYC'];
   // Lot D (Q55): any acceptance clears the gate unless the live version says
   // `requiresReacceptance` — then it has to be the live version. One rule,
   // owned by `agreements`, applied here rather than restated.
@@ -93,7 +106,7 @@ export async function bookingEligibility(
   const needed = amount ? Number(amount) : 0;
   if (spendable <= 0 || spendable < needed) blockedBy.push('FUNDS');
 
-  return { eligible: blockedBy.length === 0, blockedBy, wallet };
+  return { eligible: blockedBy.length === 0, blockedBy, launchBlockedBy, wallet };
 }
 
 /**
@@ -127,9 +140,7 @@ export async function assertCanBook(advertiserId: string, amount?: Money): Promi
   if (blockedBy.includes('PROFILE')) {
     throw new ApiError(409, 'CONFLICT', 'Complete the advertiser profile before booking');
   }
-  if (blockedBy.includes('KYC')) {
-    throw new ApiError(403, 'KYC_REQUIRED', 'KYC must be verified before booking');
-  }
+  // QR-16: KYC no longer refuses a booking — it holds the launch (`launchBlockedBy`).
   if (blockedBy.includes('AGREEMENT')) {
     throw new ApiError(
       403,
@@ -165,13 +176,61 @@ export function findAdvertiser(id: string): Promise<Advertiser | null> {
  */
 export async function getAdvertiserDetail(
   id: string,
-): Promise<Advertiser & { user: { closedAt: Date | null; closeReason: string | null } | null; kyc: KycSummary }> {
+): Promise<Advertiser & { user: { closedAt: Date | null; closeReason: string | null } | null; kyc: KycSummary; onboarding: OnboardingFacts; person: DetailPerson | null }> {
   const advertiser = await getAdvertiser(id);
-  const [user, record] = await Promise.all([
+  const [user, record, held] = await Promise.all([
     advertiser.userId ? repository.findUserClosure(advertiser.userId) : Promise.resolve(null),
     repository.findKycSummary(advertiser.id, advertiser.userId),
+    // QR-15: the person behind the account, for the desk's Edit details drawer.
+    advertiser.userId ? repository.findUserPerson(advertiser.userId) : Promise.resolve(null),
   ]);
-  return { ...advertiser, user: user ? { closedAt: user.closedAt, closeReason: user.closeReason } : null, kyc: kycSummaryOf(record, advertiser.kycStatus) };
+  // QR-14: who onboarded them, named.
+  const byName = advertiser.onboardedById ? await repository.findUserLabel(advertiser.onboardedById) : null;
+  return {
+    ...advertiser,
+    user: user ? { closedAt: user.closedAt, closeReason: user.closeReason } : null,
+    kyc: kycSummaryOf(record, advertiser.kycStatus),
+    onboarding: onboardingFactsOf(advertiser, byName),
+    person: personOf(held),
+  };
+}
+
+/** QR-15: the person's fields as the console reads them — the date of birth as YYYY-MM-DD. */
+export type DetailPerson = {
+  displayId: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  dateOfBirth: string | null;
+  gender: string | null;
+  avatarUrl: string | null;
+  consentAcceptedAt: Date | null;
+};
+
+function personOf(held: PersonRow | null | undefined): DetailPerson | null {
+  if (!held) return null;
+  return {
+    displayId: held.displayId ?? null,
+    firstName: held.firstName ?? null,
+    lastName: held.lastName ?? null,
+    dateOfBirth: dateOfBirthToString(held.dateOfBirth ?? null),
+    gender: held.gender ?? null,
+    avatarUrl: held.avatarUrl ?? null,
+    consentAcceptedAt: held.consentAcceptedAt ?? null,
+  };
+}
+
+/**
+ * QR-14/15: the roster names who onboarded each row — `onboarding { via,
+ * viaLabel, byId, byName, byRole, at }` — with one name lookup for the page.
+ * A row read without the stamp columns (an older fixture, a narrow select)
+ * is left as it is.
+ */
+async function withOnboardingFacts<T extends { onboardedById?: string | null }>(rows: T[]): Promise<(T & { onboarding?: OnboardingFacts })[]> {
+  const ids = rows.map((r) => r.onboardedById).filter((id): id is string => Boolean(id));
+  const names = ids.length > 0 ? await repository.userLabels(ids) : new Map<string, string | null>();
+  return rows.map((row) =>
+    'onboardedVia' in row ? { ...row, onboarding: onboardingFactsOf(row as never, row.onboardedById ? (names.get(row.onboardedById) ?? null) : null) } : row,
+  );
 }
 
 /**
@@ -195,9 +254,17 @@ export const findAdvertiserLabelsForUsers = (userIds: readonly string[]) =>
 /** K-B1: `{ id, label, displayId }` per advertiser id, one query — the QR desk's ref column. */
 export const findAdvertiserLabels = (ids: readonly string[]) => repository.findLabelsByIds([...new Set(ids)]);
 
+/**
+ * QR-15: the person behind the account, as the desk (or an import) sends
+ * them. Given a first name, `registerAdvertiser` opens (or adopts) the
+ * sign-in account for the number up front — the owner's first sign-in is
+ * OTP → terms → home, and the profile gate finds its answers already in.
+ */
+export type DeskPerson = { firstName?: string; lastName?: string; dateOfBirth?: string; gender?: Gender };
+
 export type RegisterInput = Omit<CreateAdvertiserInput, 'displayId' | 'mobile'> & {
   mobile?: string;
-};
+} & DeskPerson;
 
 /**
  * Gate 1, and the only place an advertiser identifier is issued.
@@ -208,14 +275,19 @@ export type RegisterInput = Omit<CreateAdvertiserInput, 'displayId' | 'mobile'> 
  * advertiser should not have to invent one before they can book.
  */
 export async function registerAdvertiser(input: RegisterInput): Promise<Advertiser> {
+  const { firstName, lastName, dateOfBirth, gender, ...rest } = input;
   // A self-serve signup takes the number from the session, never from the
   // request: the caller proved they hold it by signing in with an OTP, and
   // trusting the body would let anyone open an account against someone else's
   // number. An agent opening an account for a third party supplies it instead,
-  // because there is no session belonging to that person yet.
-  const mobile = input.userId
-    ? await repository.findUserMobile(input.userId)
-    : (input.mobile ?? null);
+  // because there is no session belonging to that person yet. QR-15: the
+  // number is canonicalised the way the OTP door does it, so the account the
+  // desk opens is the one the person later signs in as — one row, not two.
+  const mobile = rest.userId
+    ? await repository.findUserMobile(rest.userId)
+    : rest.mobile
+      ? normalizeMobile(rest.mobile)
+      : null;
 
   if (!mobile) {
     throw new ApiError(400, 'BAD_REQUEST', 'A mobile number is required');
@@ -226,15 +298,32 @@ export async function registerAdvertiser(input: RegisterInput): Promise<Advertis
     // An account an agent opened for this number at the door, before its owner
     // ever signed in — and this is that owner arriving. Link it; the wallet and
     // brand were made when the agent opened it.
-    if (input.userId && existing.userId === null) {
-      return repository.attachUser(existing.id, input.userId);
+    if (rest.userId && existing.userId === null) {
+      return repository.attachUser(existing.id, rest.userId);
     }
     throw new ApiError(409, 'CONFLICT', 'An advertiser with this mobile already exists');
   }
 
+  // QR-15: a desk onboarding names the person — open (or adopt) their account
+  // first, so the sign-in lands on the advertiser's home with nothing to ask.
+  let userId = rest.userId ?? null;
+  if (userId === null && firstName !== undefined) {
+    const account = await repository.ensureAccount({
+      mobile,
+      displayId: await allocateIdentifier('USER'),
+      name: `${firstName} ${lastName ?? ''}`.trim(),
+      ...(rest.email ? { email: rest.email } : {}),
+      firstName,
+      ...(lastName !== undefined ? { lastName } : {}),
+      ...(dateOfBirth !== undefined ? { dateOfBirth: dateOfBirthToDate(dateOfBirth) } : {}),
+      ...(gender !== undefined ? { gender } : {}),
+    });
+    userId = account.id;
+  }
+
   const displayId = await allocateIdentifier('ADVERTISER');
   // Lot X-B: the city key rides with the typed city (null for a town the catalogue lacks).
-  const advertiser = await repository.createAdvertiser(await withCityKey({ ...input, mobile, displayId }));
+  const advertiser = await repository.createAdvertiser(await withCityKey({ ...rest, mobile, displayId, userId }));
 
   await repository.ensureWallet(advertiser.id);
 
@@ -248,15 +337,44 @@ export async function registerAdvertiser(input: RegisterInput): Promise<Advertis
   return advertiser;
 }
 
-/** Gate 2. */
+/**
+ * Gate 2. QR-15: the person's own columns (the names, the date of birth,
+ * the gender) go to the account behind the profile, and the email with
+ * them; a profile nobody has claimed that the desk gives a first name gets
+ * its account opened and linked, the way a fresh onboarding does.
+ */
 export async function updateProfile(
   id: string,
-  patch: Parameters<typeof repository.updateAdvertiser>[1]
+  patch: Parameters<typeof repository.updateAdvertiser>[1] & DeskPerson
 ): Promise<Advertiser> {
-  await getAdvertiser(id);
+  const advertiser = await getAdvertiser(id);
   // kycStatus and activatedAt are outcomes of review and acceptance, never of
   // someone editing their own profile.
-  const { kycStatus: _kyc, activatedAt: _activated, ...safe } = patch;
+  const { kycStatus: _kyc, activatedAt: _activated, firstName, lastName, dateOfBirth, gender, ...safe } = patch;
+  const person = {
+    ...(firstName !== undefined ? { firstName } : {}),
+    ...(lastName !== undefined ? { lastName } : {}),
+    ...(dateOfBirth !== undefined ? { dateOfBirth: dateOfBirthToDate(dateOfBirth) } : {}),
+    ...(gender !== undefined ? { gender } : {}),
+  };
+  if (Object.keys(person).length > 0 || safe.email) {
+    if (advertiser.userId) {
+      const held = await repository.findUserPerson(advertiser.userId);
+      const name = firstName !== undefined || lastName !== undefined
+        ? `${firstName ?? held?.firstName ?? ''} ${lastName ?? held?.lastName ?? ''}`.trim()
+        : undefined;
+      await repository.updateAccount(advertiser.userId, { ...person, ...(name ? { name } : {}), ...(safe.email ? { email: safe.email } : {}) });
+    } else if (firstName !== undefined) {
+      const account = await repository.ensureAccount({
+        mobile: normalizeMobile(advertiser.mobile),
+        displayId: await allocateIdentifier('USER'),
+        name: `${firstName} ${lastName ?? ''}`.trim(),
+        ...(safe.email ? { email: safe.email } : {}),
+        ...person,
+      });
+      await repository.attachUser(id, account.id);
+    }
+  }
   return repository.updateAdvertiser(id, await withCityKey(safe));
 }
 
@@ -345,7 +463,12 @@ async function maybeActivate(advertiser: Advertiser): Promise<Activated> {
 }
 
 /** The roster; E7-3: `q` searches name / company / email / mobile / displayId beside the cursor page. */
-export const listAdvertisers = (query: PageQuery & { q?: string | undefined }) => repository.listAdvertisers(query);
+export const listAdvertisers = async (query: AdvertiserRosterQuery) => {
+  const page = await repository.listAdvertisers(query);
+  // QR-14/15: the roster names who onboarded each row, one lookup for the page.
+  const rows = (page as { rows?: Advertiser[] }).rows;
+  return rows ? { ...page, rows: await withOnboardingFacts(rows) } : page;
+};
 
 /**
  * The accounts an agent holds.
@@ -381,9 +504,9 @@ export async function acceptPlatformAgreement(
 ): Promise<Activated> {
   const advertiser = await getAdvertiser(advertiserId);
 
-  if (advertiser.kycStatus !== 'VERIFIED') {
-    throw new ApiError(403, 'KYC_REQUIRED', 'KYC must be verified before accepting the agreement');
-  }
+  // QR-16 (the owner, 17 Sep 2026): the agreement is the advertiser's own
+  // click and may come before the verification — an unverified advertiser
+  // books and pays; only the launch waits. `maybeActivate` still needs both.
 
   // Lot D (Q55): the newest click stands unless a live version demands
   // re-acceptance and the click was on an older one — then a new row is

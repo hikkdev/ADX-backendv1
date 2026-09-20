@@ -1,4 +1,6 @@
 import { ApiError } from '../../shared/errors';
+import { PROFILE_BASIC_LABEL, profileBasicsMissing } from '../../shared/kyc-state';
+import { allocateIdentifier } from '../identifiers';
 import { auditDiff, findActivityRows, logActivity } from '../../shared/audit';
 import { toListPage, type ListPage } from '../../shared/pagination';
 import { assertPublishable, belowFloorFlags, checkGate } from '../rate-cards';
@@ -37,6 +39,8 @@ export type ListingDraft = Omit<
   NewListing,
   'ratePerDay' | 'ratePerDaySurgeUntil' | 'areaSqFt'
 > & {
+  /** QR-8: the reference carried over from a saved draft; minted here when absent. */
+  displayId?: string | null;
   /** DR 02 step 6. Written after the listing exists, so it has an id to hang on. */
   contentRules?: ContentRule[];
   mediaTypeName?: string;
@@ -172,9 +176,16 @@ export async function createListing(draft: ListingDraft) {
         })
       : null;
 
+  // QR-8: the reference is minted at creation — the LISTING series,
+  // LST-DDMM-YYNN — unless the caller carries one over from a draft. Every
+  // listing has a name from its first moment; the desk and the publisher
+  // quote the same one from draft to live. (Rows from before QR-8 keep their
+  // ADX-LST-nnnnn; `submitListingForReview` mints for any still without.)
+  const displayId = data.displayId ?? (await allocateIdentifier('LISTING'));
   // Lot X-B: the city key rides with the typed city (null for a town the catalogue lacks).
   const created = await repository.create({
     ...(await withCityKey(data)),
+    displayId,
     ratePerDay,
     ...(areaSqFt ? { areaSqFt } : {}),
     ...(classified.venueTypeId ? { venueTypeId: classified.venueTypeId } : {}),
@@ -608,20 +619,14 @@ export async function assertCanCreateForPublisher(
 }
 
 /**
- * The reference the publisher is given, e.g. ADX-LST-24018.
- *
- * Its own allocator rather than the identifiers module's, because that mints
- * *party* codes in a different shape — PUB-1909-2601 — and a listing is not a
- * party. Same retry-on-clash pattern as every other reference in this codebase.
+ * The reference a listing from before QR-8 is given at submit, when its row
+ * still has none: the LISTING series (`LST-DDMM-YYNN`), the same one a new
+ * listing is minted from at creation. The old `ADX-LST-nnnnn` counter is
+ * retired — it was a row count, and two publishers submitting in the same
+ * second could draw the same number.
  */
 async function nextListingReference(): Promise<string> {
-  let n = (await repository.countAll()) + 1;
-  for (let attempt = 0; attempt < 40; attempt += 1) {
-    const reference = `ADX-LST-${String(n).padStart(5, '0')}`;
-    if (!(await repository.displayIdExists(reference))) return reference;
-    n += 1;
-  }
-  throw new ApiError(500, 'INTERNAL_ERROR', 'Could not allocate a listing reference');
+  return allocateIdentifier('LISTING');
 }
 
 /**
@@ -955,7 +960,24 @@ export async function publishListing(listingId: string) {
   // key the row carries, the spelling only for a row that has none.
   await assertCityAllows(listing.city, 'publishing', listing.cityId);
 
+  // QR-5 (the owner, 17 Sep 2026): a spot goes live once its publisher's
+  // BASICS are in — name, email, address, date of birth. The identity check
+  // no longer holds a spot back (QR-2 did that for a day): an unverified
+  // publisher lists and goes live, marked unverified and ranked below the
+  // verified when an advertiser browses. The desk sees the reason when the
+  // basics are missing, not a silent skip.
+  if (listing.publisherId) await assertPublisherBasics(listing.publisherId);
+
   return repository.publish(listingId);
+}
+
+/** QR-5: the gate a spot has to clear to go live — the publisher's basics. 409 `PROFILE_INCOMPLETE` names what is missing. */
+export async function assertPublisherBasics(publisherId: string): Promise<void> {
+  const publisher = await repository.findPublisherById(publisherId);
+  if (!publisher) throw new ApiError(404, 'NOT_FOUND', 'Publisher not found');
+  const missing = profileBasicsMissing(publisher);
+  if (missing.length === 0) return;
+  throw new ApiError(409, 'PROFILE_INCOMPLETE', `This publisher's profile is missing ${missing.map((key) => PROFILE_BASIC_LABEL[key]).join(', ')}. A spot goes live once the basics are in; the identity check moves it up the list, it does not hold it back.`, { missing });
 }
 
 export async function getSimilarListings(listingId: string) {

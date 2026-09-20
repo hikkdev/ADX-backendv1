@@ -28,6 +28,8 @@ const {
     listingsByIds: vi.fn(),
     clashingListingIds: vi.fn(),
     campaignsToTransition: vi.fn(),
+    // QR-16: the launch gate reads the advertiser's KYC; undefined here means "not held".
+    advertiserContext: vi.fn(),
     findCampaignRefundByCampaign: vi.fn(),
     createCampaignRefund: vi.fn(),
   },
@@ -505,7 +507,7 @@ describe('transitions', () => {
 
     const result = await runCampaignTransitions(new Date('2026-04-01T00:05:00Z'));
 
-    expect(result).toEqual({ wentLive: 1, completed: 0, skipped: 1, blocked: 0 });
+    expect(result).toEqual({ wentLive: 1, completed: 0, skipped: 1, blocked: 0, awaitingVerification: 0 });
     expect(repository.updateCampaign).not.toHaveBeenCalledWith('cmp_frozen', expect.anything());
     expect(repository.updateCampaign).toHaveBeenCalledWith('cmp_1', expect.objectContaining({ status: 'LIVE' }));
   });

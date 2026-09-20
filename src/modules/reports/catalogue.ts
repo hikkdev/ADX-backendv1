@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { OnboardingSource } from '../../shared/database';
 import { money } from '../../shared/money';
 import type { Decimal } from '../../shared/money';
 import type { ReportData, Window } from './reports.repository';
@@ -233,6 +234,52 @@ export function buildCatalogue(data: ReportData): ReportKind[] {
           kycRejected: row.kycRejected,
           activated: row.activated,
           verifiedPct: pct(row.kycVerified, row.kycSubmitted),
+        }));
+      },
+    },
+    {
+      kind: 'onboarding-board',
+      name: 'Onboarding — team board',
+      description: 'QR-14: who onboarded whom in the window — per person (admins, employees, agents; self-signups as "organic"), the parties they brought in and how far each got: completed, a listing live within seven days, KYC verified, a first booking. Ranked by onboarded.',
+      filters: [
+        { key: 'via', label: 'Door', type: 'enum', values: ['SELF', 'AGENT', 'QR', 'DESK', 'IMPORT'] },
+        { key: 'role', label: 'Role', type: 'string' },
+      ],
+      columns: [
+        R('rank', 'Rank'),
+        L('actorName', 'Who'),
+        L('actorRole', 'Role'),
+        R('onboarded', 'Onboarded'),
+        R('publishers', 'Publishers'),
+        R('advertisers', 'Advertisers'),
+        R('desk', 'Desk'),
+        R('agentDoor', 'Agent'),
+        R('qr', 'QR'),
+        R('imported', 'Import'),
+        R('completed', 'Completed'),
+        R('liveWithin7d', 'Live in 7 days'),
+        R('verified', 'Verified'),
+        R('firstBooking', 'First booking'),
+        R('completedPct', 'Completed of onboarded'),
+      ],
+      async query(f, window) {
+        const rows = await data.onboardingBoard(window, { via: f['via'] as OnboardingSource | undefined, role: f['role'] });
+        return rows.map((row, i) => ({
+          rank: row.actorId ? i + 1 : null,
+          actorName: row.actorName ?? (row.actorId ? row.actorId : 'Organic (self-serve)'),
+          actorRole: row.actorRole ?? (row.actorId ? '' : '—'),
+          onboarded: row.onboarded,
+          publishers: row.publishers,
+          advertisers: row.advertisers,
+          desk: row.via.DESK,
+          agentDoor: row.via.AGENT,
+          qr: row.via.QR,
+          imported: row.via.IMPORT,
+          completed: row.completed,
+          liveWithin7d: row.liveWithin7d,
+          verified: row.verified,
+          firstBooking: row.firstBooking,
+          completedPct: pct(row.completed, row.onboarded),
         }));
       },
     },
@@ -493,6 +540,7 @@ export const REPORT_KINDS = [
   'advertiser-spend-refunds',
   'agent-commissions',
   'onboarding-funnel',
+  'onboarding-board',
   'supply-listings',
   'kyc-ageing',
   'support-sla',

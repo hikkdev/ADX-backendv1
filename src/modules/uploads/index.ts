@@ -31,6 +31,8 @@ export { registerFileAccessPort } from './file-access.port';
 export type { FileAccessPort } from './file-access.port';
 /** Lot D: which purposes are private, for modules that store documents on a party's behalf. */
 export { PRIVATE_PURPOSES, isPrivatePurpose } from './uploads.schema';
+/** QR-7: the profile-picture rules, for the docs and the tests that pin them. */
+export { AVATAR_SIZE, AVATAR_QUALITY, AVATAR_MAX_INPUT_BYTES, AVATAR_MIME_TYPES, avatarCropSchema, cropRegion, parseAvatarCrop } from './avatar';
 export type { UploadPurpose } from './uploads.schema';
 /** Lot D (Q127): for the KYC purge job, through `kyc` and `publishers` — a file removed by id, no viewer. */
 export { purgeStoredFile, fileIdFromUrl } from './uploads.service';

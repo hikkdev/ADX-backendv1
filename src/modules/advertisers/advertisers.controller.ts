@@ -1,7 +1,10 @@
 import type { Request, Response } from 'express';
+import { actorLabelFor } from '../access-control';
+import { doorProvenance, selfProvenance } from '../../shared/onboarding';
 import type { ZodType } from 'zod';
 import { auditDiff, logActivity } from '../../shared/audit';
 import { ApiError } from '../../shared/errors';
+import { isVerifiedParty } from '../../shared/kyc-state';
 import { money } from '../../shared/money';
 import { pageQueryFrom } from '../../shared/pagination';
 import { findAgentProfile } from '../agents';
@@ -54,6 +57,7 @@ import {
   topUpDeskQuerySchema,
   refundStatusSchema,
   registerAdvertiserSchema,
+  advertiserRosterQuerySchema,
   ADVERTISER_INDUSTRIES,
   requestRefundSchema,
   topUpSchema,
@@ -222,7 +226,17 @@ export async function expireCreditHandler(_req: Request, res: Response): Promise
 export async function listAdvertisersHandler(req: Request, res: Response): Promise<void> {
   // E7-3: `?q=` beside limit/cursor — name, company, email, mobile or displayId contains.
   const q = typeof req.query['q'] === 'string' ? req.query['q'].trim().slice(0, 120) : '';
-  res.json({ success: true, data: await listAdvertisers({ ...pageQueryFrom(req.query), ...(q ? { q } : {}) }) });
+  // QR-15: the roster's cuts — the door, and the person who opened it.
+  const cuts = parse(advertiserRosterQuerySchema, req.query);
+  res.json({
+    success: true,
+    data: await listAdvertisers({
+      ...pageQueryFrom(req.query),
+      ...(q ? { q } : {}),
+      ...(cuts.onboardedVia ? { onboardedVia: cuts.onboardedVia } : {}),
+      ...(cuts.onboardedById ? { onboardedById: cuts.onboardedById } : {}),
+    }),
+  });
 }
 
 export async function getAdvertiserHandler(req: Request, res: Response): Promise<void> {
@@ -237,7 +251,10 @@ export async function industriesHandler(_req: Request, res: Response): Promise<v
 }
 
 export async function meHandler(req: Request, res: Response): Promise<void> {
-  res.json({ success: true, data: await getAdvertiserForUser(actor(req)) });
+  const advertiser = await getAdvertiserForUser(actor(req));
+  // QR-3: the verified mark every external party earns the same way — the
+  // app draws a tick beside the name on it.
+  res.json({ success: true, data: advertiser ? { ...advertiser, verified: isVerifiedParty(advertiser.kycStatus) } : advertiser });
 }
 
 export async function registerAdvertiserHandler(req: Request, res: Response): Promise<void> {
@@ -248,9 +265,12 @@ export async function registerAdvertiserHandler(req: Request, res: Response): Pr
   // yet, so it must not be linked to the agent's own user — that would make
   // GET /advertisers/me return their customer's account. A self-serve signup
   // links to the caller, which is exactly what makes /me resolve.
+  // QR-14: the door — the app's own, an agent at the door, or the desk.
+  const roles = req.user?.roles ?? [];
+  const agentId = onBehalf ? await resolveAgent(caller) : null;
   const data = onBehalf
-    ? { ...input, userId: null, agentId: await resolveAgent(caller) }
-    : { ...input, userId: caller, agentId: null };
+    ? { ...input, userId: null, agentId, ...doorProvenance(agentId ? 'AGENT' : 'DESK', caller, await actorLabelFor(caller, roles)) }
+    : { ...input, userId: caller, agentId: null, ...selfProvenance() };
 
   res.status(201).json({ success: true, data: await registerAdvertiser(data) });
 }

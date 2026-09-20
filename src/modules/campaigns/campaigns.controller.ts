@@ -158,12 +158,16 @@ export async function listCampaignsHandler(req: Request, res: Response): Promise
  * detail agree on them.
  */
 async function campaignDetailView(campaign: CampaignAggregate) {
-  const [refund, marked, landingPage] = await Promise.all([
+  const [refund, marked, landingPage, context] = await Promise.all([
     campaignRefundSummary(campaign.id),
     withSpotReviews(campaign),
     landingPageSummary(campaign.id),
+    repository.advertiserContext(campaign.advertiserId),
   ]);
-  return { ...withTriggerPlan(marked), city: campaign.targetLocation, spotCount: campaign.spots.length, refund, landingPage };
+  // QR-16: what stops a paid campaign from going live — the advertiser's
+  // verification — so the detail can say "paid; verify to launch".
+  const launchBlockedBy = context?.kycStatus && context.kycStatus !== 'VERIFIED' ? ['KYC'] : [];
+  return { ...withTriggerPlan(marked), city: campaign.targetLocation, spotCount: campaign.spots.length, refund, landingPage, launchBlockedBy };
 }
 
 export async function getCampaignHandler(req: Request, res: Response): Promise<void> {

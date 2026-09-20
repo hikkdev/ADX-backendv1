@@ -11,6 +11,7 @@ export const partyTypeSchema = z.enum([
   'DISPUTE',
   'SAFETY',
   'LEAD',
+  'USER',
   'VISIT',
   'CERTIFICATE',
   'FRAUD_CASE',

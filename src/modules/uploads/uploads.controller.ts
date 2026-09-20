@@ -3,6 +3,7 @@ import { ApiError } from '../../shared/errors';
 import { env } from '../../config/env';
 import { purposeSchema } from './uploads.schema';
 import { deleteFile, openFile, storeUpload } from './uploads.service';
+import { parseAvatarCrop } from './avatar';
 
 /** `BASE_URL`, or outside production the request's Host header (it keeps the port; `req.hostname` drops it). */
 export function baseUrlFor(req: Request): string {
@@ -27,6 +28,8 @@ export async function uploadFileHandler(req: Request, res: Response): Promise<vo
   const record = await storeUpload(req.user!.sub, req.file, purpose, baseUrlFor(req), {
     ownerUserId,
     isAdmin: (req.user?.roles ?? []).includes('ADMIN'),
+    // QR-7: the square the person chose for a profile picture, as fractions.
+    crop: purpose === 'AVATAR' ? parseAvatarCrop(req.body['crop']) : null,
   });
 
   res.status(201).json({ success: true, data: { url: record.url, id: record.id } });

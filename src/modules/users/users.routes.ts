@@ -4,6 +4,7 @@ import { authenticate, requirePermission, requireRole } from '../../shared/auth'
 import {
   getMe,
   updateMe,
+  recordMyConsent,
   assignRole,
   bootstrapAdmin,
   createUser,
@@ -47,6 +48,8 @@ userRouter.use(authenticate);
 
 userRouter.get('/me', asyncHandler(getMe));
 userRouter.patch('/me', asyncHandler(updateMe));
+// QR-6: the terms and privacy consent, the first screen after the OTP.
+userRouter.post('/me/consent', asyncHandler(recordMyConsent));
 userRouter.post('/me/party', asyncHandler(chooseParty));
 userRouter.get('/me/onboarding-manifest', asyncHandler(onboardingManifest));
 userRouter.get('/me/preferences', asyncHandler(getMyPreferences));

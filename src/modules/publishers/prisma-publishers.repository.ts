@@ -1,5 +1,5 @@
 import { Prisma, prisma } from '../../shared/database';
-import type { KycStatus, OrderStatus } from '../../shared/database';
+import type { KycStatus, OrderStatus, Gender } from '../../shared/database';
 import { money } from '../../shared/money';
 import { countsFrom, listArgs } from '../../shared/pagination';
 import { kycPartyStateWhere, kycQueueBaseWhere, type KycQueueState } from '../../shared/kyc-state';
@@ -80,8 +80,9 @@ const detailInclude = {
       _count: { select: { orders: { where: { status: { notIn: ['COMPLETED', 'CANCELLED'] as OrderStatus[] } } } } },
     },
   },
-  // E6: whether the account behind the profile is closed (Lot A, Q21).
-  user: { select: { closedAt: true, closeReason: true } },
+  // E6: whether the account behind the profile is closed (Lot A, Q21). QR-13:
+  // and the person the desk may edit — the console's Edit details drawer prefills from these.
+  user: { select: { closedAt: true, closeReason: true, displayId: true, firstName: true, lastName: true, dateOfBirth: true, gender: true, avatarUrl: true, consentAcceptedAt: true } },
   // P-B: who brought them in, joined the way the KYC queue joins it, so the
   // party page can print "Onboarded by" by name.
   agent: { select: { id: true, displayId: true, user: { select: { name: true } } } },
@@ -108,7 +109,7 @@ function rosterSearchWhere(q: string | undefined): Prisma.PublisherWhereInput {
 
 export const prismaPublishersRepository: PublishersRepository = {
   create(data: NewPublisher) {
-    const { type, email, city, cityId, state, displayId, ...required } = data;
+    const { type, email, city, cityId, state, displayId, userId, address, latitude, longitude, gstin, contactName, contactMobile, contactEmail, onboardingStatus, activatedAt, onboardedVia, onboardedById, onboardedByRole, onboardedAt, ...required } = data;
     // Optional columns are omitted rather than set to undefined so Prisma
     // leaves schema defaults in place. The empty KYC row is created up front so
     // every publisher has one to submit into.
@@ -121,10 +122,76 @@ export const prismaPublishersRepository: PublishersRepository = {
         ...(cityId !== undefined ? { cityId } : {}),
         ...(state !== undefined ? { state } : {}),
         ...(displayId !== undefined ? { displayId } : {}),
+        // QR-13: the desk's onboarding — the account, the address and its pin, the business and contact facts.
+        ...(userId !== undefined ? { userId } : {}),
+        ...(address !== undefined ? { address } : {}),
+        ...(latitude !== undefined ? { latitude } : {}),
+        ...(longitude !== undefined ? { longitude } : {}),
+        ...(gstin !== undefined ? { gstin } : {}),
+        ...(contactName !== undefined ? { contactName } : {}),
+        ...(contactMobile !== undefined ? { contactMobile } : {}),
+        ...(contactEmail !== undefined ? { contactEmail } : {}),
+        ...(onboardingStatus !== undefined ? { onboardingStatus } : {}),
+        ...(activatedAt !== undefined ? { activatedAt } : {}),
+        // QR-14: the door this row came through.
+        ...(onboardedVia !== undefined ? { onboardedVia } : {}),
+        ...(onboardedById !== undefined ? { onboardedById } : {}),
+        ...(onboardedByRole !== undefined ? { onboardedByRole } : {}),
+        ...(onboardedAt !== undefined ? { onboardedAt } : {}),
         kyc: { create: {} },
       },
       include: { kyc: true, listings: true },
     }) as never;
+  },
+
+  // QR-14: the names behind the stamps.
+  async userLabels(userIds) {
+    const ids = [...new Set(userIds)];
+    if (ids.length === 0) return new Map();
+    const users = await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } });
+    return new Map(users.map((u) => [u.id, u.name]));
+  },
+
+  // QR-13: the account behind a desk-opened publisher.
+  async ensureAccount(input) {
+    const { mobile, displayId, name, email, ...person } = input;
+    const existing = await prisma.user.findUnique({ where: { mobile }, include: { roles: { select: { role: true } } } });
+    if (existing) {
+      // Fill only what is empty: a person who already is somebody keeps their own details.
+      const fill: Record<string, unknown> = {};
+      if (existing.firstName === null && person.firstName !== undefined) fill['firstName'] = person.firstName;
+      if (existing.lastName === null && person.lastName !== undefined) fill['lastName'] = person.lastName;
+      if (existing.dateOfBirth === null && person.dateOfBirth !== undefined) fill['dateOfBirth'] = person.dateOfBirth;
+      if (existing.gender === null && person.gender !== undefined) fill['gender'] = person.gender;
+      if (existing.name === null) fill['name'] = name;
+      if (existing.email === null && email !== undefined) fill['email'] = email;
+      if (!existing.roles.some((r) => r.role === 'PUBLISHER')) fill['roles'] = { create: { role: 'PUBLISHER' } };
+      if (Object.keys(fill).length > 0) await prisma.user.update({ where: { id: existing.id }, data: fill });
+      return { id: existing.id, created: false };
+    }
+    const created = await prisma.user.create({
+      data: {
+        mobile,
+        displayId,
+        name,
+        ...(email !== undefined ? { email } : {}),
+        ...(person.firstName !== undefined ? { firstName: person.firstName } : {}),
+        ...(person.lastName !== undefined ? { lastName: person.lastName } : {}),
+        ...(person.dateOfBirth !== undefined ? { dateOfBirth: person.dateOfBirth } : {}),
+        ...(person.gender !== undefined ? { gender: person.gender } : {}),
+        roles: { create: { role: 'PUBLISHER' } },
+      },
+      select: { id: true },
+    });
+    return { id: created.id, created: true };
+  },
+
+  async updateAccount(userId, patch) {
+    await prisma.user.update({ where: { id: userId }, data: patch });
+  },
+
+  findByIdWithUser(publisherId) {
+    return prisma.publisher.findUnique({ where: { id: publisherId }, include: { user: { select: { dateOfBirth: true } } } }) as never;
   },
 
   findKycQueue(filter) {
@@ -188,7 +255,12 @@ export const prismaPublishersRepository: PublishersRepository = {
      statuses, counted over the search with the KYC tab removed so "KYC"
      never makes the other chips read zero. */
   async findRosterPage(query: PublisherRosterQuery) {
-    const base: Prisma.PublisherWhereInput = rosterSearchWhere(query.q);
+    const base: Prisma.PublisherWhereInput = {
+      ...rosterSearchWhere(query.q),
+      // QR-14: the door, and the person who opened it.
+      ...(query.onboardedVia ? { onboardedVia: query.onboardedVia } : {}),
+      ...(query.onboardedById ? { onboardedById: query.onboardedById } : {}),
+    };
     const where: Prisma.PublisherWhereInput = { ...base, ...(query.category === 'KYC' ? { kycStatus: 'VERIFIED' as const } : {}) };
     const [items, total, groups] = await Promise.all([
       prisma.publisher.findMany({ where, include: detailInclude, orderBy: { createdAt: 'desc' }, ...listArgs(query) }),
@@ -230,8 +302,22 @@ export const prismaPublishersRepository: PublishersRepository = {
     return rows.flatMap((row) => (row.userId ? [{ ...row, userId: row.userId }] : []));
   },
 
+  async findPlatformAgreementAcceptedAt(publisherId: string) {
+    const row = await prisma.agreementAcceptance.findFirst({
+      where: { publisherId, templateKind: 'PLATFORM' },
+      orderBy: { acceptedAt: 'desc' },
+      select: { acceptedAt: true },
+    });
+    return row?.acceptedAt ?? null;
+  },
+
   findByUserIdWithKyc(userId: string) {
-    return prisma.publisher.findUnique({ where: { userId }, include: { kyc: true } }) as never;
+    // QR-5: the person's date of birth and gender ride on the own read — the
+    // readiness rule counts the first among the basics.
+    return prisma.publisher.findUnique({
+      where: { userId },
+      include: { kyc: true, user: { select: { dateOfBirth: true, gender: true, avatarUrl: true } } },
+    }) as never;
   },
 
   /**
@@ -500,6 +586,9 @@ export const prismaPublishersRepository: PublishersRepository = {
         mobile,
         email,
         onboardingStatus: 'PENDING_ONBOARDING',
+        // QR-14: the app's own door.
+        onboardedVia: 'SELF',
+        onboardedAt: new Date(),
         ...(displayId !== undefined ? { displayId } : {}),
         ...(type !== undefined ? { type } : {}),
       },
@@ -510,15 +599,30 @@ export const prismaPublishersRepository: PublishersRepository = {
     return prisma.user.update({ where: { id: userId }, data: { name, email } });
   },
 
+  /** QR-5: the person's details the ladder collects beside the publisher's. */
+  setUserDetails(userId: string, data: { dateOfBirth?: Date; gender?: Gender }) {
+    return prisma.user.update({ where: { id: userId }, data });
+  },
+
   findUserMobile(userId: string) {
     return prisma.user.findUnique({ where: { id: userId }, select: { mobile: true, name: true, avatarUrl: true } });
   },
 
-  claim(publisherId: string, agentId: string) {
-    return prisma.publisher.update({
+  async claim(publisherId: string, agentId: string) {
+    const claimed = await prisma.publisher.update({
       where: { id: publisherId },
       data: { agentId, claimedAt: new Date(), onboardingStatus: 'IN_ONBOARDING' },
     });
+    // QR-14: a scan is the door only for a row nobody has stamped yet — a
+    // desk-opened publisher an agent then walks through keeps the desk's stamp.
+    const agent = await prisma.agentProfile.findUnique({ where: { id: agentId }, select: { userId: true } });
+    if (agent) {
+      await prisma.publisher.updateMany({
+        where: { id: publisherId, onboardedVia: null },
+        data: { onboardedVia: 'QR', onboardedById: agent.userId, onboardedByRole: 'Agent', onboardedAt: new Date() },
+      });
+    }
+    return claimed;
   },
 
   resetOnboardingState(publisherId: string) {

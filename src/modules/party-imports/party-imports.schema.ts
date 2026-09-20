@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { upperEnum } from '../../shared/validation';
+import { dateOfBirthSchema, genderSchema, upperEnum } from '../../shared/validation';
 import type { ImportParty } from '../../shared/database';
 import { advertiserTypeSchema, ADVERTISER_INDUSTRIES } from '../advertisers';
 import { WORK_MODES, EMPLOYMENT_TYPES } from '../employees';
@@ -56,7 +56,8 @@ const optionalPan = z.preprocess(blankToUndefined, z.string().trim().toUpperCase
 /** Present on every party: the key, at least ten digits; `normalizeMobile` runs after the parse. */
 const requiredMobile = z.preprocess(blankToUndefined, z.string().trim().min(10, 'mobile is required').max(20));
 
-export const ADVERTISER_COLUMNS = ['name', 'mobile', 'email', 'type', 'companyName', 'industry', 'gstin', 'panNumber', 'address', 'city', 'state', 'contactName'] as const;
+/** QR-15: the four person columns at the end — given a first name, the row opens the sign-in account up front, as the desk does. */
+export const ADVERTISER_COLUMNS = ['name', 'mobile', 'email', 'type', 'companyName', 'industry', 'gstin', 'panNumber', 'address', 'city', 'state', 'contactName', 'firstName', 'lastName', 'dateOfBirth', 'gender'] as const;
 export const AGENT_COLUMNS = ['name', 'mobile', 'email', 'side', 'city', 'state'] as const;
 export const PRINT_PARTNER_COLUMNS = ['name', 'mobile', 'legalName', 'gstin', 'panNumber', 'contactName', 'email', 'address', 'city', 'capabilities', 'maxWidthFt', 'turnaroundDays'] as const;
 export const EMPLOYEE_COLUMNS = ['name', 'mobile', 'email', 'department', 'designation', 'region', 'workMode', 'employmentType'] as const;
@@ -82,6 +83,10 @@ export const advertiserRowSchema = z.object({
   city: optionalText(80),
   state: optionalText(80),
   contactName: optionalText(120),
+  firstName: optionalText(60),
+  lastName: optionalText(60),
+  dateOfBirth: z.preprocess(blankToUndefined, dateOfBirthSchema.optional()),
+  gender: z.preprocess(blankToUndefined, genderSchema.optional()),
 });
 
 export const agentRowSchema = z.object({

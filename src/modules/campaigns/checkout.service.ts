@@ -484,13 +484,20 @@ export async function authorizeCampaign(
   const { review, commissions } = await priceCampaign(campaign);
   assertAuthorisable(campaign, review);
 
-  // Profile, KYC, agreement and funds — checked before anything is written, so a
+  // Profile, agreement and funds — checked before anything is written, so a
   // campaign that cannot be paid for fails while somebody is still looking at it.
-  await assertCanBook(campaign.advertiserId, review.total);
+  const eligibility = await assertCanBook(campaign.advertiserId, review.total);
+
+  // QR-16 (the owner, 17 Sep 2026): an unverified advertiser may book and pay,
+  // but the campaign does not RUN until KYC is verified. One due today stays
+  // SCHEDULED with its hold uncaptured; the lifecycle tick launches it once
+  // the record clears. The advertiser is told what stands between them and
+  // the launch, and the detail read says so beside the campaign.
+  const launchHeld = (eligibility?.launchBlockedBy ?? []).includes('KYC');
 
   const { holdId } = await holdForCampaign(campaign.advertiserId, campaign.id, review.total);
 
-  const startsToday = campaign.startDate ? campaign.startDate <= now : false;
+  const startsToday = !launchHeld && (campaign.startDate ? campaign.startDate <= now : false);
 
   await repository.updateCampaign(campaign.id, {
     status: startsToday ? 'LIVE' : 'SCHEDULED',
@@ -511,6 +518,7 @@ export async function authorizeCampaign(
    * shows it committed without it having left.
    */
   if (startsToday) await captureCampaignHold(holdId);
+  if (launchHeld) await tellAdvertiserToVerify(campaign, now);
 
   // Lot D (Q139): the tracking codes, before the order loop — the artwork
   // embeds them, and the print shop needs the artwork. Idempotent.
@@ -1087,12 +1095,15 @@ export async function runCampaignTransitions(now = new Date()): Promise<{
   skipped: number;
   /** Lot D (Q120): due to start, left SCHEDULED because artwork is not approved. */
   blocked: number;
+  /** QR-16: due to start, left SCHEDULED because the advertiser is not yet verified. */
+  awaitingVerification: number;
 }> {
   const due = await repository.campaignsToTransition(now);
   let wentLive = 0;
   let completed = 0;
   let skipped = 0;
   let blocked = 0;
+  let awaitingVerification = 0;
 
   for (const row of due) {
     const campaign = await repository.findCampaign(row.id);
@@ -1100,6 +1111,16 @@ export async function runCampaignTransitions(now = new Date()): Promise<{
 
     try {
       if (campaign.status === 'SCHEDULED') {
+        // QR-16: KYC gates the launch, not the payment. A paid campaign whose
+        // advertiser is still unverified stays SCHEDULED — the advertiser is
+        // nudged and ops told, once a day each — and goes live on the first
+        // tick after the record is verified.
+        const context = await repository.advertiserContext(campaign.advertiserId);
+        if (context?.kycStatus && context.kycStatus !== 'VERIFIED') {
+          awaitingVerification += 1;
+          await warnAwaitingVerification(campaign, context.userId, now);
+          continue;
+        }
         // Lot D (Q120): the hard gate. Paid, due, and not going anywhere
         // until ops approve the artwork. The campaign stays SCHEDULED and is
         // offered again next tick; ops are told once a day per campaign.
@@ -1142,11 +1163,62 @@ export async function runCampaignTransitions(now = new Date()): Promise<{
     }
   }
 
-  return { wentLive, completed, skipped, blocked };
+  return { wentLive, completed, skipped, blocked, awaitingVerification };
 }
 
 /** The last UTC day ops were told about each blocked campaign, so a five-minute tick is not a five-minute nag. */
 const launchWarnings = new Map<string, string>();
+
+/**
+ * QR-16: the campaign is paid and due, and the advertiser's verification is
+ * what stands between it and going live. The advertiser hears once a day
+ * (a KYC notice, the Digio door behind it) and ops once a day; a campaign
+ * authorised today with the verification still open hears at once.
+ */
+async function warnAwaitingVerification(campaign: CampaignAggregate, userId: string | null, now: Date): Promise<void> {
+  const day = now.toISOString().slice(0, 10);
+  const key = `${campaign.id}:kyc`;
+  if (launchWarnings.get(key) === day) return;
+  launchWarnings.set(key, day);
+  try {
+    await notifyAdmins(
+      'Launch held: advertiser not verified',
+      `${campaign.reference} (${campaign.name}) is paid and due to go live, and is held until the advertiser's KYC is verified.`,
+      campaign.id,
+    );
+  } catch (err) {
+    logger.warn('Could not warn ops of a launch awaiting verification', { campaignId: campaign.id, err });
+  }
+  if (userId) await nudgeToVerify(campaign, userId);
+}
+
+async function tellAdvertiserToVerify(campaign: CampaignAggregate, now: Date): Promise<void> {
+  const day = now.toISOString().slice(0, 10);
+  launchWarnings.set(`${campaign.id}:kyc`, day);
+  try {
+    const context = await repository.advertiserContext(campaign.advertiserId);
+    if (context?.userId) await nudgeToVerify(campaign, context.userId);
+  } catch (err) {
+    logger.warn('Could not tell the advertiser their launch awaits verification', { campaignId: campaign.id, err });
+  }
+}
+
+async function nudgeToVerify(campaign: CampaignAggregate, userId: string): Promise<void> {
+  try {
+    await createNotification({
+      userId,
+      type: 'KYC',
+      title: 'Verify to launch your campaign',
+      subtitle: campaign.name,
+      message: `${campaign.reference} is paid and booked. It goes live once your identity is verified — a few minutes with Digio, or ask your ADX contact to record your documents.`,
+      suggestedAction: 'Verify your identity',
+      relatedId: campaign.id,
+      relatedType: 'CAMPAIGN',
+    });
+  } catch (err) {
+    logger.warn('Could not nudge the advertiser to verify', { campaignId: campaign.id, err });
+  }
+}
 
 async function warnLaunchBlocked(campaign: CampaignAggregate, count: number, now: Date): Promise<void> {
   const day = now.toISOString().slice(0, 10);

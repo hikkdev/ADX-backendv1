@@ -33,6 +33,8 @@ const { repository, pricing, rateCards } = vi.hoisted(() => ({
 }));
 
 vi.mock('../prisma-listings.repository', () => ({ prismaListingsRepository: repository }));
+// QR-8: the reference comes off the LISTING series at creation; stubbed so nothing reaches the database.
+vi.mock('../../identifiers', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../identifiers')>()), allocateIdentifier: async () => 'LST-0909-2699' }));
 vi.mock('../../pricing', () => pricing);
 vi.mock('../../rate-cards', () => rateCards);
 vi.mock('../../agents', () => ({ findAgentProfile: vi.fn() }));

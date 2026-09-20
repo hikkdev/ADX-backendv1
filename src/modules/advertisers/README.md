@@ -244,3 +244,35 @@ free string, so the analytics can group on it.
 | --- | --- | --- |
 | `GET /advertisers?q=&limit=&cursor=` | ADMIN | the roster takes `q` beside its cursor page — a case-insensitive contains over `name`, `companyName`, `email`, `displayId`, and `mobile` as typed; the page shape is unchanged |
 | `GET /finance/top-ups?q=&from=&to=&status=RECONCILED\|UNRECONCILED&page=&pageSize=` | ADMIN | the register of every `WalletTopUp` on the list contract — `q` is the UTR (contains), `from`/`to` bound `receivedAt`, the chips are reconciled / not; each row names the advertiser. Its own router (`topUpDeskRouter`), mounted by bootstrap at `/finance/top-ups` for the same reason as the refund desk |
+
+## QR-15 (17 Sep 2026): the desk onboards the way the app does — the advertiser side
+
+The publisher's QR-13/14 changes, replicated here. The advertiser's own
+flow is gate-based (profile → KYC → agreement → funds, asked at booking
+time), so "everything the app asks" is smaller than the publisher's ladder:
+the person's two names, the account type, the billing address and the
+city; a company name for anyone but an individual.
+
+| Route | Who | What |
+| --- | --- | --- |
+| `POST /advertisers` | ADMIN (desk), agent (`onBehalf`), the app | takes `firstName`, `lastName`, `dateOfBirth` (YYYY-MM-DD, 18+), `gender` beside the profile fields. **A first name marks an onboarding**: `deskOnboarding` then requires `lastName`, `billingAddress`, `city` (and `companyName` unless INDIVIDUAL); email, date of birth, gender, state, industry and GSTIN stay optional — the app does not ask an advertiser for them. `registerAdvertiser` canonicalises the number (`normalizeMobile`, the OTP door's `+91…`), opens the sign-in account with the ADVERTISER role — or adopts the number's existing account, filling only what is empty — and links the profile to it (`repository.ensureAccount`). The owner's first sign-in is OTP → terms → home, with the profile gate already answered; KYC, the agreement and the funds stay theirs. Without a first name the row is a bare account held for the number, as before |
+| `PATCH /advertisers/:id` | owner, their agent, ADMIN | the same four person fields: written to the account behind the profile (`updateAccount`, the display name recomposed), the email with them; a profile nobody has claimed that is given a first name gets its account opened and linked |
+| `GET /advertisers/:id` | as before | now carries `person { displayId, firstName, lastName, dateOfBirth, gender, avatarUrl, consentAcceptedAt } \| null` — null while no account backs the profile — beside `onboarding` |
+| `GET /advertisers?onboardedVia=&onboardedById=` | ADMIN | the roster's two cuts (QR-14's, on this side), and every row carries `onboarding { via, viaLabel, byId, byName, byRole, at }` with one name lookup per page |
+| `POST /users/me/party` | the app | **stamps SELF** on the advertiser it opens — the app's real door for an advertiser is this call, not `POST /advertisers`, and QR-14 had stamped only the latter; every organic advertiser read "Not recorded" on the console and was missing from the board's organic count |
+| `POST /party-imports/advertisers` | ADMIN | four more columns at the end of the file — `firstName`, `lastName`, `dateOfBirth`, `gender`; a row with a first name is a desk onboarding (the account opened up front, the same rules) |
+
+Pinned by `qr15-desk-onboarding.test.ts` (8) and `users/__tests__/qr15-party-self-stamp.test.ts` (1).
+
+## QR-16 (17 Sep 2026): KYC holds the launch, not the booking
+
+The owner: "continue as unverified advertisers, but an unverified profile's
+campaign cannot run — they can check listings, add to cart, even pay; we
+ask for KYC (and business documents for a business) before the campaign
+launches." `bookingEligibility` now answers `blockedBy` (SUSPENDED, PROFILE,
+AGREEMENT, FUNDS — the booking) beside `launchBlockedBy` (KYC — the launch);
+`assertCanBook`, `acceptPlatformAgreement` (the click no longer waits for the
+verification) and the package purchase let an unverified advertiser agree and pay.
+The launch gate itself lives in `campaigns` (`authorizeCampaign`,
+`runCampaignTransitions`); `activatedAt` still means KYC and the agreement
+both clear. Pinned by `campaigns/__tests__/qr16-launch-gate.test.ts`.

@@ -45,8 +45,28 @@ enum OtpPurpose {
 
 model User {
   id                      String    @id @default(cuid())
+  /// QR-4: the person's own ADX id, ADX-DDMM-YYNN, minted the moment the
+  /// number is registered — before any party is chosen. Nullable only for
+  /// rows that predate it; the backfill fills those against their createdAt.
+  displayId               String?   @unique
   mobile                  String    @unique
+  /// The display name — composed from the two below when they are given.
   name                    String?
+  /// QR-4: asked right after the first OTP, before "Join ADX as".
+  firstName               String?
+  lastName                String?
+  /// QR-5: the details a publisher gives before their first listing — date of
+  /// birth is one of the basics the listing door checks; gender is asked, not
+  /// required.
+  dateOfBirth             DateTime? @db.Date
+  gender                  Gender?
+  /// QR-6 (the owner, 17 Sep 2026): the terms of use and the privacy policy,
+  /// agreed before any detail is asked — the first screen after the OTP. The
+  /// versions of the two `LegalDocument`s live at the click ride with it, so
+  /// the record says what was agreed, not just that something was.
+  consentAcceptedAt       DateTime?
+  consentTermsVersion     Int?
+  consentPrivacyVersion   Int?
   email                   String?   @unique
   passwordHash            String?
   avatarUrl               String?
@@ -755,6 +775,14 @@ enum PublisherType {
   POLITICAL
 }
 
+/// QR-5: asked with the date of birth; never required.
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  PREFER_NOT_TO_SAY
+}
+
 enum KycStatus {
   PENDING
   VERIFIED
@@ -788,6 +816,15 @@ model KycDocumentReview {
 
   @@unique([partyType, kycId, field])
   @@index([kycId])
+}
+
+/// QR-14: the door a party came through.
+enum OnboardingSource {
+  SELF
+  AGENT
+  QR
+  DESK
+  IMPORT
 }
 
 enum OnboardingStatus {
@@ -842,6 +879,10 @@ model Publisher {
   /// agent is sent to when the publisher accepts a booking, so it is an address
   /// somebody has to be able to find rather than a billing line.
   address            String?
+  /// QR-5: where the address is, when the person placed it on the map or
+  /// picked it from a search. Optional — an address need not be a pin.
+  latitude           Float?
+  longitude          Float?
   city               String?
   /// Lot X: the catalogue city the free-text `city` resolved to (null when it did not); every read that groups by city groups by this.
   cityId             String?
@@ -868,6 +909,16 @@ model Publisher {
   sizeBand           PartySizeBand     @default(INDIVIDUAL)
   /// KYC verified and the platform agreement accepted.
   activatedAt        DateTime?
+  /// QR-14: who onboarded this party, and how — SELF (the app), AGENT (the
+  /// agent app's door), QR (an agent's scan), DESK (the console), IMPORT (a
+  /// batch). `onboardedById` is the person who did it (null for SELF),
+  /// `onboardedByRole` their console role or kind at the time (a snapshot —
+  /// roles move), `onboardedAt` when. Set once, at the door; a later claim or
+  /// adoption never overwrites it.
+  onboardedVia    OnboardingSource?
+  onboardedById   String?
+  onboardedByRole String?
+  onboardedAt     DateTime?
   createdAt          DateTime          @default(now())
   updatedAt          DateTime          @updatedAt
 
@@ -875,6 +926,8 @@ model Publisher {
   agent                AgentProfile?                 @relation(fields: [agentId], references: [id])
   kyc                  PublisherKyc?
   listings             Listing[]
+  /// QR-8: the spots half-written on the phone, saved to finish later.
+  listingDrafts        ListingDraft[]
   accessGrants         DelegatedAccessGrant[]
   sites                Site[]
   agreementAcceptances AgreementAcceptance[]
@@ -894,6 +947,8 @@ model Publisher {
 
   cityRef City? @relation("PublisherCity", fields: [cityId], references: [id], onDelete: SetNull)
 
+  @@index([onboardedById])
+  @@index([onboardedVia])
   @@index([agentId])
   @@index([mobile])
   @@index([cityId])
@@ -1001,6 +1056,35 @@ enum ListingCategory {
   OUTDOOR
   TRANSIT
   MEDIA
+}
+
+/// QR-8 (the owner, 17 Sep 2026): a listing saved half-way — "allow draft
+/// facility for listings … we can use it to reach out to advertisers or
+/// publishers later with sales team or onboarding team". The wizard's
+/// answers as the phone holds them, the step the person stopped on, and a
+/// reference (`LST-…`, the LISTING series) that the listing takes over when
+/// the draft is finished — so the sales desk and the publisher name the same
+/// spot before and after. A draft is the publisher's own: written by their
+/// phone, read by the desk, gone when the listing is created from it.
+model ListingDraft {
+  id          String    @id @default(cuid())
+  displayId   String    @unique
+  publisherId String
+  publisher   Publisher @relation(fields: [publisherId], references: [id], onDelete: Cascade)
+  /// The category chosen on step 1, for the desk's list; null before it is.
+  category    String?
+  /// The spot's name once typed, for the desk's list.
+  title       String?
+  /// Where the person stopped: the wizard's screen index and its key.
+  stepIndex   Int       @default(0)
+  stepKey     String?
+  /// The wizard's answers, exactly as the phone holds them.
+  answers     Json
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([publisherId, updatedAt])
+  @@index([updatedAt])
 }
 
 model Listing {
@@ -1149,6 +1233,13 @@ model Listing {
   /// All required documents verified. Gates the site visit.
   documentsClearedAt     DateTime?
   suspendedAt            DateTime?
+  /// QR-24: the right to sell this space and when it runs out. A lapsed spot
+  /// takes no new booking until a renewed permit or agreement is reviewed;
+  /// `rightsRemindedAt` is the last reminder day sent, so each is sent once.
+  rightsBasis            RightsBasis         @default(OWNED)
+  rightsValidUntil       DateTime?
+  rightsLapsedAt         DateTime?
+  rightsRemindedAt       DateTime?
   createdAt              DateTime            @default(now())
   updatedAt              DateTime            @updatedAt
 
@@ -1185,6 +1276,7 @@ model Listing {
   @@index([agentId])
   @@index([attemptId])
   @@index([status, verificationExpiresAt])
+  @@index([rightsValidUntil])
   // findSimilar: same city and category, active only.
   @@index([city, category, status])
   // The pricing engine's comparable query: match key, then a coordinate
@@ -2945,6 +3037,16 @@ enum ListingRemovability {
   REMOVABLE
 }
 
+/// QR-24 (the owner, 17 Sep 2026): how the publisher holds the space. OWNED
+/// has no term; a lease, a licence or a permit ends on the listing's
+/// `rightsValidUntil` and is renewed by a fresh document.
+enum RightsBasis {
+  OWNED
+  LEASED
+  LICENSED
+  PERMIT
+}
+
 enum ListingDocumentKind {
   DISPLAY_AGREEMENT
   OWNER_NOC
@@ -3451,6 +3553,16 @@ model Advertiser {
   creditLimit      Decimal?          @db.Decimal(14, 2)
   /// KYC verified and the platform agreement accepted.
   activatedAt      DateTime?
+  /// QR-14: who onboarded this party, and how — SELF (the app), AGENT (the
+  /// agent app's door), QR (an agent's scan), DESK (the console), IMPORT (a
+  /// batch). `onboardedById` is the person who did it (null for SELF),
+  /// `onboardedByRole` their console role or kind at the time (a snapshot —
+  /// roles move), `onboardedAt` when. Set once, at the door; a later claim or
+  /// adoption never overwrites it.
+  onboardedVia    OnboardingSource?
+  onboardedById   String?
+  onboardedByRole String?
+  onboardedAt     DateTime?
   /// Lot A (Q40): modular suspension — BLOCK_NEW (no new campaigns or package
   /// purchases), STOP_OPEN_WORK (running campaigns halted), FREEZE_WALLET, BLOCK_SIGNIN.
   suspensionScopes SuspensionScope[] @default([])
@@ -3478,6 +3590,8 @@ model Advertiser {
 
   cityRef City? @relation("AdvertiserCity", fields: [cityId], references: [id], onDelete: SetNull)
 
+  @@index([onboardedById])
+  @@index([onboardedVia])
   @@index([agentId])
   @@index([mobile])
   @@index([kycStatus, createdAt])
@@ -3672,6 +3786,10 @@ enum PartyType {
   PARTNER
   EMPLOYEE
   AGENT
+  /// QR-8: LST-DDMM-YYNN — a listing's reference, minted the moment a draft
+  /// is saved or a listing created, and carried from the draft to the
+  /// listing so one id names the spot from the first save to going live.
+  LISTING
   /// Not parties: the two support series (TKT-, FB-) mint through the same
   /// counter so a ticket number is issued once and never derived on read.
   TICKET
@@ -3682,6 +3800,8 @@ enum PartyType {
   SAFETY
   /// LED-#### on a prospect, so ops can name one on the phone.
   LEAD
+  /// QR-4: ADX-… — the person's own id, minted at first sign-in.
+  USER
   /// VST-#### on a field visit.
   VISIT
   /// ADX-CERT-…, the certificate series.
@@ -7277,6 +7397,26 @@ enum LegalDocumentKind {
   FAQ
   SAFETY_GUIDELINES
   OPEN_SOURCE_LICENSES
+}
+
+/// QR-11 (17 Sep 2026): a published brand. Settings › Brand & theme edits a
+/// DRAFT (the `branding` section of the integrations row); Publish freezes
+/// the draft into a release, and `GET /app/branding` serves the latest one.
+/// Append-only — a restore publishes an old release's config as a new one,
+/// so the history never loses what every phone and page once wore.
+model BrandRelease {
+  id            String   @id @default(cuid())
+  /// 1, 2, 3 … — the number the console shows and a restore names.
+  number        Int      @unique
+  /// The BrandingConfig as stored on the draft at publish time (overrides only; DR 11 fills the rest).
+  config        Json
+  /// The hash of the resolved brand, so "nothing changed since" is one comparison.
+  version       String
+  note          String?
+  publishedById String?
+  publishedAt   DateTime @default(now())
+
+  @@index([publishedAt])
 }
 
 model LegalDocument {

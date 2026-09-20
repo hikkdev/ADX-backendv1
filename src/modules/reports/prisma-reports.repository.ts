@@ -1,3 +1,4 @@
+import type { OnboardingBoardRow } from './reports.repository';
 import { Prisma, prisma } from '../../shared/database';
 import { countsFrom, listArgs, type ListQuery } from '../../shared/pagination';
 import {
@@ -350,6 +351,91 @@ export const prismaReportData: ReportData = {
     for (const row of gateway) bump(row.payment.advertiserId, 'gatewayRefunds', row.amount);
     for (const row of wallet) bump(row.wallet.advertiserId, 'walletRefunds', row.amount);
     return [...rows.values()];
+  },
+
+  // QR-14: the team onboarding board — every party onboarded in the window, grouped by who did it.
+  async onboardingBoard(window, f) {
+    const scope = {
+      onboardedAt: between(window),
+      ...(f.via ? { onboardedVia: f.via } : {}),
+      ...(f.role ? { onboardedByRole: f.role } : {}),
+    };
+    const sevenDays = 7 * 86_400_000;
+    const [publishers, advertisers] = await Promise.all([
+      prisma.publisher.findMany({
+        where: { ...scope },
+        select: {
+          onboardedVia: true,
+          onboardedById: true,
+          onboardedByRole: true,
+          onboardedAt: true,
+          onboardingStatus: true,
+          kycStatus: true,
+          listings: { select: { status: true, updatedAt: true, _count: { select: { orders: true } } } },
+        },
+      }),
+      prisma.advertiser.findMany({
+        where: { ...scope },
+        select: {
+          onboardedVia: true,
+          onboardedById: true,
+          onboardedByRole: true,
+          activatedAt: true,
+          kycStatus: true,
+          _count: { select: { campaigns: true } },
+        },
+      }),
+    ]);
+    const ids = [...new Set([...publishers, ...advertisers].map((r) => r.onboardedById).filter((id): id is string => Boolean(id)))];
+    const users = ids.length ? await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } }) : [];
+    const names = new Map(users.map((u) => [u.id, u.name]));
+    const empty = (): OnboardingBoardRow => ({
+      actorId: null,
+      actorName: null,
+      actorRole: null,
+      via: { SELF: 0, AGENT: 0, QR: 0, DESK: 0, IMPORT: 0 },
+      publishers: 0,
+      advertisers: 0,
+      onboarded: 0,
+      completed: 0,
+      liveWithin7d: 0,
+      verified: 0,
+      firstBooking: 0,
+    });
+    const rows = new Map<string, OnboardingBoardRow>();
+    const rowFor = (actorId: string | null, role: string | null) => {
+      const key = actorId ?? 'organic';
+      let row = rows.get(key);
+      if (!row) {
+        row = { ...empty(), actorId, actorName: actorId ? (names.get(actorId) ?? null) : null, actorRole: actorId ? role : null };
+        rows.set(key, row);
+      }
+      return row;
+    };
+    for (const p of publishers) {
+      if (!p.onboardedVia) continue;
+      const row = rowFor(p.onboardedById, p.onboardedByRole);
+      row.via[p.onboardedVia] += 1;
+      row.publishers += 1;
+      row.onboarded += 1;
+      if (p.onboardingStatus === 'ONBOARDING_COMPLETE') row.completed += 1;
+      if (p.kycStatus === 'VERIFIED') row.verified += 1;
+      const liveSoon = p.listings.some((l) => l.status === 'ACTIVE' && p.onboardedAt !== null && l.updatedAt.getTime() - p.onboardedAt.getTime() <= sevenDays);
+      if (liveSoon) row.liveWithin7d += 1;
+      if (p.listings.some((l) => l._count.orders > 0)) row.firstBooking += 1;
+    }
+    for (const a of advertisers) {
+      if (!a.onboardedVia) continue;
+      const row = rowFor(a.onboardedById, a.onboardedByRole);
+      row.via[a.onboardedVia] += 1;
+      row.advertisers += 1;
+      row.onboarded += 1;
+      if (a.activatedAt) row.completed += 1;
+      if (a.kycStatus === 'VERIFIED') row.verified += 1;
+      if (a._count.campaigns > 0) row.firstBooking += 1;
+    }
+    // Most onboarded first; ties by how far they got.
+    return [...rows.values()].sort((x, y) => y.onboarded - x.onboarded || y.completed - x.completed || y.liveWithin7d - x.liveWithin7d || (x.actorName ?? '').localeCompare(y.actorName ?? ''));
   },
 
   async agentCommissions(window, f) {

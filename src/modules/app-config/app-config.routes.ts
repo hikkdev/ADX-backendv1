@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { asyncHandler } from '../../shared/http';
 import { authenticate, requireRole } from '../../shared/auth';
 import {
+  getAppBrandingHandler,
   getAppLimitsHandler,
   getAppMapsHandler,
   getAppStatusHandler,
@@ -30,6 +31,8 @@ appStatusRouter.put('/status', authenticate, requireRole('ADMIN'), asyncHandler(
 appStatusRouter.get('/limits', authenticate, asyncHandler(getAppLimitsHandler));
 // G7 (Q101/132): the maps vendor and its browser key — a session, never the server key.
 appStatusRouter.get('/maps', authenticate, asyncHandler(getAppMapsHandler));
+// QR-9: the brand — name, colours, logos — read before sign-in by the console, the apps and the website.
+appStatusRouter.get('/branding', asyncHandler(getAppBrandingHandler));
 
 // GET is deliberately unauthenticated: the agent app fetches it on boot,
 // before anyone has signed in. The writes are ADMIN-only: Q33 retired the

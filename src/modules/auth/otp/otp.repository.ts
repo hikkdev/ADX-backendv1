@@ -4,20 +4,20 @@ export interface OtpRepository {
   findUserByMobile(mobile: string): Promise<User | null>;
   findUserByEmail(email: string): Promise<User | null>;
   /** Legacy publisher-app registration: creates the user WITH the PUBLISHER role. */
-  createPublisherUser(mobile: string): Promise<User>;
+  createPublisherUser(mobile: string, displayId: string): Promise<User>;
   /**
    * Local-only allowlist self-provisioning, as the role the entry named.
    * Agent roles get an agent profile; an ADMIN gets a placeholder email so
    * the console's second factor has a channel after the mobile door has
    * spent SMS (Q-B); the rest are the role alone.
    */
-  createDevLoginUser(mobile: string, role: Role): Promise<User>;
+  createDevLoginUser(mobile: string, role: Role, displayId: string): Promise<User>;
   /**
    * Register-or-login: a User with no role and no party, created at send time
    * so the OTP row has something to reference. Stays a ghost until
    * `markMobileVerified` runs; the party comes from POST /users/me/party.
    */
-  createUnregisteredUser(mobile: string): Promise<User>;
+  createUnregisteredUser(mobile: string, displayId: string): Promise<User>;
   /** Stamps `mobileVerifiedAt` the first time a code is verified; a no-op after. */
   markMobileVerified(userId: string): Promise<unknown>;
   /** Expires any outstanding unverified codes for this recipient + purpose. */

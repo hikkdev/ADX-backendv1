@@ -32,6 +32,8 @@ over that resolver.
 | PUT | `/api/v1/integrations` `{ section: 'qrEngine' }` | same guard — QR-1: **strict** (`provider`, `baseUrl` (http(s)), `apiKey`, `shortBaseUrl` (http(s) or `null` to clear), `style`); `style` is a strict sub-object laid over the stored one — blank keeps, `null` clears, colours `#rrggbb`, `dotStyle` square \| dots \| rounded, `frameStyle` none \| simple \| label-below \| label-above, `frameCaption` ≤ 120, `logoUrl` https or a same-origin path. A change of `provider` is audited `QR_ENGINE_CHANGED` (before/after, never the key) beside the usual `INTEGRATION_CONFIG_UPDATED` |
 | POST | `/api/v1/integrations/qr-engine/test` | `authenticate` + ADMIN + `settings.edit` — QR-1: one `GET /api/v1/me` on the stored key (nothing minted, nothing spent) and a verdict `{ engine, configured, reachable, authorized, status, message, account: { email, plan, apiAccess, scope, redirectBase } \| null, scopesMissing[], shortBaseMatches }` — the scopes the key lacks of the four the integration needs (`qrcodes:read`, `qrcodes:write`, `analytics:read`, `render`) and whether GenQR's redirect base matches the short origin ADX prints. **Never 5xx for what GenQR did**: no host or key, a refused key (GenQR's own sentence), a dead host are verdicts; under LOCAL the verdict says codes are drawn locally and calls nobody. Audited `INTEGRATION_TESTED` `{ section: 'qrEngine', engine, verdict }` — never the key |
 | POST | `/api/v1/integrations/audience/test` `{ vendor: 'GEOIQ' \| 'AZIRA' }` | `authenticate` + ADMIN + `settings.edit` — AC-B2: asks the vendor ONCE at a fixed point (MG Road, Bengaluru — 12.9755, 77.6068; radius = `catchmentRadiusM` clamped to the vendor's bound, GeoIQ 100–2000 m) with the mapped variables, or with GeoIQ's documented sample `w_pop_tt` when none are mapped so the KEY can be tested before the map exists, and answers `{ vendor, keyPresent, variablesMapped, reachable, authorized, status, message, fieldsAnswered[], fieldsMissing[], sample: { footfallDaily } }` — a plain verdict the card prints. **Never 5xx for what the vendor did**: no key, a refused key (GeoIQ's gateway envelope — HTTP 200 carrying `{ body: "{\"status\": 401, …}", statusCode: 401 }` — is read for its effective status and GeoIQ's own sentence), a dead host and a vendor 5xx are all verdicts; Azira without its key or base URL is `reachable: false` with the sentence. Audited `INTEGRATION_TESTED` (targetType `AppConfig`, targetId `integrations`) with `{ vendor, verdict: { keyPresent, variablesMapped, reachable, authorized, status, fieldsAnswered: n, fieldsMissing: n } }` — never a key. `vendor` off the seam is 400 |
+| GET | `/api/v1/integrations` → `branding` | QR-9 (17 Sep 2026): `{ platformName, tagline, primaryColor, deepColor, inkColor, groundColor, wordmarkUrl, wordmarkInverseUrl, markUrl, markInverseUrl, iconUrl }` — every field `null` while DR 11 is in force (the pre-QR-9 `headerLogoUrl` / `authLogoUrl` show through as the wordmark / the mark). Nothing here is a secret |
+| PUT | `/api/v1/integrations` `{ section: 'branding' }` | same guard — QR-9: the words (name ≤ 60, tagline ≤ 120), the four colours (`#rrggbb`, a stray value 400) and the five logo URLs (absolute URLs — what `POST /upload` purpose `BRANDING` answers); blank keeps, `null` or `''` clears back to DR 11. The public `GET /app/branding` answers the change within its five-minute cache |
 
 The guard is applied to the whole router, not per route, because every endpoint
 here exposes or mutates credentials.
@@ -265,6 +267,44 @@ other). Port **465** is implicit TLS (`secure: true`), **587** is STARTTLS
 port, nothing else to fill. Press the test to confirm before switching the
 primary or the mode; a refused app password comes back as the verdict's
 sentence (`535-5.7.8 Username and Password not accepted`).
+
+## The brand (QR-9, 17 Sep 2026; QR-11 — draft and releases)
+
+**QR-11:** the `branding` section is now the DRAFT. What every surface
+draws is the latest `BrandRelease`, made by Publish on Settings › Brand &
+theme (`modules/branding` — `GET /branding`, `PUT /branding/draft`, `POST
+/branding/publish`, `GET /branding/releases`, `POST /branding/releases/
+:number/restore`); `getBrand()` resolves the release, `getDraftBrand()` the
+section. The resolved brand also carries `onPrimaryColor` (white or the
+ink, by contrast — the console's `--primary-foreground`, the phones'
+`onPrimary`) and `website: { taglines[], heroImageUrl, ogImageUrl,
+faviconUrl }`, and `brandChecks()` grades legibility. The section's own
+PUT still works and is what the draft write wraps.
+
+`shared/integrations/branding.ts` is the seam: `BRAND_DEFAULTS` is DR 11 as
+pulled from Figma (`pMifkbhIWER4xIbCKt0Nvh`, node `4994-10790`) — wordmark red
+`#E40209`, tile red `#BD2020`, ink `#0F0F0F`, ground `#F5F5F5`, the "A" mark,
+"Space that gets seen." — and the SVG files under `public/brand/` (the source
+set is `brand/svg` at the monorepo root, with the generated launcher icons,
+app PNGs and web icons beside it under `brand/generated`). `resolveBrand(config,
+baseUrl)` lays the stored `branding` section over the defaults, turns the
+`/brand/*` paths into absolute URLs, refuses a colour that is not `#rrggbb`
+back to the default, lists the fields still on DR 11 in `defaults[]` and
+hashes the result into `version`. `getBrand(baseUrl)` reads the row and
+resolves it; `GET /app/branding` (app-config) serves that to anyone.
+
+What a change on Settings › Branding reaches, and what it does not:
+
+- the console — logos, name and the primary colour (its theme variables) at
+  once;
+- the phones — the logos (the wordmark on the sign-in sheet and the boot
+  splash, the mark on the agent app's FAB) and the tagline at the next
+  launch, and (QR-10) the four colours at the launch after that: the app
+  caches what `/app/branding` answered and boots on it next time, so every
+  DR 09 component — buttons, tabs, chips, the FAB, the side menu — is in the
+  retuned primary;
+- **not** the launcher icons or the splash the OS draws — those are baked
+  into the APK / IPA from `brand/generated` and need a rebuild.
 
 ## Invariants
 

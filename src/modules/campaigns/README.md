@@ -357,3 +357,11 @@ policy on the integrations row — Y-B). So the per-campaign read carries
   capture — a frozen advertiser's (Lot A FREEZE_WALLET, refused inside the
   movement since B3a) — is counted `skipped`, logged and left SCHEDULED for
   the next tick. It never stops the other campaigns due on the same tick.
+- QR-16 (the owner, 17 Sep 2026): KYC gates the LAUNCH, not the payment.
+  `authorizeCampaign` reads `launchBlockedBy` off `assertCanBook`'s answer;
+  with KYC in it a campaign due today stays SCHEDULED, uncaptured, and the
+  advertiser is told. `runCampaignTransitions` skips a due campaign whose
+  advertiser is unverified (`advertiserContext.kycStatus`), counted
+  `awaitingVerification`, ops and the advertiser told once a day; the first
+  tick after the verification launches it. The detail read carries
+  `launchBlockedBy` for the app's "paid — verify to launch" line.

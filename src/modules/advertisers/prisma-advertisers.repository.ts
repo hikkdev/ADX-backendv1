@@ -1,6 +1,7 @@
 import { Prisma, prisma } from '../../shared/database';
 import type {
   Brand,
+  Gender,
   RefundDestination,
   RefundReason,
   RefundRequestStatus,
@@ -22,8 +23,10 @@ import {
   REFUND_REQUEST_STATUSES,
   TOP_UP_DESK_STATUSES,
   type TopUpDeskQuery,
+  type AccountInput,
   type AdvertiserFunnel,
   type AdvertiserFunnelRow,
+  type AdvertiserRosterQuery,
   type AdvertisersRepository,
   type CreateAcceptanceInput,
   type CreateAdvertiserInput,
@@ -86,6 +89,64 @@ async function findUserClosure(userId: string) {
   return prisma.user.findUnique({ where: { id: userId }, select: { closedAt: true, closeReason: true } });
 }
 
+/** QR-15: the person behind the account — the console's Edit details drawer prefills from these. */
+async function findUserPerson(userId: string) {
+  return prisma.user.findUnique({
+    where: { id: userId },
+    select: { displayId: true, firstName: true, lastName: true, dateOfBirth: true, gender: true, avatarUrl: true, consentAcceptedAt: true },
+  });
+}
+
+/** QR-14/15: the names behind `onboardedById`, one query for a page of rows. */
+async function userLabels(userIds: readonly string[]) {
+  const ids = [...new Set(userIds)];
+  if (ids.length === 0) return new Map<string, string | null>();
+  const users = await prisma.user.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } });
+  return new Map(users.map((u) => [u.id, u.name]));
+}
+
+/**
+ * QR-15: the account behind a desk-onboarded advertiser — opened with the
+ * number and the ADVERTISER role, or the number's existing account adopted.
+ * Only what is empty is filled: a person who already is somebody keeps
+ * their own details.
+ */
+async function ensureAccount(input: AccountInput) {
+  const { mobile, displayId, name, email, ...person } = input;
+  const existing = await prisma.user.findUnique({ where: { mobile }, include: { roles: { select: { role: true } } } });
+  if (existing) {
+    const fill: Record<string, unknown> = {};
+    if (existing.firstName === null && person.firstName !== undefined) fill['firstName'] = person.firstName;
+    if (existing.lastName === null && person.lastName !== undefined) fill['lastName'] = person.lastName;
+    if (existing.dateOfBirth === null && person.dateOfBirth !== undefined) fill['dateOfBirth'] = person.dateOfBirth;
+    if (existing.gender === null && person.gender !== undefined) fill['gender'] = person.gender;
+    if (existing.name === null) fill['name'] = name;
+    if (existing.email === null && email) fill['email'] = email;
+    if (!existing.roles.some((r) => r.role === 'ADVERTISER')) fill['roles'] = { create: { role: 'ADVERTISER' } };
+    if (Object.keys(fill).length > 0) await prisma.user.update({ where: { id: existing.id }, data: fill });
+    return { id: existing.id, created: false };
+  }
+  const created = await prisma.user.create({
+    data: {
+      mobile,
+      displayId,
+      name,
+      ...(email ? { email } : {}),
+      ...(person.firstName !== undefined ? { firstName: person.firstName } : {}),
+      ...(person.lastName !== undefined ? { lastName: person.lastName } : {}),
+      ...(person.dateOfBirth !== undefined ? { dateOfBirth: person.dateOfBirth } : {}),
+      ...(person.gender !== undefined ? { gender: person.gender } : {}),
+      roles: { create: { role: 'ADVERTISER' } },
+    },
+    select: { id: true },
+  });
+  return { id: created.id, created: true };
+}
+
+async function updateAccount(userId: string, patch: { firstName?: string; lastName?: string; name?: string; email?: string; dateOfBirth?: Date; gender?: Gender }) {
+  await prisma.user.update({ where: { id: userId }, data: patch });
+}
+
 async function createAdvertiser(input: CreateAdvertiserInput) {
   return prisma.advertiser.create({
     data: {
@@ -103,9 +164,20 @@ async function createAdvertiser(input: CreateAdvertiserInput) {
       userId: input.userId ?? null,
       agentId: input.agentId ?? null,
       displayId: input.displayId,
+      // QR-14: the door.
+      onboardedVia: input.onboardedVia ?? null,
+      onboardedById: input.onboardedById ?? null,
+      onboardedByRole: input.onboardedByRole ?? null,
+      onboardedAt: input.onboardedAt ?? null,
     },
   });
 }
+
+/** QR-14: the name behind `onboardedById`. */
+const findUserLabel = async (userId: string): Promise<string | null> => {
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { name: true } });
+  return user?.name ?? null;
+};
 
 const findAdvertiserById = (id: string) => prisma.advertiser.findUnique({ where: { id } });
 const findAdvertiserByMobile = (mobile: string) =>
@@ -125,19 +197,24 @@ const findAdvertiserLabelsByUserIds = async (userIds: string[]) => {
 const updateAdvertiser = (id: string, patch: UpdateAdvertiserInput) =>
   prisma.advertiser.update({ where: { id }, data: patch });
 
-async function listAdvertisers(query: PageQuery & { q?: string | undefined }) {
+async function listAdvertisers(query: AdvertiserRosterQuery) {
   const rows = await prisma.advertiser.findMany({
-    where: query.q
-      ? {
-          OR: [
-            { name: { contains: query.q, mode: 'insensitive' } },
-            { companyName: { contains: query.q, mode: 'insensitive' } },
-            { email: { contains: query.q, mode: 'insensitive' } },
-            { mobile: { contains: query.q } },
-            { displayId: { contains: query.q, mode: 'insensitive' } },
-          ],
-        }
-      : {},
+    where: {
+      ...(query.q
+        ? {
+            OR: [
+              { name: { contains: query.q, mode: 'insensitive' } },
+              { companyName: { contains: query.q, mode: 'insensitive' } },
+              { email: { contains: query.q, mode: 'insensitive' } },
+              { mobile: { contains: query.q } },
+              { displayId: { contains: query.q, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+      // QR-15: the roster's cuts — who onboarded, and how.
+      ...(query.onboardedVia ? { onboardedVia: query.onboardedVia } : {}),
+      ...(query.onboardedById ? { onboardedById: query.onboardedById } : {}),
+    },
     orderBy: { createdAt: 'desc' },
     ...pageArgs(query),
   });
@@ -754,12 +831,17 @@ const findLabelsByIds = async (ids: string[]) => {
 };
 
 export const prismaAdvertisersRepository: AdvertisersRepository = {
+  findUserLabel,
   findLabelsByIds,
   createAdvertiser,
   attachUser,
   attachAgent,
   findUserSummary,
   findUserClosure,
+  findUserPerson,
+  userLabels,
+  ensureAccount,
+  updateAccount,
   findAdvertiserById,
   findKycSummary,
   findAdvertiserByMobile,

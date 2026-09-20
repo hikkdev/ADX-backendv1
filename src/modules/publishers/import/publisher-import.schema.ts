@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { upperEnum } from '../../../shared/validation';
+import { dateOfBirthSchema, genderSchema, upperEnum } from '../../../shared/validation';
 import { PUBLISHER_TYPES } from '../publishers.schema';
 
 /**
@@ -24,6 +24,13 @@ export const IMPORT_COLUMNS = [
   'contactMobile',
   'contactEmail',
   'panNumber',
+  // QR-13: the person behind the account and the address pin — what the app's ladder collects.
+  'firstName',
+  'lastName',
+  'dateOfBirth',
+  'gender',
+  'latitude',
+  'longitude',
 ] as const;
 export type ImportColumn = (typeof IMPORT_COLUMNS)[number];
 
@@ -50,6 +57,13 @@ export const importRowSchema = z.object({
   contactName: optionalText(160),
   contactMobile: z.preprocess(blankToUndefined, z.string().trim().min(10).max(20).optional()),
   contactEmail: z.preprocess(blankToUndefined, z.string().trim().email().optional()),
+  // QR-13: the person and the pin.
+  firstName: optionalText(60),
+  lastName: optionalText(60),
+  dateOfBirth: z.preprocess(blankToUndefined, dateOfBirthSchema.optional()),
+  gender: z.preprocess(blankToUndefined, genderSchema.optional()),
+  latitude: z.preprocess(blankToUndefined, z.coerce.number().min(-90).max(90).optional()),
+  longitude: z.preprocess(blankToUndefined, z.coerce.number().min(-180).max(180).optional()),
   panNumber: z.preprocess(
     blankToUndefined,
     z

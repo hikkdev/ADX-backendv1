@@ -44,6 +44,12 @@ const state = vi.hoisted(() => {
         const row = get(id);
         return row ? { ...row, publisher: { id: 'pub_1', userId: 'usr_publisher', agentId: null } } : null;
       },
+      // QR-6: the submit gate reads the publisher's own row; this one has
+      // accepted the publisher agreement, so the road is open.
+      findPublisherByUserId: async (userId: string) =>
+        userId === 'usr_publisher'
+          ? { id: 'pub_1', name: 'Sharma Hoardings', mobile: '+919876543210', email: 'a@b.c', address: '1 Road', dateOfBirth: new Date('1990-01-01T00:00:00Z'), activatedAt: new Date('2026-09-01T00:00:00Z') }
+          : null,
       countAll: async () => rows.size,
       displayIdExists: async () => false,
       submitForReview: async (id: string, displayId: string | null, at: Date) =>
@@ -74,6 +80,15 @@ const state = vi.hoisted(() => {
 });
 
 vi.mock('../prisma-listings.repository', () => ({ prismaListingsRepository: state.repository }));
+// QR-8: the reference is minted off the LISTING series, not counted.
+vi.mock('../../identifiers', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../identifiers')>()), allocateIdentifier: async () => 'LST-0909-2602' }));
+// QR-6: the submit gate asks `agreements` for the publisher's standing on the
+// live agreement; this publisher has accepted it, so the road stays open —
+// and the test never reaches the database for it.
+vi.mock('../../agreements', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../agreements')>()),
+  platformStanding: async () => ({ kind: 'PLATFORM', currentVersion: 1, requiresReacceptance: false, accepted: { templateVersion: 1 }, satisfied: true, outdated: false }),
+}));
 /* Partial: the app mounts `rateCardRouter` from the same module, so only the
    gate is replaced — no card covers anything in this suite. */
 vi.mock('../../rate-cards', async (importOriginal) => ({
@@ -158,7 +173,7 @@ describe('submit → send back → resubmit → publish', () => {
     // The publisher says they are done.
     const submitted = await submit('lst_1');
     expect(submitted.status).toBe(200);
-    expect(submitted.body.data).toMatchObject({ status: 'PENDING_REVIEW', displayId: 'ADX-LST-00002' });
+    expect(submitted.body.data).toMatchObject({ status: 'PENDING_REVIEW', displayId: 'LST-0909-2602' });
 
     // It is now on the desk, with nothing held against it yet.
     const waiting = await queue();
@@ -196,7 +211,7 @@ describe('submit → send back → resubmit → publish', () => {
     // The publisher fixes it and resubmits. The reference is kept; the reason
     // stays on the row so the reviewer sees what was asked.
     const again = await submit('lst_1');
-    expect(again.body.data).toMatchObject({ status: 'PENDING_REVIEW', displayId: 'ADX-LST-00002' });
+    expect(again.body.data).toMatchObject({ status: 'PENDING_REVIEW', displayId: 'LST-0909-2602' });
     const back = await queue();
     expect(back.body.data.items[0]).toMatchObject({ priorReason: 'Photos are blurry' });
     expect(back.body.data.items[0].submittedAt).not.toBeNull();

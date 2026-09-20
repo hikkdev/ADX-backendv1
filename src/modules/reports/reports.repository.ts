@@ -1,4 +1,5 @@
 import type { Prisma, ReportCadence, ReportFormat, ReportRun, ReportRunStatus, ReportSchedule } from '../../shared/database';
+import type { OnboardingSource } from '../../shared/database';
 import type { Decimal } from '../../shared/money';
 import type { ListQuery } from '../../shared/pagination';
 
@@ -278,7 +279,29 @@ export interface PlatformSummary {
   deliveriesSent: number;
 }
 
+/** QR-14: one row of the team onboarding board — a person (or "organic"), what they onboarded in the window and how far it got. */
+export interface OnboardingBoardRow {
+  actorId: string | null;
+  actorName: string | null;
+  actorRole: string | null;
+  /** How many came through each door under this person. */
+  via: Record<OnboardingSource, number>;
+  publishers: number;
+  advertisers: number;
+  onboarded: number;
+  /** Publishers whose onboarding reached COMPLETE; advertisers with an activated account. */
+  completed: number;
+  /** Publishers with a listing live within seven days of onboarding. */
+  liveWithin7d: number;
+  /** KYC verified. */
+  verified: number;
+  /** Publishers with a first booking; advertisers with a first paid campaign or package. */
+  firstBooking: number;
+}
+
 export interface ReportData {
+  /** QR-14: the team onboarding board for the window. */
+  onboardingBoard(window: Window, f: { via?: OnboardingSource; role?: string }): Promise<OnboardingBoardRow[]>;
   bookings(window: Window, f: { advertiserId?: string; agentId?: string; kind?: 'CAMPAIGN' | 'PACKAGE' }): Promise<BookingRow[]>;
   publisherEarnings(window: Window, f: { publisherId?: string; city?: string }): Promise<PublisherEarningsRow[]>;
   publisherPayouts(window: Window, publisherIds: readonly string[] | null): Promise<PublisherPayoutRow[]>;

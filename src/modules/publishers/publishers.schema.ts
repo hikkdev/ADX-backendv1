@@ -1,6 +1,7 @@
 import { z } from 'zod';
+import { ONBOARDING_SOURCES } from '../../shared/onboarding';
 import { DEFAULT_LIST_PAGE_SIZE, MAX_LIST_PAGE_SIZE } from '../../shared/pagination';
-import { upperEnum } from '../../shared/validation';
+import { dateOfBirthSchema, genderSchema, upperEnum } from '../../shared/validation';
 import { kycQueueStateSchema } from '../../shared/kyc-state';
 
 /**
@@ -36,6 +37,9 @@ export const PUBLISHER_KYC_STATUSES = ['PENDING', 'VERIFIED', 'REJECTED', 'NEEDS
 export const publisherRosterQuerySchema = z.object({
   q: z.string().trim().min(1).max(120).optional(),
   category: z.string().trim().min(1).max(40).optional(),
+  /** QR-14: the door, and the person who opened it. */
+  onboardedVia: upperEnum(ONBOARDING_SOURCES).optional(),
+  onboardedById: z.string().trim().min(1).max(64).optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).default(DEFAULT_LIST_PAGE_SIZE).transform((value) => Math.min(MAX_LIST_PAGE_SIZE, value)),
 });
@@ -63,33 +67,103 @@ export const publisherBareQuerySchema = z.object({
 });
 export type PublisherBareQuery = z.infer<typeof publisherBareQuerySchema>;
 
-export const createPublisherSchema = z.object({
-  /**
-   * Q29: an ADMIN may open a publisher account from the desk, and may say
-   * whose book it belongs to. Ignored on the agent path — an agent's own
-   * publishers are attributed to them by their session, never by a body field.
-   */
-  attributeToAgentId: z.string().trim().min(1).max(64).optional(),
-  /** Where to meet them. Optional at creation, asked for before a booking. */
-  address: z.string().trim().min(1).optional(),
-  name: z.string().min(1),
-  mobile: z.string().min(10),
-  email: z.string().email().optional(),
-  type: upperEnum(PUBLISHER_TYPES).optional(),
-  city: z.string().optional(),
-  state: z.string().optional(),
-});
+/**
+ * QR-13: the person behind the account, as the app's ladder collects them.
+ * Optional on the wire so the agent door's quick-add (name + number) keeps
+ * working; when `firstName` is given the desk is onboarding in full and the
+ * rest of what the app requires is required here too — see `deskOnboarding`.
+ */
+const personFields = {
+  firstName: z.string().trim().min(1).max(60).optional(),
+  lastName: z.string().trim().min(1).max(60).optional(),
+  dateOfBirth: dateOfBirthSchema.optional(),
+  gender: genderSchema.optional(),
+};
+
+const contactFields = {
+  gstin: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .regex(/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/, 'Invalid GSTIN')
+    .optional(),
+  contactName: z.string().trim().min(1).max(160).optional(),
+  contactMobile: z.string().regex(/^\+?[1-9]\d{9,14}$/, 'Invalid mobile number').optional(),
+  contactEmail: z.string().email().optional(),
+  /** QR-5: the pin behind the address; both or neither. */
+  latitude: z.number().min(-90).max(90).nullable().optional(),
+  longitude: z.number().min(-180).max(180).nullable().optional(),
+};
+
+/**
+ * QR-13: what the app's ladder requires, applied to a desk onboarding — the
+ * same rules, so a publisher opened here lands on the phone with nothing
+ * left to ask. Details for everyone: last name, email, address, city,
+ * state, date of birth. A business: its GSTIN. Anyone but an individual: a
+ * contact person with a number.
+ */
+export function deskOnboarding(value: { firstName?: string; lastName?: string; email?: string; dateOfBirth?: string; address?: string; city?: string; state?: string; type?: string; gstin?: string; contactName?: string; contactMobile?: string; latitude?: number | null; longitude?: number | null }, ctx: z.RefinementCtx): void {
+  if ((value.latitude === undefined) !== (value.longitude === undefined) || (value.latitude === null) !== (value.longitude === null)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['latitude'], message: 'Send latitude and longitude together, or neither.' });
+  }
+  if (value.firstName === undefined) return;
+  const need = (key: keyof typeof value, message: string) => {
+    if (value[key] === undefined || value[key] === '') ctx.addIssue({ code: z.ZodIssueCode.custom, path: [key], message });
+  };
+  need('lastName', 'Needed: the app asks for it.');
+  need('email', 'Needed: the app asks for it, and the readiness rule counts it.');
+  need('dateOfBirth', 'Needed: the app asks for it (18 or over).');
+  need('address', 'Needed: the app asks for it.');
+  need('city', 'Needed: the app asks for it.');
+  need('state', 'Needed: the app asks for it.');
+  const type = value.type ?? 'INDIVIDUAL';
+  if (type === 'BUSINESS') need('gstin', 'Needed for a business: the app asks for it.');
+  if (type !== 'INDIVIDUAL') {
+    need('contactName', 'Needed for a business or organisation: who ADX should reach.');
+    need('contactMobile', 'Needed for a business or organisation: their number.');
+  }
+}
+
+export const createPublisherSchema = z
+  .object({
+    /**
+     * Q29: an ADMIN may open a publisher account from the desk, and may say
+     * whose book it belongs to. Ignored on the agent path — an agent's own
+     * publishers are attributed to them by their session, never by a body field.
+     */
+    attributeToAgentId: z.string().trim().min(1).max(64).optional(),
+    /** Where to meet them. Optional at creation, asked for before a booking. */
+    address: z.string().trim().min(1).optional(),
+    name: z.string().min(1),
+    mobile: z.string().min(10),
+    email: z.string().email().optional(),
+    type: upperEnum(PUBLISHER_TYPES).optional(),
+    city: z.string().optional(),
+    state: z.string().optional(),
+    ...personFields,
+    ...contactFields,
+  })
+  .superRefine(deskOnboarding);
 
 // Mobile is absent on purpose: it identifies the publisher and is not editable
-// through this endpoint.
-export const updatePublisherSchema = z.object({
-  address: z.string().trim().min(1).optional(),
-  name: z.string().optional(),
-  email: z.string().email().optional(),
-  type: upperEnum(PUBLISHER_TYPES).optional(),
-  city: z.string().optional(),
-  state: z.string().optional(),
-});
+// through this endpoint. QR-13: the desk edits everything the ladder
+// collects, the person's fields included.
+export const updatePublisherSchema = z
+  .object({
+    address: z.string().trim().min(1).optional(),
+    name: z.string().optional(),
+    email: z.string().email().optional(),
+    type: upperEnum(PUBLISHER_TYPES).optional(),
+    city: z.string().optional(),
+    state: z.string().optional(),
+    ...personFields,
+    ...contactFields,
+  })
+  .superRefine((value, ctx) => {
+    if ((value.latitude === undefined) !== (value.longitude === undefined) || (value.latitude === null) !== (value.longitude === null)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['latitude'], message: 'Send latitude and longitude together, or neither.' });
+    }
+  });
 
 export const registerPublisherSchema = z.object({
   name: z.string().min(1),
@@ -105,6 +179,12 @@ export const updateMyProfileSchema = z.object({
   email: z.string().email().optional(),
   type: upperEnum(PUBLISHER_TYPES).optional(),
   address: z.string().trim().min(1).optional(),
+  /** QR-5: the pin behind the address; both or neither, null clears. */
+  latitude: z.number().min(-90).max(90).nullable().optional(),
+  longitude: z.number().min(-180).max(180).nullable().optional(),
+  /** QR-5: the person's, written to their User row. */
+  dateOfBirth: dateOfBirthSchema.optional(),
+  gender: genderSchema.optional(),
   city: z.string().trim().min(1).optional(),
   state: z.string().trim().min(1).optional(),
   gstin: z

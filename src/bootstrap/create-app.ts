@@ -51,6 +51,10 @@ export function createApp(): express.Express {
 
   // Serve uploaded files as static assets
   app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+  // QR-9: the DR 11 brand files — the wordmark, the mark, the icon tile — the
+  // defaults `GET /app/branding` points every surface at. Long-cached: a
+  // retuned brand is a different URL (an upload), never a changed file here.
+  app.use('/brand', express.static(path.join(process.cwd(), 'public', 'brand'), { maxAge: '7d', immutable: true }));
 
   /*
    * The campaign scan redirect. Deliberately outside /api/v1: this URL is

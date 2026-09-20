@@ -419,6 +419,47 @@ export const prismaSupplyRepository: SupplyRepository = {
     return prisma.listing.findUnique({ where: { id: listingId } });
   },
 
+  /* Rights — QR-24 */
+
+  setRights(listingId, data) {
+    return prisma.listing.update({ where: { id: listingId }, data });
+  },
+
+  async rightsDue(before: Date, limit = SWEEP_BATCH) {
+    const rows = await prisma.listing.findMany({
+      where: {
+        rightsBasis: { not: 'OWNED' },
+        rightsValidUntil: { not: null, lte: before },
+        status: { in: ['ACTIVE', 'SUSPENDED', 'PENDING_REVIEW', 'AWAITING_DOCUMENTS', 'AWAITING_SITE_VERIFICATION'] },
+      },
+      orderBy: { rightsValidUntil: 'asc' },
+      take: limit,
+      select: {
+        id: true,
+        title: true,
+        publisherId: true,
+        status: true,
+        availableNow: true,
+        rightsBasis: true,
+        rightsValidUntil: true,
+        rightsLapsedAt: true,
+        rightsRemindedAt: true,
+        publisher: { select: { name: true } },
+      },
+    });
+    return rows.map(({ publisher, ...row }) => ({ ...row, publisherName: publisher?.name ?? null }));
+  },
+
+  async publisherUserId(publisherId: string) {
+    const row = await prisma.publisher.findUnique({ where: { id: publisherId }, select: { userId: true } });
+    return row?.userId ?? null;
+  },
+
+  async publisherIdOfUser(userId: string) {
+    const row = await prisma.publisher.findUnique({ where: { userId }, select: { id: true } });
+    return row?.id ?? null;
+  },
+
   setListingStatus(listingId: string, status: Listing['status']) {
     return prisma.listing.update({
       where: { id: listingId },

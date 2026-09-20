@@ -3,6 +3,7 @@ import { asyncHandler } from '../../shared/http';
 import { authenticate, requireRole } from '../../shared/auth';
 import {
   catalogueHandler,
+  onboardingBoardHandler,
   createScheduleHandler,
   deleteScheduleHandler,
   getRunHandler,
@@ -28,6 +29,8 @@ reportsRouter.get('/runs/:id/file', signedLinkOrAdmin, asyncHandler(runFileHandl
 
 reportsRouter.use(authenticate, requireRole('ADMIN'));
 reportsRouter.get('/catalogue', catalogueHandler);
+// QR-14: the team onboarding board, on screen — the same rows the 'onboarding-board' report exports.
+reportsRouter.get('/boards/onboarding', asyncHandler(onboardingBoardHandler));
 reportsRouter.post('/run', asyncHandler(runHandler));
 reportsRouter.get('/runs', asyncHandler(listRunsHandler));
 reportsRouter.get('/runs/:id', asyncHandler(getRunHandler));

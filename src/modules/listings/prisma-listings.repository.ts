@@ -106,7 +106,9 @@ function decimals(rest: {
  */
 const browseInclude = {
   photos: { select: { url: true, type: true }, orderBy: { createdAt: 'asc' } },
-  publisher: { select: { name: true } },
+  // QR-5: the publisher's KYC state rides on every card — the verified mark,
+  // and the partition below. QR-7: their picture beside the name.
+  publisher: { select: { name: true, kycStatus: true, user: { select: { avatarUrl: true } } } },
   mediaType: { select: { name: true, formatGroup: true } },
 } satisfies Prisma.ListingInclude;
 
@@ -432,7 +434,11 @@ export const prismaListingsRepository: ListingsRepository = {
     }
     const where: Prisma.ListingWhereInput = {
       status: 'ACTIVE',
+      // QR-24: a spot whose lease, licence or permit has run out takes no new booking.
+      rightsLapsedAt: null,
       ...(filter.category ? { category: filter.category } : {}),
+      // QR-20: the sub-category, one venue.
+      ...(filter.venueTypeId ? { venueTypeId: filter.venueTypeId } : {}),
       ...(filter.display === 'DIGITAL'
         ? { subType: { contains: 'digital', mode: 'insensitive' } }
         : filter.display === 'STATIC'
@@ -480,17 +486,34 @@ export const prismaListingsRepository: ListingsRepository = {
             : filter.sort === 'RATING'
               ? [{ ratingAvg: { sort: 'desc', nulls: 'last' } }, { reviewCount: 'desc' }, { publishedAt: 'desc' }]
               : { publishedAt: 'desc' };
-    const [items, total] = await Promise.all([
-      prisma.listing.findMany({
-        where,
-        orderBy,
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-        include: browseInclude,
-      }),
-      prisma.listing.count({ where }),
+    // QR-5 (the owner): verified publishers' spots come first, whatever the
+    // sort, and the unverified follow in the same sort — two partitions
+    // paged as one list. A KycStatus enum cannot be ordered "VERIFIED first"
+    // by the database, so the page is cut across the partitions here:
+    // however many of the verified fall on this page, the rest is filled
+    // from the unverified with the offset moved past the verified count.
+    // ADX's own spots (no publisher) sit with the verified. The partition
+    // joins the AND list so `q`'s OR and the place clause keep their seats.
+    const partitioned = (clause: Prisma.ListingWhereInput): Prisma.ListingWhereInput => ({
+      ...where,
+      AND: [...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []), clause],
+    });
+    const verifiedWhere = partitioned({ OR: [{ publisherId: null }, { publisher: { kycStatus: 'VERIFIED' } }] });
+    const unverifiedWhere = partitioned({ publisher: { kycStatus: { not: 'VERIFIED' } } });
+    const skip = (page - 1) * pageSize;
+    const [verifiedTotal, total] = await Promise.all([prisma.listing.count({ where: verifiedWhere }), prisma.listing.count({ where })]);
+    const fromVerified = Math.max(0, Math.min(pageSize, verifiedTotal - skip));
+    const unverifiedSkip = Math.max(0, skip - verifiedTotal);
+    const fromUnverified = pageSize - fromVerified;
+    const [verified, unverified] = await Promise.all([
+      fromVerified > 0
+        ? prisma.listing.findMany({ where: verifiedWhere, orderBy, skip, take: fromVerified, include: browseInclude })
+        : Promise.resolve([]),
+      fromUnverified > 0
+        ? prisma.listing.findMany({ where: unverifiedWhere, orderBy, skip: unverifiedSkip, take: fromUnverified, include: browseInclude })
+        : Promise.resolve([]),
     ]);
-    return { items, total };
+    return { items: [...verified, ...unverified], total };
   },
 
   // ── Saved spaces — Lot D (Q5/Q104) ──────────────────────────────────
@@ -580,7 +603,7 @@ export const prismaListingsRepository: ListingsRepository = {
       where: { displayId, status: 'ACTIVE' },
       include: {
         photos: { select: { url: true, type: true }, orderBy: { createdAt: 'asc' } },
-        publisher: { select: { name: true } },
+        publisher: { select: { name: true, kycStatus: true, user: { select: { avatarUrl: true } } } },
         mediaType: { select: { name: true, formatGroup: true } },
       },
     });
@@ -588,19 +611,24 @@ export const prismaListingsRepository: ListingsRepository = {
 
   findActiveForCategories(place: BrowsePlace) {
     return prisma.listing.findMany({
-      where: { status: 'ACTIVE', AND: browsePlaceClauses(place) },
+      where: { status: 'ACTIVE', rightsLapsedAt: null, AND: browsePlaceClauses(place) },
       // Newest live spot first: the tile is drawn with the first public
       // photograph down this order.
       orderBy: [{ publishedAt: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }],
       select: {
         id: true,
         category: true,
+        venueTypeId: true,
         latitude: true,
         longitude: true,
         publishedAt: true,
         photos: { select: { url: true, type: true }, orderBy: { createdAt: 'asc' } },
       },
     });
+  },
+
+  venueTypes() {
+    return prisma.venueType.findMany({ where: { isActive: true }, select: { id: true, name: true, slug: true, category: true }, orderBy: { name: 'asc' } });
   },
 
   setAvailability(listingId: string, availableNow: boolean) {
@@ -624,15 +652,28 @@ export const prismaListingsRepository: ListingsRepository = {
     return (await prisma.agentProfile.findUnique({ where: { id: agentId } })) !== null;
   },
 
-  findPublisherByUserId(userId: string) {
-    return prisma.publisher.findUnique({ where: { userId }, select: { id: true } });
+  async findPublisherByUserId(userId: string) {
+    const row = await prisma.publisher.findUnique({
+      where: { userId },
+      select: { id: true, name: true, mobile: true, email: true, address: true, activatedAt: true, user: { select: { dateOfBirth: true } } },
+    });
+    if (!row) return null;
+    const { user, ...publisher } = row;
+    return { ...publisher, dateOfBirth: user?.dateOfBirth ?? null };
   },
 
-  findPublisherById(publisherId: string) {
-    return prisma.publisher.findUnique({
+  async findPublisherById(publisherId: string) {
+    const row = await prisma.publisher.findUnique({
       where: { id: publisherId },
-      select: { id: true, userId: true, agentId: true },
+      select: {
+        id: true, userId: true, agentId: true, kycStatus: true,
+        name: true, mobile: true, email: true, address: true,
+        user: { select: { dateOfBirth: true } },
+      },
     });
+    if (!row) return null;
+    const { user, ...publisher } = row;
+    return { ...publisher, dateOfBirth: user?.dateOfBirth ?? null };
   },
 
   listContentCategories() {

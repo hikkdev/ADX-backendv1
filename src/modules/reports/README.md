@@ -142,3 +142,16 @@ signed link, expiry, schedules CRUD with audits, and `runDueSchedules`.
 
 Platform — with `admin-overview`, which reads the same tables for the
 console's numbers.
+
+## The onboarding board (QR-14, 17 Sep 2026)
+
+A thirteenth kind, `onboarding-board`, and one on-screen read, `GET
+/reports/boards/onboarding?preset=|from=&to=[&via=&role=]` (ADMIN): who
+onboarded whom in the window, one row per person on the ADX side (admins by
+their console role, agents, anyone who committed an import), with the doors
+they used and how far each party got — completed, a listing live within
+seven days of onboarding, KYC verified, a first booking (a first paid
+campaign or package for an advertiser). Ranked by onboarded, ties by how far
+they got; self-signups sit apart as "organic", unranked. The rows come from
+`prismaReportData.onboardingBoard`, the same for the CSV and the screen.
+The agent leaderboard (commission) is untouched.

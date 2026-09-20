@@ -25,6 +25,9 @@ import {
   submitDocumentHandler,
   submitVerificationHandler,
   verificationQueueHandler,
+  setRightsHandler,
+  rightsQueueHandler,
+  rightsSweepHandler,
 } from './supply.controller';
 
 export const supplyRouter = Router();
@@ -111,6 +114,12 @@ supplyRouter.patch(
   asyncHandler(reviewVerificationHandler),
 );
 supplyRouter.get('/verification-queue', requireRole('ADMIN'), asyncHandler(verificationQueueHandler));
+
+/* QR-24: the right to sell a space and its term. The publisher sets their
+   own; an agent or ADX any. The desk's queue and the on-demand sweep are ADX's. */
+supplyRouter.patch('/listings/:listingId/rights', requireRole('PUBLISHER', 'AGENT_PUBLISHER', 'ADMIN'), asyncHandler(setRightsHandler));
+supplyRouter.get('/rights-queue', requireRole('ADMIN'), asyncHandler(rightsQueueHandler));
+supplyRouter.post('/rights/sweep', requireRole('ADMIN'), asyncHandler(rightsSweepHandler));
 
 /* Enforcement sweep. Idempotent, intended for a scheduler; exposed so ops can
    run it on demand while there is no job runner. */

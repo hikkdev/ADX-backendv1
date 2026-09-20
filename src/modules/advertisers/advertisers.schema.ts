@@ -1,5 +1,7 @@
 import { z } from 'zod';
+import { ONBOARDING_SOURCES } from '../../shared/onboarding';
 import { listQuerySchema } from '../../shared/pagination';
+import { dateOfBirthSchema, genderSchema, upperEnum } from '../../shared/validation';
 
 export const advertiserTypeSchema = z.enum(['INDIVIDUAL', 'COMMERCIAL', 'NGO', 'AGENCY']);
 
@@ -53,7 +55,20 @@ export const moneySchema = z
 
 const mobileSchema = z.string().regex(/^[6-9]\d{9}$/, 'Enter a 10-digit Indian mobile number');
 
-export const registerAdvertiserSchema = z.object({
+/**
+ * QR-15: the person behind the account, as the desk types them — the same
+ * four the publisher desk takes, and the columns `PATCH /users/me` writes
+ * from the app. Given a first name, the account is opened up front with the
+ * ADVERTISER role, so the owner's sign-in has nothing left to ask.
+ */
+const personFields = {
+  firstName: z.string().trim().min(1).max(60).optional(),
+  lastName: z.string().trim().min(1).max(60).optional(),
+  dateOfBirth: dateOfBirthSchema.optional(),
+  gender: genderSchema.optional(),
+};
+
+const registerFields = z.object({
   name: z.string().min(2).max(120),
   /**
    * Required only when `onBehalf` is set. A self-serve signup ignores this and
@@ -78,9 +93,40 @@ export const registerAdvertiserSchema = z.object({
   state: z.string().min(2).max(80).optional(),
   /** Lot G (Q119): one of `ADVERTISER_INDUSTRIES`. */
   industry: advertiserIndustrySchema.optional(),
+  ...personFields,
 });
 
-export const updateProfileSchema = registerAdvertiserSchema
+/**
+ * QR-15: the desk onboards the way the app does. A first name marks an
+ * onboarding (rather than a bare account held for a number), and then what
+ * the app's own flow collects before the first booking is required here
+ * too: the last name, the billing address and the city; a company name for
+ * anyone but an individual. Email, date of birth, gender, state and GSTIN
+ * stay optional — the app does not ask an advertiser for them.
+ */
+export function deskOnboarding(
+  value: { firstName?: string; lastName?: string; type?: string; companyName?: string; billingAddress?: string; city?: string },
+  ctx: z.RefinementCtx,
+): void {
+  if (value.firstName === undefined) return;
+  const need = (key: keyof typeof value, message: string) => {
+    if (value[key] === undefined || value[key] === '') ctx.addIssue({ code: z.ZodIssueCode.custom, path: [key], message });
+  };
+  need('lastName', 'Needed: the app asks for it.');
+  need('billingAddress', 'Needed: the app asks for it before the first booking.');
+  need('city', 'Needed: the app asks for it.');
+  if ((value.type ?? 'INDIVIDUAL') !== 'INDIVIDUAL') need('companyName', 'Needed for a company or organisation: the app asks for it.');
+}
+
+export const registerAdvertiserSchema = registerFields.superRefine(deskOnboarding);
+
+/** QR-15: the roster's cuts beside `q` — the door, and the person who opened it. */
+export const advertiserRosterQuerySchema = z.object({
+  onboardedVia: upperEnum(ONBOARDING_SOURCES).optional(),
+  onboardedById: z.string().trim().min(1).max(60).optional(),
+});
+
+export const updateProfileSchema = registerFields
   .omit({ mobile: true, onBehalf: true, industry: true })
   .extend({ industry: advertiserIndustrySchema.nullable().optional() })
   .partial()

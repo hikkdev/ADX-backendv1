@@ -7,7 +7,7 @@ import { Decimal } from '../../../shared/money';
  * one wallet.
  */
 
-const repository = vi.hoisted(() => ({ listRefundRequestsPage: vi.fn(), findAdvertiserById: vi.fn(), findUserClosure: vi.fn(), findKycSummary: vi.fn(async () => null) }));
+const repository = vi.hoisted(() => ({ listRefundRequestsPage: vi.fn(), findAdvertiserById: vi.fn(), findUserClosure: vi.fn(), findUserPerson: vi.fn(async () => null), findKycSummary: vi.fn(async () => null) }));
 
 vi.mock('../prisma-advertisers.repository', () => ({ prismaAdvertisersRepository: repository }));
 vi.mock('../../identifiers', () => ({ allocateIdentifier: vi.fn() }));

@@ -10,7 +10,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  */
 
 const { repository } = vi.hoisted(() => ({
-  repository: { findForAgent: vi.fn(), findAllForAdmin: vi.fn(), findByUserIdWithKyc: vi.fn(), findByUserId: vi.fn() },
+  repository: { findForAgent: vi.fn(), findAllForAdmin: vi.fn(), findByUserIdWithKyc: vi.fn(), findByUserId: vi.fn(), findPlatformAgreementAcceptedAt: vi.fn().mockResolvedValue(null) },
 }));
 
 vi.mock('../prisma-publishers.repository', () => ({ prismaPublishersRepository: repository }));

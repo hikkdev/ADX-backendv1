@@ -19,6 +19,8 @@ import type {
   ListingClaimStatus,
   ListingDocumentKind,
   VerificationType,
+  RightsBasis,
+  ListingDocument,
 } from '../../shared/database';
 import type { PageQuery } from '../../shared/pagination';
 import { getPlatformSettings } from '../app-config';
@@ -449,10 +451,13 @@ export async function submitDocument(input: {
   listingId: string;
   kind: ListingDocumentKind;
   url: string;
+  /** QR-24: the day the permit or agreement runs out, YYYY-MM-DD. */
+  expiresAt?: string | null;
 }) {
   const listing = await repository.findListing(input.listingId);
   if (!listing) throw new ApiError(404, 'NOT_FOUND', 'Listing not found');
-  return repository.addDocument(input);
+  const { expiresAt, ...rest } = input;
+  return repository.addDocument({ ...rest, expiresAt: expiresAt ? endOfDay(expiresAt) : null });
 }
 
 export function getDocuments(listingId: string) {
@@ -492,8 +497,180 @@ export async function reviewDocument(input: {
   if (listing && !cleared && listing.status === 'AWAITING_SITE_VERIFICATION') {
     await repository.setListingStatus(listing.id, 'AWAITING_DOCUMENTS');
   }
+  // QR-24: an approved permit or agreement with a later end date renews the term.
+  if (listing && input.approve) await renewRightsFromDocument(listing, reviewed);
 
   return reviewed;
+}
+
+/* ------------------------------------------------------------------ */
+/* Rights — QR-24                                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * QR-24 (the owner, 17 Sep 2026): a hoarding, a digital billboard, a shelter
+ * — many spots are held on a lease, a licence or a permit a civic body
+ * renews every year, and a publisher who stopped holding it must stop
+ * selling it. The listing says how it is held and until when; the sweep
+ * reminds the publisher thirty and seven days out and marks the spot lapsed
+ * on the day — no new booking until a renewed document is reviewed and
+ * approved at the desk, which extends the term. Running campaigns are not
+ * touched: the advertiser booked in good faith, and the lapse is the
+ * publisher's to fix.
+ */
+export const RIGHTS_REMINDER_DAYS = [30, 7] as const;
+/** The documents that evidence a right to the space; an approved one with a later end date renews the term. */
+export const RIGHTS_DOCUMENT_KINDS: ListingDocumentKind[] = ['DISPLAY_AGREEMENT', 'MUNICIPAL_PERMIT', 'OWNER_NOC'];
+
+/** The last instant of a calendar day in India, so a permit "valid until 31 March" is good all of the 31st there — and prints as the 31st, not the 1st. */
+function endOfDay(day: string): Date {
+  return new Date(`${day}T23:59:59.999+05:30`);
+}
+
+export type RightsState = 'OWNED' | 'CURRENT' | 'ENDING' | 'LAPSED';
+
+/** OWNED needs no term; ENDING is inside the first reminder window; LAPSED is past the day, whether or not the sweep has stamped it. */
+export function rightsState(
+  listing: { rightsBasis: RightsBasis; rightsValidUntil: Date | null; rightsLapsedAt: Date | null },
+  now = new Date(),
+): RightsState {
+  if (listing.rightsBasis === 'OWNED') return 'OWNED';
+  if (listing.rightsLapsedAt) return 'LAPSED';
+  if (!listing.rightsValidUntil) return 'CURRENT';
+  if (listing.rightsValidUntil.getTime() <= now.getTime()) return 'LAPSED';
+  return listing.rightsValidUntil.getTime() - now.getTime() <= RIGHTS_REMINDER_DAYS[0] * DAY_MS ? 'ENDING' : 'CURRENT';
+}
+
+/**
+ * The publisher (their own spot), an agent or ADX sets how the space is
+ * held. A term already past lapses the spot at once; OWNED clears the term
+ * and any lapse — the publisher is saying nobody's permit stands over it.
+ */
+export async function setRights(
+  listingId: string,
+  input: { basis: RightsBasis; validUntil?: string | null },
+  actor: { userId: string; roles: string[] },
+  now = new Date(),
+) {
+  const listing = await repository.findListing(listingId);
+  if (!listing) throw new ApiError(404, 'NOT_FOUND', 'Listing not found');
+  const privileged = actor.roles.includes('ADMIN') || actor.roles.includes('AGENT_PUBLISHER');
+  if (!privileged) {
+    const own = await repository.publisherIdOfUser(actor.userId);
+    if (!own || own !== listing.publisherId) throw new ApiError(403, 'FORBIDDEN', 'You can only say how you hold your own spot.');
+  }
+  if (input.basis === 'OWNED') {
+    return repository.setRights(listingId, { rightsBasis: 'OWNED', rightsValidUntil: null, rightsLapsedAt: null, rightsRemindedAt: null });
+  }
+  if (!input.validUntil) throw new ApiError(400, 'VALIDATION_ERROR', 'A lease, licence or permit needs the day it runs out.');
+  const validUntil = endOfDay(input.validUntil);
+  const lapsed = validUntil.getTime() <= now.getTime();
+  return repository.setRights(listingId, {
+    rightsBasis: input.basis,
+    rightsValidUntil: validUntil,
+    rightsLapsedAt: lapsed ? now : null,
+    rightsRemindedAt: null,
+    ...(lapsed ? { availableNow: false } : {}),
+  });
+}
+
+/** The desk's queue: every term ending within `horizonDays`, and every lapse, soonest first. */
+export async function getRightsQueue(now = new Date(), horizonDays = 60) {
+  const rows = await repository.rightsDue(addDays(now, horizonDays));
+  return rows.map((row) => ({
+    ...row,
+    state: rightsState(row, now),
+    daysLeft: row.rightsValidUntil ? Math.ceil((row.rightsValidUntil.getTime() - now.getTime()) / DAY_MS) : null,
+  }));
+}
+
+async function tellPublisher(listing: { id: string; title: string; publisherId: string | null }, note: { title: string; message: string; suggestedAction: string }) {
+  if (!listing.publisherId) return;
+  const userId = await repository.publisherUserId(listing.publisherId);
+  if (!userId) return;
+  try {
+    await createNotification({ userId, type: 'SYSTEM', subtitle: listing.title, relatedId: listing.id, relatedType: 'LISTING', ...note });
+  } catch {
+    // Best effort: the sweep's stamp is the record; a notification that failed to send is not a reason to stop it.
+  }
+}
+
+async function tellAdmins(listing: { id: string; title: string }, note: { title: string; message: string }) {
+  try {
+    const admins = await listAdminUserIds();
+    await Promise.all(admins.map((userId) => createNotification({ userId, type: 'SYSTEM', subtitle: listing.title, relatedId: listing.id, relatedType: 'LISTING', suggestedAction: 'Open the renewals queue', ...note })));
+  } catch {
+    // As above.
+  }
+}
+
+const dayLabel = (date: Date) => new Intl.DateTimeFormat('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', year: 'numeric' }).format(date);
+
+/**
+ * The tick. A reminder goes once per window — thirty days out, then seven —
+ * which `rightsRemindedAt` records; a term past its day lapses the spot,
+ * takes it off the shelf, and tells the publisher and ADX once.
+ */
+export async function runRightsSweep(now = new Date()) {
+  const rows = await repository.rightsDue(addDays(now, RIGHTS_REMINDER_DAYS[0]));
+  let lapsed = 0;
+  let reminded = 0;
+  for (const row of rows) {
+    if (!row.rightsValidUntil) continue;
+    const until = row.rightsValidUntil;
+    if (until.getTime() <= now.getTime()) {
+      if (row.rightsLapsedAt) continue;
+      await repository.setRights(row.id, { rightsLapsedAt: now, availableNow: false });
+      lapsed += 1;
+      await tellPublisher(row, {
+        title: 'Your right to this spot has run out',
+        message: `The ${basisWord(row.rightsBasis)} on ${row.title} ended on ${dayLabel(until)}. It takes no new booking until you upload the renewed document and ADX approves it.`,
+        suggestedAction: 'Upload the renewed permit or agreement',
+      });
+      await tellAdmins(row, { title: 'A spot\'s right to the space has lapsed', message: `${row.publisherName ?? 'The publisher'} held ${row.title} on a ${basisWord(row.rightsBasis)} that ended on ${dayLabel(until)}. It is off the shelf until a renewal is approved.` });
+      continue;
+    }
+    const daysLeft = Math.ceil((until.getTime() - now.getTime()) / DAY_MS);
+    // The tightest window the day falls in: seven days out is the seven-day reminder, not a late thirty-day one.
+    const window = RIGHTS_REMINDER_DAYS.filter((days) => daysLeft <= days).pop();
+    if (window === undefined) continue;
+    // Sent once per window: a reminder stamped before this window opened does not count for it.
+    const windowOpened = until.getTime() - window * DAY_MS;
+    if (row.rightsRemindedAt && row.rightsRemindedAt.getTime() >= windowOpened) continue;
+    await repository.setRights(row.id, { rightsRemindedAt: now });
+    reminded += 1;
+    await tellPublisher(row, {
+      title: `Your ${basisWord(row.rightsBasis)} on ${row.title} ends in ${daysLeft} day${daysLeft === 1 ? '' : 's'}`,
+      message: `It runs out on ${dayLabel(until)}. Upload the renewed document before then and the spot stays on the shelf; after that day it takes no new booking until ADX approves the renewal.`,
+      suggestedAction: 'Upload the renewed permit or agreement',
+    });
+  }
+  return { considered: rows.length, lapsed, reminded };
+}
+
+function basisWord(basis: RightsBasis): string {
+  return basis === 'LEASED' ? 'lease' : basis === 'LICENSED' ? 'licence' : basis === 'PERMIT' ? 'permit' : 'right';
+}
+
+/** An approved permit or agreement whose end date is later than the term on file extends it and lifts a lapse. */
+async function renewRightsFromDocument(listing: Listing, document: ListingDocument, now = new Date()) {
+  if (!document.expiresAt || !RIGHTS_DOCUMENT_KINDS.includes(document.kind)) return;
+  if (listing.rightsBasis === 'OWNED') return;
+  if (listing.rightsValidUntil && document.expiresAt.getTime() <= listing.rightsValidUntil.getTime()) return;
+  const lapsed = document.expiresAt.getTime() <= now.getTime();
+  await repository.setRights(listing.id, {
+    rightsValidUntil: document.expiresAt,
+    rightsLapsedAt: lapsed ? (listing.rightsLapsedAt ?? now) : null,
+    rightsRemindedAt: null,
+    ...(lapsed ? {} : { availableNow: true }),
+  });
+  if (!lapsed) {
+    await tellPublisher(listing, {
+      title: 'Renewal approved',
+      message: `${listing.title} is good until ${dayLabel(document.expiresAt)} and back on the shelf.`,
+      suggestedAction: 'Open the listing',
+    });
+  }
 }
 
 /* ------------------------------------------------------------------ */

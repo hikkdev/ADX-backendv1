@@ -29,6 +29,14 @@ export type ApiErrorCode =
   // Demand: the app sends the advertiser to KYC on this one, so like
   // PLATFORM_AGREEMENT_REQUIRED it has to be more than a 403.
   | 'KYC_REQUIRED'
+  // Supply (QR-3): a publisher may not start a listing until their name,
+  // email and address are in. The app opens the setup ladder on it.
+  | 'PROFILE_INCOMPLETE'
+  // QR-7: a profile picture that is not an image, or too big to take in.
+  | 'INVALID_IMAGE'
+  | 'FILE_TOO_LARGE'
+  // QR-11: Publish on Settings › Brand & theme when the draft is what is live already. Paired with 409.
+  | 'NOTHING_TO_PUBLISH'
   // Demand: opens top-up rather than reporting a failure. Paired with 402.
   | 'INSUFFICIENT_FUNDS'
   // Revenue (Lot J-B1): the publisher is on this tier open-ended, so there is

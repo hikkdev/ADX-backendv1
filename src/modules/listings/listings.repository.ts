@@ -68,6 +68,8 @@ export type SpotAttributes = {
 
 export type NewListing = Partial<SpotAttributes> & {
   publisherId: string;
+  /** QR-8: the reference (`LST-DDMM-YYNN`), minted by the service at creation or carried over from a draft. */
+  displayId?: string;
   /**
    * The agent who keyed this in, when one did.
    *
@@ -170,6 +172,8 @@ export type BrowseFilter = {
    */
   cityId?: string | null;
   category?: 'INDOOR' | 'OUTDOOR' | 'TRANSIT' | 'MEDIA';
+  /** QR-20: the sub-category — one `VenueType`. */
+  venueTypeId?: string;
   /** DIGITAL matches a sub-type naming a screen; STATIC is everything else. */
   display?: 'DIGITAL' | 'STATIC';
   minRate?: string;
@@ -190,7 +194,8 @@ export type BrowseFilter = {
 
 export type BrowseListing = Listing & {
   photos: { url: string; type: string }[];
-  publisher: { name: string | null } | null;
+  /** QR-5: `kycStatus` rides along for the verified mark and the ranking; QR-7: the person's picture. */
+  publisher: { name: string | null; kycStatus?: string | null; user?: { avatarUrl: string | null } | null } | null;
   /**
    * G12-B: the media type the spot was filed under — the second half of the
    * evidence `slots.service.carriesLoop` reads for the card's `display`.
@@ -207,11 +212,16 @@ export type BrowsePlace = Pick<BrowseFilter, 'city' | 'cityId' | 'near'>;
 export type CategoryTileListing = {
   id: string;
   category: ListingCategory;
+  /** QR-20: the venue the spot lives in, for the sub-category tiles; null on a spot listed before venues. */
+  venueTypeId: string | null;
   latitude: number | null;
   longitude: number | null;
   publishedAt: Date | null;
   photos: { url: string; type: string }[];
 };
+
+/** QR-20: one venue type of the catalogue — the sub-categories the home strip and the Explore grid draw. */
+export type VenueTypeRow = { id: string; name: string; slug: string; category: ListingCategory };
 
 /** E11-2: the public spot page's row — the browse row plus the media type it prints. */
 export type SpotPageListing = BrowseListing & {
@@ -321,11 +331,14 @@ export interface ListingsRepository {
    * already imports this one — reaching the other way would close a cycle for
    * the sake of a two-column lookup.
    */
-  findPublisherByUserId(userId: string): Promise<{ id: string } | null>;
-  /** The publisher and the agent who onboarded them, for the create guard. */
+  /** The publisher behind a login; QR-3: with the basics the listing door checks. */
+  findPublisherByUserId(
+    userId: string,
+  ): Promise<{ id: string; name: string; mobile: string; email: string | null; address: string | null; dateOfBirth: Date | null; activatedAt: Date | null } | null>;
+  /** The publisher and the agent who onboarded them, for the create guard; QR-2: and their KYC state, for the publish gate. */
   findPublisherById(
     publisherId: string
-  ): Promise<{ id: string; userId: string | null; agentId: string | null } | null>;
+  ): Promise<{ id: string; userId: string | null; agentId: string | null; kycStatus: string; name: string; mobile: string; email: string | null; address: string | null; dateOfBirth: Date | null } | null>;
 
   /* ── Content rules — DR 02 step 6 ─────────────────────────────────
    * The categories are a controlled list for the same reason media types are:
@@ -362,6 +375,8 @@ export interface ListingsRepository {
    * the box to the circle, the way browse does.
    */
   findActiveForCategories(place: BrowsePlace): Promise<CategoryTileListing[]>;
+  /** QR-20: every active venue type, the catalogue's sub-categories. */
+  venueTypes(): Promise<VenueTypeRow[]>;
   /** E11-2: the public spot page — one ACTIVE listing by its display id, with its media type; null otherwise. */
   findActiveByDisplayId(displayId: string): Promise<SpotPageListing | null>;
   setAvailability(listingId: string, availableNow: boolean): Promise<unknown>;

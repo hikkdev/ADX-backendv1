@@ -1,4 +1,5 @@
 import type { Request, Response } from 'express';
+import { actorLabelFor } from '../../access-control';
 import { ApiError } from '../../../shared/errors';
 import { importBodySchema } from './publisher-import.schema';
 import { commitImport, getImport, importReportCsv, listImports, parseImportCsv, revokeImport, validateImport } from './publisher-import.service';
@@ -38,7 +39,7 @@ export async function getImportHandler(req: Request, res: Response): Promise<voi
 }
 
 export async function commitImportHandler(req: Request, res: Response): Promise<void> {
-  res.json({ success: true, data: await commitImport(req.params['id'] as string, req.user!.sub, req) });
+  res.json({ success: true, data: await commitImport(req.params['id'] as string, req.user!.sub, req, await actorLabelFor(req.user!.sub, req.user?.roles ?? [])) });
 }
 
 export async function revokeImportHandler(req: Request, res: Response): Promise<void> {

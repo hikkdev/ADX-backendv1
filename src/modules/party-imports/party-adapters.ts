@@ -1,4 +1,5 @@
 import type { Request } from 'express';
+import { doorProvenance } from '../../shared/onboarding';
 import type { z } from 'zod';
 import type { ImportParty } from '../../shared/database';
 import { auditDiff, logActivity } from '../../shared/audit';
@@ -102,6 +103,13 @@ const advertisers: PartyAdapter = {
       industry: row['industry'] ?? null,
       userId: null,
       agentId: null,
+      // QR-15: the person, when the file names them — the account is opened up front.
+      ...(row['firstName'] ? { firstName: row['firstName'] } : {}),
+      ...(row['lastName'] ? { lastName: row['lastName'] } : {}),
+      ...(row['dateOfBirth'] ? { dateOfBirth: row['dateOfBirth'] } : {}),
+      ...(row['gender'] ? { gender: row['gender'] as never } : {}),
+      // QR-14: the batch's uploader is who onboarded the row.
+      ...doorProvenance('IMPORT', ctx.byUserId, 'Admin'),
     });
     await logActivity(ctx.byUserId, 'ADVERTISER_CREATED', {
       req: ctx.req,

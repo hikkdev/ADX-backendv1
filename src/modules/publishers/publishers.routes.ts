@@ -119,7 +119,8 @@ publisherRouter.get('/:publisherId/summary', requireRole('ADMIN'), asyncHandler(
 // R-B: the action log — the mirror of /advertisers/:id/activity; the account's own agent (no live grant) or ADMIN, decided in the service.
 publisherRouter.get('/:publisherId/activity', asyncHandler(listPublisherActivityHandler));
 publisherRouter.post('/:publisherId/activity', asyncHandler(recordPublisherActivityHandler));
-publisherRouter.patch('/:publisherId', requireRole('AGENT_PUBLISHER'), asyncHandler(updatePublisherHandler));
+// QR-13: the desk edits a publisher the way the ladder fills one; the agent path is unchanged.
+publisherRouter.patch('/:publisherId', requireRole('AGENT_PUBLISHER', 'ADMIN'), asyncHandler(updatePublisherHandler));
 publisherRouter.post('/:publisherId/kyc', requireRole('AGENT_PUBLISHER'), asyncHandler(submitKycHandler));
 publisherRouter.post('/:publisherId/kyc/review', requireRole('ADMIN'), asyncHandler(reviewKycHandler));
 publisherRouter.post('/:publisherId/kyc/digio/initiate', requireRole('AGENT_PUBLISHER'), asyncHandler(initiateDigioKycHandler));

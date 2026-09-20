@@ -1,4 +1,6 @@
 import type { Request, Response } from 'express';
+import { actorLabelFor } from '../access-control';
+import { doorProvenance } from '../../shared/onboarding';
 import { ApiError } from '../../shared/errors';
 import { logActivity } from '../../shared/audit';
 import { agentExists, requireAgentProfile } from '../agents';
@@ -27,6 +29,7 @@ import {
   reviewKyc,
   submitKyc,
   updatePublisher,
+  updatePublisherAtDesk,
   listKycQueue,
   getKycCase,
   restartDigioKyc,
@@ -59,10 +62,12 @@ export async function createPublisherHandler(req: Request, res: Response): Promi
     agentId = (await requireAgentProfile(req.user!.sub)).id;
   }
 
+  // QR-14: the door and the person — an admin at the desk, or an agent at the door.
   const publisher = await createPublisher({
     ...input,
     agentId,
     type: input.type as PublisherType,
+    ...doorProvenance(isAdmin ? 'DESK' : 'AGENT', req.user!.sub, await actorLabelFor(req.user!.sub, req.user?.roles ?? [])),
   });
 
   if (isAdmin) {
@@ -114,6 +119,12 @@ export async function updatePublisherHandler(req: Request, res: Response): Promi
   const parsed = updatePublisherSchema.safeParse(req.body);
   if (!parsed.success) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid request', parsed.error.flatten());
 
+  // QR-13: the desk edits everything the ladder collects; the agent path is unchanged.
+  if ((req.user?.roles ?? []).includes('ADMIN')) {
+    const publisher = await updatePublisherAtDesk(req.params['publisherId'] as string, req.user!.sub, parsed.data as { type?: PublisherType });
+    res.json({ success: true, data: publisher });
+    return;
+  }
   const publisher = await updatePublisher(
     req.params['publisherId'] as string,
     req.user!.sub,

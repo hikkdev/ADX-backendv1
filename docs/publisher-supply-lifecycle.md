@@ -24,6 +24,26 @@ theirs and three are ours.
 A publisher is **activated** once gates 1–3 are cleared. Individual listings then
 clear their own document and verification gates independently.
 
+**QR-5 (17 Sep 2026): gate 2 no longer holds a listing back.** The owner's
+rule: a publisher uses the account unverified and lists once the basics are
+in — name, email, address, date of birth (`shared/kyc-state`'s
+`profileBasicsMissing`). `publishListing` refuses only on a missing basic
+(409 `PROFILE_INCOMPLETE`); a spot of a PENDING / NEEDS_INFO / REJECTED
+publisher goes live, marked unverified, and ranks below the verified when an
+advertiser browses (`listings.findActive` partitions verified-first; every
+card carries `publisherVerified`). Gate 2 still counts in the funnel and
+still earns the tick; it just moves a publisher up the list rather than
+gating them.
+
+**QR-6 (17 Sep 2026): where the two agreements are asked.** The terms of use
+and privacy policy are consented to on the first screen after the OTP, before
+any detail is asked (`User.consentAcceptedAt` + the document versions, via
+`POST /users/me/consent`) — not a funnel gate. Gate 3 (the platform, i.e.
+commercial, agreement) is presented when the publisher submits a listing:
+`POST /listings/:id/submit` refuses 409 `AGREEMENT_REQUIRED` until
+`activatedAt` is stamped, and the app shows the agreement right there. It no
+longer appears on the home's readiness checklist.
+
 ## Agreements
 
 Two agreements, and they are not the same kind of object.
@@ -112,6 +132,16 @@ Every verification, agent or self, is stored with its coordinates, distance from
 the listing, captured timestamp and photo, so a challenged listing can be
 evidenced rather than argued.
 
+**Where it lives (QR-26, 20 Sep 2026).** The publisher's own re-verification
+is the user app's "Is the spot still standing?" card on the listing page
+(`ReverifyScreen`: fix first, camera only, `SELF_REVERIFICATION` with the fix;
+the row wears "Verify again in N days" inside the risk window). The agent's
+verification is the agent app's site visit — an order milestone's checklist:
+travel → check-in → confirmations and venue papers (the image picker, which now
+asks for the camera at runtime) → photo proofs through the in-app viewfinder →
+`AGENT_INITIAL` with the distance from the pin. Both land at the verification
+desk as SUBMITTED. Reminders to the publisher at T−15 / T−7 are not built.
+
 ### The risk window
 
 Fifteen days before expiry for `PERMANENT`, seven for `REMOVABLE`, a listing
@@ -179,3 +209,16 @@ Not implemented, and flagged rather than guessed:
   combine. Deferred deliberately.
 - **Recoverable cost heads.** Which costs are deductible and whether capped.
   Depends on cost-to-serve, which depends on print quoting.
+
+## The right to the space (QR-24, 20 Sep 2026)
+
+The re-verification clock above says the spot still stands and looks like
+this. A second clock says the publisher still has the right to sell it: a
+hoarding on a highway, a shelter, a digital billboard are held on a lease, a
+licence or a permit a civic body renews every year. The listing carries
+`rightsBasis` and `rightsValidUntil`; ADX reminds the publisher 30 and 7
+days out; on the day the spot lapses — off the shelf, running campaigns
+untouched — until the renewed permit or agreement, uploaded from the
+listing page with its new end date, is approved at the review desk. The
+console watches it all from Listings › Renewals. Details in the supply
+module README, "QR-24".

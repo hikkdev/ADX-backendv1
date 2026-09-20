@@ -1,4 +1,4 @@
-import { Prisma, prisma } from '../../../shared/database';
+import { type Gender, Prisma, prisma } from '../../../shared/database';
 import type { PublisherImportStatus, PublisherType } from '../../../shared/database';
 import type {
   CommitAction,
@@ -29,8 +29,55 @@ const withRows = { rows: { orderBy: { rowNumber: 'asc' as const } } } as const;
 
 /** The publisher columns out of an import row's fields; `panNumber` is the KYC row's. */
 function publisherColumns(fields: ImportPublisherFields) {
-  const { panNumber: _pan, type, ...rest } = fields;
+  // QR-13: the person's columns go to the User row, not the publisher's.
+  const { panNumber: _pan, type, firstName: _f, lastName: _l, dateOfBirth: _d, gender: _g, ...rest } = fields;
   return { ...rest, ...(type ? { type: type as PublisherType } : {}) };
+}
+
+/** QR-13: the four basics the readiness rule counts — with them in, an imported onboarding opens complete. */
+function basicsIn(fields: ImportPublisherFields & { name: string }): boolean {
+  return Boolean(fields.name && fields.email && fields.address && fields.dateOfBirth);
+}
+
+/**
+ * QR-13: the account an imported row signs in as — opened with the PUBLISHER
+ * role, or adopted when the number already has one (the person's fields
+ * filled where empty, the role granted). Inside the commit's transaction.
+ */
+async function ensureAccountTx(
+  tx: Prisma.TransactionClient,
+  input: { mobile: string; displayId: string; name: string; email?: string; firstName?: string; lastName?: string; dateOfBirth?: string; gender?: string },
+): Promise<string> {
+  const dateOfBirth = input.dateOfBirth ? new Date(`${input.dateOfBirth}T00:00:00.000Z`) : undefined;
+  const gender = input.gender as Gender | undefined;
+  const existing = await tx.user.findUnique({ where: { mobile: input.mobile }, include: { roles: { select: { role: true } } } });
+  if (existing) {
+    const fill: Record<string, unknown> = {};
+    if (existing.firstName === null && input.firstName !== undefined) fill['firstName'] = input.firstName;
+    if (existing.lastName === null && input.lastName !== undefined) fill['lastName'] = input.lastName;
+    if (existing.dateOfBirth === null && dateOfBirth !== undefined) fill['dateOfBirth'] = dateOfBirth;
+    if (existing.gender === null && gender !== undefined) fill['gender'] = gender;
+    if (existing.name === null) fill['name'] = input.name;
+    if (existing.email === null && input.email !== undefined) fill['email'] = input.email;
+    if (!existing.roles.some((r) => r.role === 'PUBLISHER')) fill['roles'] = { create: { role: 'PUBLISHER' } };
+    if (Object.keys(fill).length > 0) await tx.user.update({ where: { id: existing.id }, data: fill });
+    return existing.id;
+  }
+  const created = await tx.user.create({
+    data: {
+      mobile: input.mobile,
+      displayId: input.displayId,
+      name: input.name,
+      ...(input.email !== undefined ? { email: input.email } : {}),
+      ...(input.firstName !== undefined ? { firstName: input.firstName } : {}),
+      ...(input.lastName !== undefined ? { lastName: input.lastName } : {}),
+      ...(dateOfBirth !== undefined ? { dateOfBirth } : {}),
+      ...(gender !== undefined ? { gender } : {}),
+      roles: { create: { role: 'PUBLISHER' } },
+    },
+    select: { id: true },
+  });
+  return created.id;
 }
 
 export const prismaPublisherImportRepository: PublisherImportRepository = {
@@ -96,6 +143,21 @@ export const prismaPublisherImportRepository: PublisherImportRepository = {
               merged += 1;
               continue;
             }
+            // QR-13: a row that names the person opens (or adopts) their account, and
+            // with every basic in the onboarding is complete the moment it lands.
+            const userId = action.account
+              ? await ensureAccountTx(tx, {
+                  mobile,
+                  displayId: action.account.displayId,
+                  name: `${fields.firstName ?? ''} ${fields.lastName ?? ''}`.trim() || name,
+                  ...(fields.email !== undefined ? { email: fields.email } : {}),
+                  ...(fields.firstName !== undefined ? { firstName: fields.firstName } : {}),
+                  ...(fields.lastName !== undefined ? { lastName: fields.lastName } : {}),
+                  ...(fields.dateOfBirth !== undefined ? { dateOfBirth: fields.dateOfBirth } : {}),
+                  ...(fields.gender !== undefined ? { gender: fields.gender } : {}),
+                })
+              : null;
+            const complete = userId !== null && basicsIn({ ...fields, name });
             const publisher = await tx.publisher.create({
               data: {
                 mobile,
@@ -105,8 +167,12 @@ export const prismaPublisherImportRepository: PublisherImportRepository = {
                 // Lot X-B: the key beside the typed city.
                 ...(fields.city !== undefined ? { cityId: action.cityId ?? null } : {}),
                 agentId: null,
+                ...(userId !== null ? { userId } : {}),
+                // QR-14: the door.
+                ...(action.onboardedBy ? { onboardedVia: 'IMPORT' as const, onboardedById: action.onboardedBy.userId, onboardedByRole: action.onboardedBy.role, onboardedAt: committedAt } : {}),
                 kycStatus: 'PENDING',
-                onboardingStatus: 'PENDING_ONBOARDING',
+                onboardingStatus: complete ? 'ONBOARDING_COMPLETE' : 'PENDING_ONBOARDING',
+                ...(complete ? { activatedAt: new Date() } : {}),
                 kyc: { create: { status: 'PENDING', ...(fields.panNumber ? { panNumber: fields.panNumber } : {}) } },
               },
               select: { id: true },
@@ -141,10 +207,12 @@ type Matched = { [K in keyof ImportPublisherFields]: string | null } & { kyc: { 
 /** The fields of `incoming` the publisher does not already hold. */
 function blanksOf(publisher: Matched, incoming: ImportPublisherFields): ImportPublisherFields {
   const fill: ImportPublisherFields = {};
-  for (const [key, value] of Object.entries(incoming) as [keyof ImportPublisherFields, string | undefined][]) {
+  for (const [key, value] of Object.entries(incoming) as [keyof ImportPublisherFields, unknown][]) {
     if (value === undefined) continue;
-    const current = key === 'panNumber' ? publisher.kyc?.panNumber : publisher[key];
-    if (current === null || current === undefined || current === '') fill[key] = value;
+    // QR-13: the person's columns and the pin are not the publisher row's; a race-merge leaves them.
+    if (['firstName', 'lastName', 'dateOfBirth', 'gender', 'latitude', 'longitude'].includes(key)) continue;
+    const current = key === 'panNumber' ? publisher.kyc?.panNumber : publisher[key as keyof Matched];
+    if (current === null || current === undefined || current === '') fill[key] = value as never;
   }
   return fill;
 }

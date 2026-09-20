@@ -120,6 +120,7 @@ import {
 } from '../modules/kyc';
 import { uploadRouter, filesRouter, registerFileAccessPort } from '../modules/uploads';
 import { integrationsRouter } from '../modules/integrations';
+import { brandingRouter } from '../modules/branding';
 import { appStatusRouter, configRouter, platformSettingsRouter } from '../modules/app-config';
 import { opsRouter, registerPostgresProbe } from '../modules/ops';
 import { reportsRouter } from '../modules/reports';
@@ -700,6 +701,8 @@ apiRouter.use('/upload', uploadRouter);
 // Lot D (Q61): a file by id — the one door to every private document.
 apiRouter.use('/files', filesRouter);
 apiRouter.use('/integrations', integrationsRouter);
+// QR-11: Settings › Brand & theme — the draft, publish, the release history. ADMIN at the router.
+apiRouter.use('/branding', brandingRouter);
 apiRouter.use('/onboarding', onboardingRouter);
 
 // ── Back office ──

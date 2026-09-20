@@ -10,7 +10,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  * were each fully built and were never joined.
  */
 
-const { repository, pricing, rateCards } = vi.hoisted(() => ({
+const { repository, pricing, rateCards, identifiers } = vi.hoisted(() => ({
   repository: {
     findById: vi.fn(),
     submitForReview: vi.fn(),
@@ -20,9 +20,12 @@ const { repository, pricing, rateCards } = vi.hoisted(() => ({
   },
   pricing: { recordMarketDataPoint: vi.fn(), evaluate: vi.fn() },
   rateCards: { assertPublishable: vi.fn() },
+  // QR-8: the reference comes off the LISTING series now, not a row count.
+  identifiers: { allocateIdentifier: vi.fn() },
 }));
 
 vi.mock('../prisma-listings.repository', () => ({ prismaListingsRepository: repository }));
+vi.mock('../../identifiers', () => identifiers);
 
 import { submitListingForReview } from '../listings.service';
 
@@ -38,8 +41,7 @@ const NOW = new Date('2026-09-09T10:00:00Z');
 beforeEach(() => {
   vi.clearAllMocks();
   repository.findById.mockResolvedValue(listing());
-  repository.countAll.mockResolvedValue(24017);
-  repository.displayIdExists.mockResolvedValue(false);
+  identifiers.allocateIdentifier.mockResolvedValue('LST-0909-2601');
   repository.submitForReview.mockImplementation(
     async (id: string, displayId: string | null, at: Date) => ({
       id,
@@ -54,27 +56,23 @@ describe('submitting for review', () => {
   it('moves a draft to pending review and dates it', async () => {
     const result = await submitListingForReview('lst_1', NOW);
     expect(result.status).toBe('PENDING_REVIEW');
-    expect(repository.submitForReview).toHaveBeenCalledWith('lst_1', 'ADX-LST-24018', NOW);
+    expect(repository.submitForReview).toHaveBeenCalledWith('lst_1', 'LST-0909-2601', NOW);
   });
 
-  /* The reference AG-25 prints back. Its own allocator rather than the party
-     one, which mints a different shape entirely. */
-  it('mints the reference the confirmation screen shows', async () => {
+  /* The reference AG-25 prints back. QR-8: a row from before QR-8 with no
+     reference yet is minted one from the LISTING series at submit — the
+     same series a new listing draws from at creation. */
+  it('mints the reference the confirmation screen shows, off the LISTING series', async () => {
     await submitListingForReview('lst_1', NOW);
-    expect(repository.submitForReview.mock.calls[0]![1]).toBe('ADX-LST-24018');
+    expect(identifiers.allocateIdentifier).toHaveBeenCalledWith('LISTING');
+    expect(repository.submitForReview.mock.calls[0]![1]).toBe('LST-0909-2601');
   });
 
-  it('steps past a reference somebody already holds', async () => {
-    repository.displayIdExists.mockResolvedValueOnce(true).mockResolvedValue(false);
-    await submitListingForReview('lst_1', NOW);
-    expect(repository.submitForReview.mock.calls[0]![1]).toBe('ADX-LST-24019');
-  });
-
-  it('keeps the reference a listing already has', async () => {
+  it('keeps the reference a listing already has — the old ADX-LST-nnnnn included', async () => {
     repository.findById.mockResolvedValue(listing({ displayId: 'ADX-LST-00007' }));
     await submitListingForReview('lst_1', NOW);
     expect(repository.submitForReview.mock.calls[0]![1]).toBe('ADX-LST-00007');
-    expect(repository.countAll).not.toHaveBeenCalled();
+    expect(identifiers.allocateIdentifier).not.toHaveBeenCalled();
   });
 
   /* Submit is on a screen somebody will press twice. */

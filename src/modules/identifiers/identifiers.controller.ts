@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { ApiError } from '../../shared/errors';
 import type { PartyType } from '../../shared/database';
-import { backfillPublisherIdentifiers } from './identifiers.backfill';
+import { backfillPublisherIdentifiers, backfillUserIdentifiers } from './identifiers.backfill';
 import {
   getFormat,
   listFormats,
@@ -43,5 +43,8 @@ export async function previewFormatHandler(req: Request, res: Response): Promise
 }
 
 export async function backfillHandler(_req: Request, res: Response): Promise<void> {
-  res.json({ success: true, data: await backfillPublisherIdentifiers() });
+  // QR-4: people too — every account minted before the USER series existed.
+  const publishers = await backfillPublisherIdentifiers();
+  const users = await backfillUserIdentifiers();
+  res.json({ success: true, data: { ...publishers, users } });
 }

@@ -5,6 +5,7 @@ import { prisma } from './shared/database';
 import { redis } from './shared/cache';
 import { registerGracefulShutdown } from './bootstrap/graceful-shutdown';
 import { startPublisherTimerJob, publisherTimerInterval } from './jobs/publisher-timer.job';
+import { startRightsRenewalJob, rightsRenewalInterval } from './jobs/rights-renewal.job';
 import { startAgentTimerJob, agentTimerInterval } from './jobs/agent-timer.job';
 import { startEventScraperJob, eventScraperInterval } from './jobs/event-scraper.job';
 import {
@@ -76,6 +77,7 @@ const server = app.listen(env.PORT, () => {
   logger.info('ADX backend running', { port: env.PORT, env: env.NODE_ENV });
   warmConnections();
   startPublisherTimerJob();
+  startRightsRenewalJob();
   startAgentTimerJob();
   startEventScraperJob();
   startCampaignLifecycleJob();
@@ -142,6 +144,7 @@ server.on('error', (err: NodeJS.ErrnoException) => {
 
 registerGracefulShutdown(server, () => {
   if (publisherTimerInterval) clearInterval(publisherTimerInterval);
+  if (rightsRenewalInterval) clearInterval(rightsRenewalInterval);
   if (agentTimerInterval) clearInterval(agentTimerInterval);
   if (eventScraperInterval) clearInterval(eventScraperInterval);
   if (campaignLifecycleInterval) clearInterval(campaignLifecycleInterval);

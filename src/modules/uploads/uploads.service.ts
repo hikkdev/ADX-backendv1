@@ -10,6 +10,7 @@ import { deleteStoredFile, openPrivateFile, uploadFile } from '../../shared/stor
 import { prismaUploadsRepository as repository } from './prisma-uploads.repository';
 import { agentMayViewFile, disputePartyMayViewFile, supportPartyMayViewFile } from './file-access.port';
 import { KYC_PURPOSES, PURPOSE_FOLDER, isPrivatePurpose, type UploadPurpose } from './uploads.schema';
+import { normaliseAvatar, type AvatarCrop } from './avatar';
 
 export type IncomingFile = {
   /** Temp path multer wrote to. Always removed, success or failure. */
@@ -59,12 +60,15 @@ export async function assertMayUploadFor(uploader: FileViewer, ownerUserId: stri
  */
 export async function storeUpload(
   userId: string,
-  file: IncomingFile,
+  incoming: IncomingFile,
   purpose: UploadPurpose,
   baseUrl: string,
-  options: { ownerUserId?: string | null; isAdmin?: boolean } = {},
+  options: { ownerUserId?: string | null; isAdmin?: boolean; crop?: AvatarCrop | null } = {},
 ) {
   await assertMayUploadFor({ userId, isAdmin: options.isAdmin ?? false }, options.ownerUserId);
+  // QR-7: a profile picture is normalised before it is stored — the
+  // person's square crop, 512 px, JPEG — and never kept as sent.
+  const file = purpose === 'AVATAR' ? await normaliseAvatar(incoming, options.crop ?? null) : incoming;
   const isPrivate = isPrivatePurpose(purpose);
   const id = randomUUID().replace(/-/g, '');
   let url: string | null;
@@ -84,7 +88,7 @@ export async function storeUpload(
     fs.promises.unlink(file.path).catch(() => {});
   }
 
-  return repository.record({
+  const record = await repository.record({
     id,
     userId,
     url: url ?? privateFileUrl(baseUrl, id),
@@ -96,6 +100,18 @@ export async function storeUpload(
     ownerUserId: options.ownerUserId ?? null,
     storageKey,
   });
+
+  // QR-7: one avatar per person. The earlier ones go the moment the new one
+  // is recorded, so the folder never holds a history; a purge that fails
+  // leaves an orphan for the purge job, never a failed upload.
+  if (purpose === 'AVATAR') {
+    const previous = await repository.listByUserAndPurpose(userId, 'AVATAR');
+    for (const old of previous) {
+      if (old.id === record.id) continue;
+      await purgeStoredFile(old.id).catch(() => false);
+    }
+  }
+  return record;
 }
 
 /**

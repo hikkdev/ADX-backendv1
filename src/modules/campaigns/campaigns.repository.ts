@@ -1,4 +1,4 @@
-import type { Prisma } from '../../shared/database';
+import type { KycStatus, Prisma } from '../../shared/database';
 
 /** G10: what a clash check asks per listing — a bare id wants one slot. */
 export type SlotAsk = string | { listingId: string; quantity: number };
@@ -480,7 +480,8 @@ export interface CampaignsRepository {
    * permission check on every write, and a cross-module call per write is a
    * dependency this module does not need.
    */
-  advertiserContext(advertiserId: string): Promise<{ id: string; agentId: string | null; userId: string | null } | null>;
+  /** QR-16: `kycStatus` rides along — the launch gate reads it; absent on a narrow read. */
+  advertiserContext(advertiserId: string): Promise<{ id: string; agentId: string | null; userId: string | null; kycStatus?: KycStatus } | null>;
 
   /** The listings behind a cart, priced and measured. */
   listingsByIds(ids: string[]): Promise<CandidateListing[]>;

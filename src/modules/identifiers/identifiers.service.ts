@@ -38,6 +38,8 @@ const DEFAULT_PREFIXES: Record<PartyType, string> = {
   DISPUTE: 'DSP',
   /// SFT-#### on a safety report, so ops can call one out on the phone.
   SAFETY: 'SFT',
+  /// QR-4: ADX-DDMM-YYNN — the person's own id, minted at first sign-in.
+  USER: 'ADX',
   /// LED-#### on a prospect. DR 06 does not print it on the card, but ops
   /// needs a way to name one lead out of a thousand on the phone.
   LEAD: 'LED',
@@ -55,6 +57,9 @@ const DEFAULT_PREFIXES: Record<PartyType, string> = {
   TASK: 'TSK',
   ISSUE: 'ISS',
   PROJECT: 'PRJ',
+  /// QR-8: LST-DDMM-YYNN on a listing — minted when a draft is saved or a
+  /// listing created, and carried from the one to the other.
+  LISTING: 'LST',
 };
 
 /* ------------------------------------------------------------------ */

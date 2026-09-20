@@ -29,6 +29,9 @@ import {
   reviewDocument,
   reviewVerification,
   runEnforcementSweep,
+  setRights,
+  getRightsQueue,
+  runRightsSweep,
   submitDocument,
   submitVerification,
 } from './supply.service';
@@ -43,6 +46,7 @@ import {
   reviewDocumentSchema,
   reviewVerificationSchema,
   submitDocumentSchema,
+  rightsSchema,
   submitVerificationSchema,
 } from './supply.schema';
 
@@ -195,6 +199,23 @@ export async function verificationQueueHandler(_req: Request, res: Response): Pr
 
 export async function enforcementSweepHandler(_req: Request, res: Response): Promise<void> {
   res.json({ success: true, data: await runEnforcementSweep() });
+}
+
+/* Rights — QR-24 ---------------------------------------------------- */
+
+export async function setRightsHandler(req: Request, res: Response): Promise<void> {
+  const body = parse(rightsSchema, req.body);
+  const listing = await setRights(req.params['listingId'] as string, body, { userId: actor(req), roles: req.user?.roles ?? [] });
+  res.json({ success: true, data: listing });
+}
+
+export async function rightsQueueHandler(req: Request, res: Response): Promise<void> {
+  const horizon = Number(req.query['horizonDays']);
+  res.json({ success: true, data: await getRightsQueue(new Date(), Number.isFinite(horizon) && horizon > 0 ? Math.min(horizon, 365) : 60) });
+}
+
+export async function rightsSweepHandler(_req: Request, res: Response): Promise<void> {
+  res.json({ success: true, data: await runRightsSweep() });
 }
 
 /* Claims ----------------------------------------------------------- */

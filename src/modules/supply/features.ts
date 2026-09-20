@@ -39,6 +39,17 @@ feature('supply.verification', {
   ],
 });
 
+feature('supply.rights', {
+  surfaces: ['APP_USER', 'CONSOLE'],
+  owner: 'supply',
+  kind: 'FEATURE',
+  launch: 'on',
+  description:
+    'QR-24: the right to sell a space and its term — a lease, licence or permit that ends, the reminders before it, the lapse after it, and the renewal the desk approves.',
+  routes: ['/api/v1/supply/rights', '/api/v1/supply/rights-queue'],
+  jobs: ['rights-renewal'],
+});
+
 feature('supply.claims', {
   surfaces: ['CONSOLE'],
   owner: 'supply',

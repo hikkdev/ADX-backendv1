@@ -27,24 +27,24 @@ Mounted at `/api/v1/publishers`, all `authenticate`d, plus one webhook.
 | Method | Path | Guard |
 | --- | --- | --- |
 | POST | `/register` | PUBLISHER (**201** or 200) |
-| GET | `/me` | PUBLISHER |
+| GET | `/me` | PUBLISHER — QR-3 (17 Sep 2026): the row plus `readiness: { profile: { complete, missing[], percent }, kyc: { verified, status }, terms: { accepted }, percent, canList, canGoLive }` (`shared/kyc-state`'s `publisherReadiness` — basics name/email/address/dateOfBirth 70, identity check 30, terms 0 since QR-6 — the terms of use are consented to before any detail (`POST /users/me/consent`) and the commercial agreement is presented at submit (`listings`), so neither is a setup step; a name still equal to the mobile is no name; `canList` is the listing door's rule and, since QR-5, `canGoLive` is the same rule — the check ranks, it no longer gates) and `verified` (`kycStatus === 'VERIFIED'`, the tick beside the name; `/advertisers/me` and `/print-partners/me` carry the same). QR-5 (17 Sep 2026): also `dateOfBirth` (`YYYY-MM-DD \| null`) and `gender` (`MALE \| FEMALE \| OTHER \| PREFER_NOT_TO_SAY \| null`), read off the person's User row, and the publisher's `latitude` / `longitude` (the pin behind the address; null when it was typed). QR-7: `avatarUrl` (the person's profile picture, off the User row; set through `PATCH /users/me` after an `AVATAR` upload) |
 | GET | `/me/listings` | PUBLISHER — DR 06: the publisher's own spots on the list contract, `?shelf=AVAILABLE\|OCCUPIED\|INACTIVE`, `?q=`, `?sort=`; every row carries `occupied` and, E11-1, `belowFloor` (rate-cards' `belowFloorFlags`, the same chip as ADMIN `GET /listings` — under the floor of the card in force, whatever case stands on it; false where no card reaches) |
 | GET | `/me/qr` | PUBLISHER (**201** or 200) — `?latitude&longitude` is the phone's fix; a 90-second code, reissued once dead |
 | GET | `/me/qr/status` | PUBLISHER — polled: is the code live, and who scanned it (name, id, photo, distance) |
 | POST | `/me/qr/scans/:scanId/approve` | PUBLISHER — the owner's yes: burns the code, claims, opens the ONBOARDING grant |
 | POST | `/me/qr/scans/:scanId/decline` | PUBLISHER — the owner's no: burns the code, logs USER_DECLINED |
 | POST | `/me/cancel-onboarding` | PUBLISHER |
-| PATCH | `/me` | PUBLISHER — DR 08 Steps 2–4 |
+| PATCH | `/me` | PUBLISHER — DR 08 Steps 2–4. QR-5 (17 Sep 2026): also `dateOfBirth` (`YYYY-MM-DD`, 18–120 years ago) and `gender` (any casing), written to the person's User row (the same two columns `PATCH /users/me` takes), and `latitude` / `longitude` (both or neither — 400 `VALIDATION_ERROR` with one half — null clears), the pin the app sets when the address came off the map or a place search |
 | GET | `/me/kyc` | PUBLISHER — null before the first submission |
 | POST | `/me/kyc` | PUBLISHER (**201**) — Steps 6–11, self-service; Lot F: while NEEDS_INFO a **partial** body of the DR 08 columns — only the flagged tiles — the rest keep their files and decisions, the case returns to PENDING, the flags on the fields sent are cleared; `manifestVersion` in the body is pinned on the row at the first submission (`pinKycManifest`, never moved) |
 | POST | `/me/complete-onboarding` | PUBLISHER — needs a submitted KYC; 409 while an agent is mid-way |
 | GET | `/` | any authenticated — E10-1 (ADMIN): `?q=` (name / display id / city / mobile contains) beside `?category=`; with `?page=` the answer is the list contract `{ items, total, page, pageSize, counts }`, the chips by `kycStatus` counted with the KYC tab removed; without `page` the bare array stays one release — E12-B: on that bare path an empty `q=` / `category=` and a non-numeric `pageSize=` are ignored as the old handler ignored them (`publisherBareQuerySchema` drops them); the list-contract path keeps its validation. N2-B: every roster row — the bare array and the list contract's `items[]` — carries **`userId`** (the app login behind the publisher, null until they have one): the console opens the desk's KYC paths by it, since a request or a recording before any KYC row exists is keyed by the party's user |
-| POST | `/` | AGENT_PUBLISHER, ADMIN (**201**) — Q29: an admin may open one from the desk; `attributeToAgentId` in the body is the only way an admin's publisher gets an agent |
+| POST | `/` | AGENT_PUBLISHER, ADMIN (**201**) — Q29: an admin may open one from the desk; `attributeToAgentId` in the body is the only way an admin's publisher gets an agent. **QR-13 (17 Sep 2026): the desk onboards in full** — beside `name, mobile, email, type, city, state, address` the body takes the person (`firstName, lastName, dateOfBirth` (YYYY-MM-DD, 18+), `gender`), the pin (`latitude`+`longitude`, both or neither), `gstin` and the contact person. Once `firstName` is given the app's ladder rules apply (`deskOnboarding`): last name, email, address, city, state and date of birth required; a BUSINESS's GSTIN; a contact name and mobile for anyone but an INDIVIDUAL. The mobile is normalised to `+91…`, the **User is opened with the PUBLISHER role and an `ADX-…` id (or adopted when the number already has an account — fields filled where empty, role granted)** and linked as `userId`, and with the four readiness basics in the row opens `ONBOARDING_COMPLETE` with `activatedAt` — so the owner's first sign-in goes OTP → consent → home, with nothing left to ask. Without a first name the agent door's quick-add is unchanged |
 | GET | `/:publisherId` | any authenticated — the onboarding agent or ADMIN; Lot F: `kyc.flagged[] { field, note }` and `kyc.documentReviews[] { field, decision, note }` from the desk's per-document decisions (the manifest's source), so the agent's capture screen lights the flagged tiles. P-B: `agent { id, displayId, name } \| null` — who brought them in, by name ("Onboarded by"), joined the way the KYC queue joins it; null when nobody did |
 | GET | `/:publisherId/summary` | ADMIN — P-B: the detail card, the mirror of `GET /advertisers/:id/summary`: `{ publisher, metrics, listings, activity }`. See "The detail card" below |
 | GET | `/:publisherId/activity` | the account's own agent or ADMIN — R-B: the action log on the list contract `{ items, total, page, pageSize, counts }`, newest first; `?status=` is the kind facet (`CHECK_IN \| FOLLOW_UP \| CALLED \| MESSAGED \| NOTE`, a comma list, the chips counted with it removed), `?q=` reaches the note; each row `{ id, kind, note, at, agentId }`. 403 another agent or no agent profile, 404 unknown |
 | POST | `/:publisherId/activity` | the account's own agent or ADMIN (**201**) — R-B: `{ kind, note? }`, the mirror of `POST /advertisers/:id/activity` (decision 14): the same five kinds, the same READ-level act — the agent the account is attributed to logs without a live grant (a phone call is not a write to the account); ADMIN's row is recorded against the account's own agent (an admin who also carries an agent profile logs as themselves), 409 `CONFLICT` when the account has no agent. The row is what the summary feed reads back as `ACTIVITY` |
-| PATCH | `/:publisherId` | AGENT_PUBLISHER |
+| PATCH | `/:publisherId` | AGENT_PUBLISHER. **QR-13:** ADMIN too — the desk's edit takes everything the create does (the person's fields are written to the linked account; a first name given to a publisher with no account opens one and links it), settles the onboarding when the basics land, and audits `PUBLISHER_UPDATED_BY_ADMIN` |
 | POST | `/:publisherId/kyc` | AGENT_PUBLISHER — the same partial-body, `manifestVersion` and E9 `EMPTY_RESUBMISSION` rules as `/me/kyc` |
 | POST | `/kyc-queue/:publisherId/escalate` | ADMIN — Lot G (Q127/142): `{ reason }`, the case handed to Compliance through `kyc.escalateKyc`; `KYC_ESCALATED`; 409 decided / already escalated |
 | POST | `/kyc-queue/:publisherId/request` | ADMIN + **`kyc.edit`** (N3-B) — Lot N: `{ channel: DIGIO \| MANUAL = DIGIO, note? }`, the KYC asked for from the desk; DIGIO opens the session on the publisher's behalf; `KYC_REQUESTED` to the publisher (email + SMS + push deep-linking `adx://kyc`); `PUBLISHER_KYC_REQUESTED`; 409 `KYC_ALREADY_VERIFIED`. N3-B: the channel defaults to DIGIO (the console's one click sends no body) and the route is the catalogue's KYC edit tier — a role config granted `kyc.edit` may send it; the super admin and an admin with no role config pass under the launch rule |
@@ -255,7 +255,11 @@ both is `kyc/kyc-desk.service.ts`.
   `uploads`' `csvUploadMiddleware`) or a JSON body `{ rows[], fileName?, note? }`
   — **201**, a VALIDATED import with a per-row plan. Columns: `name, mobile,
   email, type, gstin, address, city, state, contactName, contactMobile,
-  contactEmail, panNumber`; mobile is required and normalised; PAN and GSTIN
+  contactEmail, panNumber`, and (QR-13) `firstName, lastName, dateOfBirth,
+  gender, latitude, longitude` — a row naming a person opens (or adopts) the
+  account with the publisher, and with the basics in it lands
+  `ONBOARDING_COMPLETE`; a merge never touches an existing publisher's
+  account or pin; mobile is required and normalised; PAN and GSTIN
   upper-cased; the city resolved through `pricing.resolveCity` and warned when
   unknown. Outcomes: a mobile match plans a **MERGED** fill of only the columns
   the publisher has empty (SKIPPED when there is nothing to fill); a PAN on
@@ -329,6 +333,39 @@ that claimed nothing.
 - `shared/integrations` (Digio credentials), `shared/logging`, `shared/http`,
   `shared/auth`, `shared/errors`, `shared/validation`, `shared/database`
   (repositories only).
+
+## The desk and the ladder are one onboarding (QR-13, 17 Sep 2026)
+
+The owner's rule: a publisher onboarded at the desk signs in with the number
+given there, agrees to the platform terms, adds a photo if they like, and
+carries on exactly as a self-onboarded publisher would. So the desk collects
+what the app's ladder collects (the person, the address and its pin, the
+business and contact facts), opens the account up front, and — with the four
+readiness basics in — marks the onboarding complete the day it is entered.
+The same settle rule (`settleOnboardingIfReady`) runs off the app's own
+`PATCH /publishers/me`, so the self-serve path completes itself too; the
+explicit `POST /publishers/me/complete-onboarding` takes the basics, or the
+documents already in. KYC ranks, it does not gate (QR-5).
+
+## Who onboarded whom (QR-14, 17 Sep 2026)
+
+Every publisher (and advertiser) carries the door it came through and who
+opened it — `onboardedVia` (SELF, AGENT, QR, DESK, IMPORT), `onboardedById`
+(null for a self-signup), `onboardedByRole` (the person's console role or
+kind at the time — "Super admin", "Ops manager", "Agent" …, a snapshot from
+`access-control`'s `actorLabelFor`, because roles move) and `onboardedAt`.
+The stamp is written once, at the door: the desk (`POST /publishers` by an
+ADMIN), the agent app (`POST /publishers` by an agent), a QR scan (`claim`,
+only on a row nobody has stamped — a desk-opened publisher an agent then
+walks through keeps the desk's), the import (the batch's uploader, per row)
+and the app's own registration (SELF). The migration
+`20260917070000_qr14_onboarding_provenance` backfilled every existing row
+from the agent link, the audit trail and the import batches. The detail
+read and the roster answer `onboarding { via, viaLabel, byId, byName,
+byRole, at }`; the roster takes `onboardedVia` and `onboardedById` as
+filters. The team board that counts on these is `reports`' `onboarding-
+board` kind and `GET /reports/boards/onboarding` (vocabulary in
+`shared/onboarding`).
 
 ## Invariants
 

@@ -55,6 +55,19 @@ export const prismaIdentifiersRepository: IdentifiersRepository = {
     });
   },
 
+  usersMissingIdentifier(limit: number) {
+    return prisma.user.findMany({
+      where: { displayId: null },
+      orderBy: { createdAt: 'asc' },
+      take: limit,
+      select: { id: true, createdAt: true },
+    });
+  },
+
+  async setUserIdentifier(userId: string, displayId: string) {
+    await prisma.user.update({ where: { id: userId }, data: { displayId } });
+  },
+
   async setPublisherIdentifier(publisherId: string, displayId: string) {
     await prisma.publisher.update({ where: { id: publisherId }, data: { displayId } });
   },

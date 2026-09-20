@@ -18,6 +18,7 @@ import type {
   ListingVerification,
   VerificationStatus,
   VerificationType,
+  RightsBasis,
 } from '../../shared/database';
 import type { Page, PageQuery } from '../../shared/pagination';
 
@@ -142,6 +143,20 @@ export type VerificationWithPhotos = ListingVerification & {
 };
 
 /** A listing whose verification is due, in the risk window, or lapsed. */
+/** QR-24: one term-holding listing the renewal sweep and the desk queue read. */
+export type RightsDueRow = {
+  id: string;
+  title: string;
+  publisherId: string | null;
+  publisherName: string | null;
+  status: Listing['status'];
+  availableNow: boolean;
+  rightsBasis: RightsBasis;
+  rightsValidUntil: Date | null;
+  rightsLapsedAt: Date | null;
+  rightsRemindedAt: Date | null;
+};
+
 export type VerificationDueRow = {
   listingId: string;
   title: string;
@@ -199,6 +214,8 @@ export interface SupplyRepository {
     listingId: string;
     kind: ListingDocumentKind;
     url: string;
+    /** QR-24: when the permit or agreement runs out. */
+    expiresAt?: Date | null;
   }): Promise<ListingDocument>;
   findDocument(documentId: string): Promise<ListingDocument | null>;
   reviewDocument(
@@ -219,6 +236,19 @@ export interface SupplyRepository {
   listVerifications(listingId: string): Promise<VerificationWithPhotos[]>;
   /** Bounded per call: the sweep works in batches rather than one huge set. */
   verificationsDue(before: Date, limit?: number): Promise<VerificationDueRow[]>;
+
+  /* Rights — QR-24 */
+  /** The listing's right to sell the space: its basis, its term, and whether it has lapsed. */
+  setRights(
+    listingId: string,
+    data: { rightsBasis?: RightsBasis; rightsValidUntil?: Date | null; rightsLapsedAt?: Date | null; rightsRemindedAt?: Date | null; availableNow?: boolean },
+  ): Promise<Listing>;
+  /** Term-holding listings whose right ends before `before` (or already has), soonest first; bounded per call. */
+  rightsDue(before: Date, limit?: number): Promise<RightsDueRow[]>;
+  /** The account behind a publisher, for the reminders; null while the row has none. */
+  publisherUserId(publisherId: string): Promise<string | null>;
+  /** The publisher a signed-in account owns; null for an account with no publisher side. */
+  publisherIdOfUser(userId: string): Promise<string | null>;
 
   /* Listings */
   findListing(listingId: string): Promise<Listing | null>;

@@ -130,3 +130,45 @@ ledger, which the money workstream owns. When it lands, the hold is the hook.
   `notifications` + `users` to tell the desk when that switch is off.
 - `listings`, `orders` and `publishers` are untouched — supply moves a listing
   through its status but never creates one outside an attempt.
+
+## QR-24 (20 Sep 2026): the right to sell a space, and its term
+
+A hoarding, a digital billboard, a bus shelter — many spots are held on a
+lease, a licence or a permit a civic body renews every year, and a publisher
+who stopped holding it must stop selling it. The listing now carries how it
+is held and until when:
+
+- `Listing.rightsBasis` (`OWNED | LEASED | LICENSED | PERMIT`, default
+  OWNED), `rightsValidUntil` (the last instant, in India, of the day the term ends),
+  `rightsLapsedAt` (stamped by the sweep, or at once when a past date is
+  set), `rightsRemindedAt` (the last reminder day, so each window is sent
+  once). Migration `20260920090000_qr24_listing_rights_term`.
+- `POST /listings` takes `rightsBasis` and `rightsValidUntil` (YYYY-MM-DD);
+  the wizard's documents step asks both (`seed:config` re-seeded the flow
+  to v2).
+- `PATCH /supply/listings/:listingId/rights { basis, validUntil }` —
+  PUBLISHER (their own spot), AGENT_PUBLISHER, ADMIN. OWNED clears the
+  term and any lapse; a term already past lapses the spot at once and takes
+  it off the shelf (`availableNow: false`).
+- `POST /supply/listings/:listingId/documents` takes `expiresAt`
+  (YYYY-MM-DD); the app's renew screen files the renewed permit or
+  agreement with it. `PATCH /supply/documents/:id/review` approving a
+  DISPLAY_AGREEMENT / MUNICIPAL_PERMIT / OWNER_NOC whose `expiresAt` is
+  later than the term on file **extends the term, lifts the lapse and puts
+  the spot back on the shelf** — the desk's approval is the renewal.
+- `GET /supply/rights-queue?horizonDays=60` (ADMIN): every term ending
+  within the horizon and every lapse, soonest first, with `state`
+  (`OWNED | CURRENT | ENDING | LAPSED`) and `daysLeft`. The console's
+  Listings › Renewals tab.
+- `POST /supply/rights/sweep` (ADMIN) runs `runRightsSweep(now)` on demand;
+  `jobs/rights-renewal.job.ts` runs it every six hours under a Redis lock:
+  reminders at 30 and 7 days (the tightest window the day falls in, once
+  per window, to the publisher's account), the lapse on the day (to the
+  publisher and every admin). Running campaigns are not touched — the lapse
+  is the publisher's to fix; the browse (`findActive`,
+  `findActiveForCategories`) leaves a lapsed spot off the shelf.
+
+Invariants: the reminder for a window is sent once (`rightsRemindedAt` at
+or after the window opened means sent); a lapse is stamped once; a renewal
+never shortens a term (an approved paper with an earlier date changes
+nothing); OWNED never lapses. Tests: `__tests__/qr24-rights.test.ts`.

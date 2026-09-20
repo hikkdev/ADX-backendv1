@@ -154,6 +154,8 @@ export const createListingSchema = z.object({
    * controller fills it from their own record and ignores anything sent here.
    */
   publisherId: z.string().min(1).optional(),
+  /** QR-8: the saved draft this listing finishes; its reference becomes the listing's and the draft is removed. */
+  draftId: z.string().min(1).optional(),
   title: z.string().min(1),
   category: upperEnum(LISTING_CATEGORIES),
   subType: z.string().optional(),
@@ -204,6 +206,19 @@ export const createListingSchema = z.object({
   slotsTotal: slotsTotalField,
   photos: z.array(z.object({ url: z.string().url(), type: z.string() })).optional(),
   planId: z.string().optional(),
+  /**
+   * QR-24: how the publisher holds the space and, for a lease, licence or
+   * permit, the day it runs out (YYYY-MM-DD, stored as the last instant of
+   * that day). The vocabulary is the database's `RightsBasis`; spelt out
+   * here rather than imported, since `listings` does not reach into `supply`.
+   */
+  rightsBasis: upperEnum(['OWNED', 'LEASED', 'LICENSED', 'PERMIT']).optional(),
+  rightsValidUntil: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD')
+    // The last instant of that day in India, as `supply` stores a renewal's date.
+    .transform((day) => new Date(`${day}T23:59:59.999+05:30`))
+    .optional(),
   // ADMIN-only: create on behalf of a specific agent (identified by their
   // AgentProfile id, e.g. from GET /agents) rather than the caller's own.
   agentId: z.string().optional(),
@@ -261,6 +276,8 @@ export const browseQuerySchema = z
     q: z.string().trim().min(1).max(80).optional(),
     city: z.string().trim().min(1).max(80).optional(),
     category: z.enum(LISTING_CATEGORIES).optional(),
+    /** QR-20: the sub-category — a `VenueType` id, as the home's and the Explore grid's venue tiles hand it over. */
+    venueTypeId: z.string().trim().min(1).max(64).optional(),
     display: z.enum(['DIGITAL', 'STATIC']).optional(),
     minRate: z.string().regex(/^\d+(\.\d{1,2})?$/).optional(),
     maxRate: z.string().regex(/^\d+(\.\d{1,2})?$/).optional(),
@@ -321,6 +338,9 @@ export const browseCategoriesQuerySchema = z
     path: ['lng'],
   });
 export type BrowseCategoriesQuery = z.infer<typeof browseCategoriesQuerySchema>;
+
+/** QR-20: the venue tiles take the same place as the category tiles. */
+export const browseVenuesQuerySchema = browseCategoriesQuerySchema;
 
 /** Lot G (Q116/136): the window `GET /listings/browse/:id` counts `slotsLeft` over — the campaign's dates, else today. */
 export const browseWindowSchema = z

@@ -30,6 +30,8 @@ feature('listings.browse', {
     'The advertiser\'s discovery: browse, detail, similar spots, the content categories.',
   routes: [
     '/api/v1/listings/browse',
+    '/api/v1/listings/browse/categories',
+    '/api/v1/listings/browse/venues',
     '/api/v1/listings/:id/similar',
     '/api/v1/listings/content-categories',
   ],

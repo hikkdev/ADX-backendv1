@@ -30,3 +30,20 @@ export async function backfillPublisherIdentifiers(batchSize = 500): Promise<{
   const remaining = (await repository.publishersMissingIdentifier(1)).length;
   return { assigned, remaining };
 }
+
+/**
+ * QR-4: the same for people. Every account minted before the USER series
+ * existed gets ADX-… against its own `createdAt`, oldest first, so the id
+ * says when the person actually joined. Safe to run repeatedly.
+ */
+export async function backfillUserIdentifiers(batchSize = 500): Promise<{ assigned: number; remaining: number }> {
+  const pending = await repository.usersMissingIdentifier(batchSize);
+  let assigned = 0;
+  for (const user of pending) {
+    const displayId = await allocateIdentifier('USER', user.createdAt);
+    await repository.setUserIdentifier(user.id, displayId);
+    assigned += 1;
+  }
+  const remaining = (await repository.usersMissingIdentifier(1)).length;
+  return { assigned, remaining };
+}

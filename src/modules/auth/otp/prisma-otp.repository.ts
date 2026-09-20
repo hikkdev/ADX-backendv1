@@ -11,17 +11,18 @@ export const prismaOtpRepository: OtpRepository = {
     return prisma.user.findUnique({ where: { email } });
   },
 
-  createPublisherUser(mobile: string) {
+  createPublisherUser(mobile: string, displayId: string) {
     return prisma.user.create({
-      data: { mobile, roles: { create: { role: 'PUBLISHER' } } },
+      data: { mobile, displayId, roles: { create: { role: 'PUBLISHER' } } },
     });
   },
 
-  createDevLoginUser(mobile: string, role: Role) {
+  createDevLoginUser(mobile: string, role: Role, displayId: string) {
     const last4 = mobile.slice(-4);
     return prisma.user.create({
       data: {
         mobile,
+        displayId,
         name: `Dev Login ${last4}`,
         roles: { create: { role } },
         ...(role === 'AGENT_PUBLISHER' || role === 'AGENT_ADVERTISER' ? { agentProfile: { create: {} } } : {}),
@@ -32,10 +33,11 @@ export const prismaOtpRepository: OtpRepository = {
     });
   },
 
-  createUnregisteredUser(mobile: string) {
+  createUnregisteredUser(mobile: string, displayId: string) {
     // No roles, no profile: the party record and its role are created when
-    // the person chooses PUBLISHER or ADVERTISER after verifying.
-    return prisma.user.create({ data: { mobile } });
+    // the person chooses PUBLISHER or ADVERTISER after verifying. QR-4: the
+    // person's own id is minted here, before any of that.
+    return prisma.user.create({ data: { mobile, displayId } });
   },
 
   markMobileVerified(userId: string) {

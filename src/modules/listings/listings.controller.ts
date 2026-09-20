@@ -1,5 +1,9 @@
 import type { Request, Response } from 'express';
 import { ApiError } from '../../shared/errors';
+import { platformStanding } from '../agreements';
+import { deskDrafts, listMyDrafts, removeDraft, saveDraft, takeDraft } from './drafts.service';
+import { deskDraftsQuerySchema, saveDraftSchema } from './drafts.schema';
+import { profileBasicsMissing, profileIncompleteMessage } from '../../shared/kyc-state';
 import { logActivity } from '../../shared/audit';
 import { assertMayActFor, getAdvertiserForUser } from '../advertisers';
 import { requireAgentProfile } from '../agents';
@@ -18,6 +22,7 @@ import {
 } from './listings.schema';
 import {
   browseCategories,
+  browseVenues,
   browseListings,
   getBrowseListing,
   listSavedListings,
@@ -91,6 +96,18 @@ export async function browseCategoriesHandler(req: Request, res: Response): Prom
   if (!parsed.success) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid query', parsed.error.flatten());
   const { city, lat, lng, radiusKm } = parsed.data;
   const result = await browseCategories({
+    ...(city ? { city } : {}),
+    ...(lat !== undefined && lng !== undefined ? { near: { latitude: lat, longitude: lng, radiusKm } } : {}),
+  });
+  res.json({ success: true, data: result });
+}
+
+/** QR-20: GET /listings/browse/venues?city=&lat=&lng=&radiusKm= — the sub-category tiles for the place, every active venue type counted. */
+export async function browseVenuesHandler(req: Request, res: Response): Promise<void> {
+  const parsed = browseCategoriesQuerySchema.safeParse(req.query);
+  if (!parsed.success) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid query', parsed.error.flatten());
+  const { city, lat, lng, radiusKm } = parsed.data;
+  const result = await browseVenues({
     ...(city ? { city } : {}),
     ...(lat !== undefined && lng !== undefined ? { near: { latitude: lat, longitude: lng, radiusKm } } : {}),
   });
@@ -193,7 +210,7 @@ export async function createListingHandler(req: Request, res: Response): Promise
 
   const roles = req.user?.roles ?? [];
   const isAdmin = roles.includes('ADMIN');
-  const { agentId: requestedAgentId, publisherId, ...rest } = parsed.data;
+  const { agentId: requestedAgentId, publisherId, draftId, ...rest } = parsed.data;
 
   /**
    * Two variants of the same seven steps.
@@ -216,11 +233,25 @@ export async function createListingHandler(req: Request, res: Response): Promise
         'You have no publisher account yet, so there is nothing to list a spot under',
       );
     }
+    // QR-3: the door. A publisher on their own phone lists nothing until
+    // ADX has their name, email and address — the same rule the home's
+    // readiness figure draws, so the "+" the app disables and this refusal
+    // agree. An agent at the door follows the ladder, which asks for the
+    // basics before the spots; ADX may file a spot under any record.
+    const missing = profileBasicsMissing(own);
+    if (missing.length > 0) {
+      throw new ApiError(409, 'PROFILE_INCOMPLETE', profileIncompleteMessage(missing), { missing });
+    }
+    // QR-8: a listing finished from a saved draft takes the draft's reference
+    // and the draft goes — one id from the first save to going live.
+    const draft = draftId ? await takeDraft(own.id, draftId) : null;
     const listing = await createListing({
       ...rest,
       publisherId: own.id,
       category: rest.category as ListingCategory,
+      ...(draft ? { displayId: draft.displayId } : {}),
     });
+    if (draft) await removeDraft(own.id, draft.id);
     res.status(201).json({ success: true, data: listing });
     return;
   }
@@ -305,10 +336,31 @@ export async function updateListingHandler(req: Request, res: Response): Promise
  */
 export async function submitListingHandler(req: Request, res: Response): Promise<void> {
   const listingId = req.params['listingId'] as string;
-  await assertCanEditListing(listingId, {
-    userId: req.user!.sub,
-    isAdmin: (req.user?.roles ?? []).includes('ADMIN'),
-  });
+  const roles = req.user?.roles ?? [];
+  const isAdmin = roles.includes('ADMIN');
+  await assertCanEditListing(listingId, { userId: req.user!.sub, isAdmin });
+  // QR-6 (the owner, 17 Sep 2026): the commercial agreement is presented
+  // when a listing is submitted — not in the setup checklist. A publisher on
+  // their own phone submits nothing until they have accepted the live
+  // publisher platform agreement (`agreements.platformStanding`: the live
+  // version, or any version unless ADX asked for re-acceptance); the app
+  // shows the text on this refusal, records the click and retries. While
+  // ADX has published no agreement there is nothing to accept and nothing
+  // gates. An agent's ladder carries its own acceptance and is not gated.
+  if (!isAdmin && !roles.includes('AGENT_PUBLISHER')) {
+    const own = await findOwnPublisher(req.user!.sub);
+    if (own) {
+      const standing = await platformStanding('PLATFORM', { publisherId: own.id });
+      if (standing.currentVersion !== null && !standing.satisfied) {
+        throw new ApiError(
+          409,
+          'AGREEMENT_REQUIRED',
+          'Read and accept the ADX publisher agreement to send this listing for review. It is saved as a draft until then.',
+          { agreement: 'PLATFORM', version: standing.currentVersion },
+        );
+      }
+    }
+  }
   const listing = await submitListingForReview(listingId);
   res.json({ success: true, data: listing });
 }
@@ -399,4 +451,40 @@ export async function listingContentRulesHandler(req: Request, res: Response): P
 
 export async function similarListingsHandler(req: Request, res: Response): Promise<void> {
   res.json({ success: true, data: await getSimilarListings(req.params['id'] as string) });
+}
+
+
+/* ── QR-8: listing drafts ──────────────────────────────────────────────── */
+
+/** GET /listings/drafts — the caller's own saved drafts, newest first. */
+export async function listMyListingDraftsHandler(req: Request, res: Response): Promise<void> {
+  const own = await findOwnPublisher(req.user!.sub);
+  if (!own) throw new ApiError(403, 'FORBIDDEN', 'You have no publisher account yet, so there is nothing to save a draft under');
+  res.json({ success: true, data: await listMyDrafts(own.id) });
+}
+
+/** POST /listings/drafts — save a new draft (mints its LST- reference); PUT /listings/drafts/:id — update one. */
+export async function saveListingDraftHandler(req: Request, res: Response): Promise<void> {
+  const parsed = saveDraftSchema.safeParse(req.body);
+  if (!parsed.success) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid request', parsed.error.flatten());
+  const own = await findOwnPublisher(req.user!.sub);
+  if (!own) throw new ApiError(403, 'FORBIDDEN', 'You have no publisher account yet, so there is nothing to save a draft under');
+  const id = typeof req.params['draftId'] === 'string' ? req.params['draftId'] : null;
+  const draft = await saveDraft(own.id, id, parsed.data);
+  res.status(id ? 200 : 201).json({ success: true, data: draft });
+}
+
+/** DELETE /listings/drafts/:id — the caller throws a draft away. */
+export async function deleteListingDraftHandler(req: Request, res: Response): Promise<void> {
+  const own = await findOwnPublisher(req.user!.sub);
+  if (!own) throw new ApiError(403, 'FORBIDDEN', 'You have no publisher account yet');
+  await removeDraft(own.id, req.params['draftId'] as string);
+  res.json({ success: true, data: { deleted: true } });
+}
+
+/** GET /listings/drafts/desk — ADMIN: every publisher's half-written spot, for the sales and onboarding teams. */
+export async function deskListingDraftsHandler(req: Request, res: Response): Promise<void> {
+  const parsed = deskDraftsQuerySchema.safeParse(req.query);
+  if (!parsed.success) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid request', parsed.error.flatten());
+  res.json({ success: true, data: await deskDrafts(parsed.data) });
 }

@@ -38,9 +38,10 @@ export function startCampaignLifecycleJob(): void {
     try {
       // Lot D (Q120): `blocked` is a campaign due to start whose artwork ops
       // have not approved — left SCHEDULED, ops told once a day.
-      const { wentLive, completed, skipped, blocked } = await runCampaignTransitions();
-      if (wentLive > 0 || completed > 0 || skipped > 0 || blocked > 0) {
-        logger.info('Campaign lifecycle tick', { tag: TAG, wentLive, completed, skipped, blocked });
+      // QR-16: `awaitingVerification` is a paid campaign held until its advertiser's KYC clears.
+      const { wentLive, completed, skipped, blocked, awaitingVerification } = await runCampaignTransitions();
+      if (wentLive > 0 || completed > 0 || skipped > 0 || blocked > 0 || awaitingVerification > 0) {
+        logger.info('Campaign lifecycle tick', { tag: TAG, wentLive, completed, skipped, blocked, awaitingVerification });
       }
 
       // Lot C (Q88): a campaign sent to its advertiser to pay holds its spots

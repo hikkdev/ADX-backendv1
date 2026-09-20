@@ -1,4 +1,6 @@
 import type { KycQueueState } from '../../shared/kyc-state';
+import type { Provenance } from '../../shared/onboarding';
+import type { Gender } from '../../shared/database';
 import type {
   KycStatus,
   Listing,
@@ -26,7 +28,36 @@ export type MyListingsPage = {
   counts: Record<string, number>;
 };
 
-export type NewPublisher = {
+/** QR-13: the person behind a desk-opened account, written to their User row. */
+export type PersonFields = {
+  firstName?: string;
+  lastName?: string;
+  dateOfBirth?: Date;
+  gender?: Gender;
+};
+
+/** QR-13: what `ensureAccount` needs to open, or adopt, the User a publisher signs in as. */
+export type AccountInput = PersonFields & {
+  mobile: string;
+  /** Issued by `identifiers`; used only when a row has to be created. */
+  displayId: string;
+  name: string;
+  email?: string;
+};
+
+export type NewPublisher = Partial<Provenance> & {
+  /** QR-13: the account the desk opened for them — set, the sign-in lands on the publisher's home. */
+  userId?: string;
+  address?: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  gstin?: string;
+  contactName?: string;
+  contactMobile?: string;
+  contactEmail?: string;
+  /** QR-13: a desk onboarding with every basic in place opens complete. */
+  onboardingStatus?: 'PENDING_ONBOARDING' | 'ONBOARDING_COMPLETE';
+  activatedAt?: Date;
   /**
    * Who brought this publisher in. Null when ADX opened the account itself
    * (Q29): attribution is a fact about an agent's book and an admin is not an
@@ -51,6 +82,9 @@ export type PublisherPatch = Partial<{
   email: string;
   type: PublisherType;
   address: string;
+  /** QR-5: where the address is, when it came off the map or a search. */
+  latitude: number | null;
+  longitude: number | null;
   city: string;
   /** Lot X-B: rides with `city` — the service stamps it, a caller never sends it. */
   cityId: string | null;
@@ -234,7 +268,11 @@ export interface PublishersRepository {
   findLabelsByUserIds(userIds: string[]): Promise<PartyLabelRow[]>;
   /** The publisher's own spots, paged, with the three shelf counts. */
   findMyListings(publisherId: string, query: MyListingsQuery): Promise<MyListingsPage>;
-  findByUserIdWithKyc(userId: string): Promise<(Publisher & { kyc: PublisherKyc | null }) | null>;
+  /** QR-22: when the publisher last accepted the platform terms; null until they have. */
+  findPlatformAgreementAcceptedAt(publisherId: string): Promise<Date | null>;
+  findByUserIdWithKyc(
+    userId: string,
+  ): Promise<(Publisher & { kyc: PublisherKyc | null; user: { dateOfBirth: Date | null; gender: string | null; avatarUrl: string | null } | null }) | null>;
   /**
    * DR 01's publisher home: every spot with whether a booking occupies it at
    * `now`, and how many bookings are waiting for the publisher's answer.
@@ -266,6 +304,20 @@ export interface PublishersRepository {
   // ── Self-registration and onboarding ──
   /** A row by its number, whoever holds it — an agent-opened account has no user yet. */
   findByMobile(mobile: string): Promise<Publisher | null>;
+  /**
+   * QR-13: the User a desk-opened publisher signs in as. An account already
+   * on the number (a person who is an advertiser, say) is adopted: the
+   * PUBLISHER role is granted and the person's fields filled where empty;
+   * otherwise one is created with the role. Answers the id and whether it
+   * was made.
+   */
+  ensureAccount(input: AccountInput): Promise<{ id: string; created: boolean }>;
+  /** QR-13: the row with the person's date of birth beside it, for the settle rule. */
+  findByIdWithUser(publisherId: string): Promise<(Publisher & { user: { dateOfBirth: Date | null } | null }) | null>;
+  /** QR-13: the person's fields, from the desk. */
+  updateAccount(userId: string, patch: PersonFields & { name?: string; email?: string }): Promise<void>;
+  /** QR-14: the names behind `onboardedById`, for the detail and the roster. */
+  userLabels(userIds: readonly string[]): Promise<Map<string, string | null>>;
   /** Links an agent-opened row to the person who has now signed in with its number. */
   attachUser(publisherId: string, userId: string): Promise<Publisher>;
   createSelfRegistered(data: {
@@ -278,6 +330,8 @@ export interface PublishersRepository {
     displayId?: string;
   }): Promise<Publisher>;
   setUserProfile(userId: string, name: string, email?: string): Promise<unknown>;
+  /** QR-5: the person's date of birth and gender, collected with the publisher's details. */
+  setUserDetails(userId: string, data: { dateOfBirth?: Date; gender?: string }): Promise<unknown>;
   findUserMobile(
     userId: string,
   ): Promise<{ mobile: string; name: string | null; avatarUrl: string | null } | null>;

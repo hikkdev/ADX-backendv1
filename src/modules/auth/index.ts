@@ -26,6 +26,8 @@ export {
   revokeOtherSessions,
 } from './tokens/tokens.service';
 export type { SessionMeta } from './tokens/tokens.service';
+/** QR-2: a running session's access token re-signed with the roles the account holds now. */
+export { reissueAccessToken } from './auth.session';
 
 export { hashPassword, verifyPassword } from './password/password.service';
 /** E6: the desk's `POST /users/:id/reset-password` sends the ordinary reset link. */

@@ -27,6 +27,8 @@ export {
  * imports `auth`, and the answer must not depend on a second wiring step.
  */
 export { consoleStandingFor } from './access-control.service';
+/** QR-14: the actor's role at the time, for a party's `onboardedByRole` stamp. */
+export { actorLabelFor } from './access-control.service';
 registerConsoleStandingResolver(consoleStandingFor);
 /**
  * Lot K2 — `users` (deactivate, delete) and `account-lifecycle` (close):

@@ -16,6 +16,7 @@
     "seed:cities": "tsx src/scripts/seedCities.ts",
     "seed:geo": "tsx src/scripts/seedGeo.ts",
     "seed:revenue": "tsx src/scripts/seedRevenue.ts",
+    "seed:demo-listings": "tsx src/scripts/seedDemoListings.ts",
     "seed:venues": "tsx src/scripts/seedVenuesAndContent.ts",
     "backfill:city-keys": "tsx src/scripts/backfillCityKeys.ts",
     "typecheck": "tsc -p tsconfig.test.json",
@@ -28,7 +29,9 @@
     "backup": "tsx scripts/backup.ts",
     "restore": "tsx scripts/restore.ts",
     "arch": "depcruise src --config .dependency-cruiser.cjs && eslint .",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "seed:demo-platform": "tsx src/scripts/seedDemoPlatform.ts",
+    "seed:demo": "npm run seed:demo-listings && npm run seed:demo-platform"
   },
   "keywords": [],
   "author": "",

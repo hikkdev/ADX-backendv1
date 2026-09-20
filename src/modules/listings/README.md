@@ -29,7 +29,7 @@ the same read (`findOneForAdmin`) rather than looked up again.
 | POST | `/api/v1/listings/:listingId/send-back` | ADMIN |
 | POST | `/api/v1/listings/:listingId/publish` | ADMIN |
 | GET | `/api/v1/listings/:id/similar` | **none** |
-| GET | `/api/v1/listings/browse?…&from=&to=&instant=&sort=RATING&advertiserId=` | any signed-in caller — DR 01 discovery; Lot D adds `instant`, `RATING` and the `saved` mark. E7-2: `to` beside `from` is the availability window — a spot whose `availableFrom` is after it, or with a booking overlapping [from, to] (BOOKED / LIVE, or a live RESERVED hold — the clash rule checkout applies, repeated here because `listings` cannot import `campaigns`), is left out. E11-2: every card carries `shareUrl` — `PUBLIC_WEB_URL` (env, optional; the API origin — `BASE_URL`, else the local port — when unset) + `/s/:displayId`; null while the spot has no display id. Lot G (Q116/136): every card carries `slotsTotal` and `slotsLeft` for the asked window (`from`/`to`, else today); a spot with a loop is never hidden by `to` for one booking — its card says how many slots are left, which may be 0 |
+| GET | `/api/v1/listings/browse?…&from=&to=&instant=&sort=RATING&advertiserId=` | any signed-in caller — DR 01 discovery; QR-5: verified publishers' spots first, then the rest, each in the asked sort, one page cut across both; every card carries `publisherVerified`; Lot D adds `instant`, `RATING` and the `saved` mark. E7-2: `to` beside `from` is the availability window — a spot whose `availableFrom` is after it, or with a booking overlapping [from, to] (BOOKED / LIVE, or a live RESERVED hold — the clash rule checkout applies, repeated here because `listings` cannot import `campaigns`), is left out. E11-2: every card carries `shareUrl` — `PUBLIC_WEB_URL` (env, optional; the API origin — `BASE_URL`, else the local port — when unset) + `/s/:displayId`; null while the spot has no display id. Lot G (Q116/136): every card carries `slotsTotal` and `slotsLeft` for the asked window (`from`/`to`, else today); a spot with a loop is never hidden by `to` for one booking — its card says how many slots are left, which may be 0 |
 | GET | `/api/v1/listings/browse/categories?city=&lat=&lng=&radiusKm=` | any signed-in caller — G12-B: the "Browse by category" grid: `{ items: [{ category, count, photoUrl }], total }`, one tile per `ListingCategory` (all four, zeroes included), `count` the ACTIVE spots of that category in the place, `photoUrl` the newest live spot's first public photograph (`publicPhotoUrl` — an `https` address, never `/api/v1/files/:id`; down the newest-first order until one has a picture; null when none does), most populous first, ties in catalogue order. The place is resolved exactly as `/browse` resolves it (`browsePlaceClauses`): `city` by name (Lot X-L: plus the rows keyed to the city the name resolves to), or `lat`/`lng` (together) with `radiusKm` (1..100, default 10) — the bounding box cut to the circle by exact distance. Registered above `/browse/:listingId` so "categories" is never read as an id |
 | GET | `/api/v1/listings/browse/:listingId?advertiserId=&from=&to=` | any signed-in caller — the same card, `shareUrl` included (E11-2); Lot G: `slotsLeft` counted over `from`/`to` (the campaign's dates) when given, else today |
 | GET | `/s/:displayId` | **none** — E11-2: the public spot page a shared link opens, root-mounted beside `/p/:slug` and metered by IP (`spotPageLimiter`, 60 a minute); one self-contained HTML document (no external asset; the hero photograph through a public http(s) URL only, never a `/api/v1/files/:id` address) with the title, media type (the category made readable when none), size, rate per day, city and area (the recorded address), the publisher's business name, the rating line when `reviewCount > 0`, one "Open in the ADX app" link to `adx://spaces/:displayId` and the store links from `APP_STORE_URL` / `PLAY_STORE_URL` (env, optional — a store nobody named is not drawn); ACTIVE listings only, 404 otherwise, so the link dies with the spot; `Cache-Control: no-store`, `noindex` — `spot-page.service.ts`, `spotPageRouter` mounted by `bootstrap/create-app` after the payment link |
@@ -50,6 +50,74 @@ asserts it.
 this module's `getListingsForPublisher`.
 
 ## The review desk (DR 10)
+
+**QR-3 (17 Sep 2026): the listing door.** A publisher on their own phone
+may not START a listing until ADX has their basics — a name (one that is
+not still the mobile number the self-registration wrote), an email, an
+address and (QR-5) a date of birth. `POST /listings` as a self-serve
+PUBLISHER refuses 409 `PROFILE_INCOMPLETE` with `details.missing` (`name` /
+`email` / `address` / `dateOfBirth`, in the ladder's order) and a sentence
+that names them and says what the identity check is for. The rule is
+`shared/kyc-state`'s `profileBasicsMissing`, the same one `GET
+/publishers/me` folds into `readiness` so the app's locked "+" and this
+refusal agree. An agent's or ADX's create is not gated here — their ladder
+and desk are.
+
+**QR-5 (17 Sep 2026): the basics gate on going live — the KYC gate
+withdrawn.** QR-2 (a day earlier) had `publishListing` refuse 409
+`KYC_REQUIRED` for any publisher not VERIFIED. The owner's rule since: a
+publisher uses the account unverified and lists once the basics are in —
+"their listing will also be marked along with their profile as unverified
+and be pushed below verified listings or profiles when an advertiser checks
+out listings". `publishListing` now runs `assertPublisherBasics` after the
+rate-card and city gates: 409 `PROFILE_INCOMPLETE` with `details.missing`
+when a basic is missing (a VERIFIED publisher with no date of birth is
+refused too), nothing when they are all in, whatever `kycStatus` says. A
+listing with no publisher (an ADX-owned row) is not gated. `readiness.
+canGoLive` follows the same rule. Gate 2 of
+`docs/publisher-supply-lifecycle.md` is therefore the basics, not the check.
+
+**QR-6 (17 Sep 2026): the commercial agreement at submit.** The owner:
+"Commercial Agreement should be presented after any listing is getting
+submitted" — not in the setup checklist. `POST /listings/:id/submit` by a
+publisher on their own phone refuses 409 `AGREEMENT_REQUIRED` (`details.
+agreement = 'PLATFORM'`) while their publisher platform agreement is
+unaccepted (`Publisher.activatedAt` null); the listing stays a draft; the app
+shows the text (`GET /agreements/current/PLATFORM`), records the click
+(`POST /supply/agreements/accept-platform`) and retries. An agent's submit is
+not gated here — their ladder carries the acceptance. The readiness figure
+no longer counts the terms (`READINESS_WEIGHTS` profile 70 / kyc 30 / terms 0).
+
+**QR-8 (17 Sep 2026): drafts, and the `LST-` reference.** The owner: "allow
+draft facility for listings and campaigns … to reach out to advertisers or
+publishers later with sales team or onboarding team. We might need
+alphanumerical unique listing IDs too." A campaign has been a draft from its
+first step since DR 03; this is the listing's half. `ListingDraft` holds the
+wizard's answers as the phone has them, the step the person stopped on, and
+a reference minted off the `LISTING` identifier series (`LST-DDMM-YYNN`) —
+the reference the listing takes when the draft is finished (`POST /listings
+{ draftId }` carries it over and removes the draft), so the publisher and the
+desk call the spot by one name from the first save to going live. Every NEW
+listing is minted its reference at creation from the same series (rows from
+before QR-8 keep their `ADX-LST-nnnnn`; `submitListingForReview` mints for
+any still without — the old row-count allocator is retired). Routes:
+`GET/POST /listings/drafts`, `PUT/DELETE /listings/drafts/:draftId`
+(PUBLISHER, their own); `GET /listings/drafts/desk?idleDays=&q=&category=&sort=IDLE|NEWEST`
+(ADMIN): every publisher's drafts with the publisher's name, number and city
+beside each and `idleDays` since the last save — the sales and onboarding
+teams' call list. Registered before `/:listingId`.
+
+**QR-5: verified first on browse.** `findActive` reads two partitions — the
+spots of VERIFIED publishers (and ADX's own, which carry no publisher), then
+the rest — each in the asked sort, and cuts one page across them: the page
+is filled from the verified first, the remainder from the unverified with
+the offset moved past the verified count, so page 2 continues exactly where
+page 1 stopped. (A `KycStatus` enum sorts PENDING before VERIFIED, so the
+database cannot do it in one `orderBy`.) The partition is one more clause in
+the `AND` list, so `q`'s `OR` and the place clause keep their seats. Every
+browse card and the spot page carry `publisherVerified` (boolean; true for
+ADX's own), the mark the advertiser sees, and (QR-7) `publisherAvatarUrl`,
+the publisher's profile picture when they added one.
 
 The publisher's verb is `/submit`: DRAFT → PENDING_REVIEW, minting the
 `ADX-LST-nnnnn` reference and stamping `submittedAt`. ADX has three answers:
@@ -362,3 +430,47 @@ comingSoon: { city, slug, stage } }` instead of rows, so the phone draws
 LISTING_UNPUBLISHED metadata; the "raise the rate and relist" in-app line is
 not sent, `geo` tells the publisher once per city instead) — beside the
 default `PRICE_CASE`.
+
+## QR-20 (17 Sep 2026): the sub-categories are tiles too
+
+| Route | Who | What |
+| --- | --- | --- |
+| `GET /listings/browse/venues?city=&lat=&lng=&radiusKm=` | any session | every active `VenueType` of the catalogue for the place — `{ venueTypeId, slug, name, label, category, count, photoUrl }` — counted from the live spots there, the newest spot's public photograph on the tile; ordered by the frame's category order, the counted venues, then the curated venues people look for first (`VENUE_ORDER`), then the alphabet. `label` is the tile's word (`venueLabel`: a short name where one is known, the catalogue name's first segment otherwise) |
+| `GET /listings/browse?venueTypeId=` | as before | the browse cut to one venue, beside `category` |
+
+The user app's home strip (four categories, then the counted venues, capped at
+sixteen, two rows sideways) and the Explore grid (the sub-categories under
+each category) read the first; a tile tapped browses with the second.
+`npm run seed:demo-listings [+91mobile]` writes the dev demo set — a demo
+publisher, twenty live listings (five a category, one per venue) with
+pictures, and five campaigns with spots, orders and daily metrics for the
+advertiser named (default +919000000101).
+
+## QR-23 (20 Sep 2026): the platform demo — `npm run seed:demo`
+
+`seed:demo` = `seed:demo-listings` (the demo publisher, its twenty spots,
+Advait's five campaigns) followed by `seed:demo-platform`
+(`src/scripts/seedDemoPlatform.ts`), which fills the rest of the platform in
+around them so every desk and overview has something to count: three agents
+(verified KYC, both roles, credited and pending incentives, visits, leads in
+every stage), four more publishers across Bengaluru, Hyderabad and Mumbai in
+every KYC state and every onboarding door (agent, desk, self) with the demo
+spots redistributed by category and eight new spots in every listing state,
+four more advertisers of every legal form with brands and billing details,
+funded through the real top-up door, eight more campaigns (completed, live,
+scheduled, awaiting payment, cancelled) booked the way checkout books them —
+a wallet hold, then the capture that posts the `CAMPAIGN_SPEND` ledger legs
+the dashboard's GMV reads — with spots, orders, daily metrics, a tracking
+code with its events and reviews on the completed spots, the daily accrual
+run (publisher earnings, ADX commission, the take rate), a payout method, a
+paid withdrawal and a pending one.
+
+Idempotent: parties are keyed by mobile (+91 90000 002xx publishers, 003xx
+agents, 004xx advertisers), campaigns by reference (`ADX-CMP-2026-DEMO06`
+to `13`), listings by title. The ledger is append-only, so the demo is not
+deleted row by row: to remove it, reset the dev database and re-run the
+base seeds in this order — `seed:cities`, `seed:geo`, `seed:venues`,
+`seed:pricing`, `seed:revenue`, `seed:config`, `prisma/seed.ts`. Over a
+remote database a day's accrual can outlive Prisma's 5 s transaction
+window; the run is idempotent per spot and day, so the script makes up to
+three passes.

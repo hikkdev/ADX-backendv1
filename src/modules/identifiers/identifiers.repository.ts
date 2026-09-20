@@ -35,4 +35,7 @@ export interface IdentifiersRepository {
   /** Parties still without an identifier, oldest first, for the backfill. */
   publishersMissingIdentifier(limit: number): Promise<{ id: string; createdAt: Date }[]>;
   setPublisherIdentifier(publisherId: string, displayId: string): Promise<void>;
+  /** QR-4: accounts still without an ADX-… id, oldest first. */
+  usersMissingIdentifier(limit: number): Promise<{ id: string; createdAt: Date }[]>;
+  setUserIdentifier(userId: string, displayId: string): Promise<void>;
 }

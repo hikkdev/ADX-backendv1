@@ -82,6 +82,10 @@ export const prismaUsersRepository: UsersRepository = {
     return prisma.user.update({ where: { id: userId }, data, include: profileInclude }) as never;
   },
 
+  recordConsent(userId: string, data: { consentAcceptedAt: Date; consentTermsVersion: number | null; consentPrivacyVersion: number | null }) {
+    return prisma.user.update({ where: { id: userId }, data, include: profileInclude }) as never;
+  },
+
   // NOTE: unbounded, and deliberately left on the default load strategy.
   // It returns every user joined to seven relations including one-to-many
   // listings/sites/orders. A `join` strategy here would widen an already

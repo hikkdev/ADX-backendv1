@@ -42,6 +42,14 @@ const FACING_OPTIONS = [
  * no address to prove. The kinds themselves are `ListingDocumentKind` and are
  * posted to `POST /supply/listings/:listingId/documents` one at a time.
  */
+/** QR-24: the ways a space is held; everything but OWNED carries a date it runs out. */
+const RIGHTS_OPTIONS = [
+  { id: 'OWNED', title: 'I own it', description: 'The land, wall or vehicle is yours' },
+  { id: 'LEASED', title: 'On a lease', description: 'Rented from the owner for a term' },
+  { id: 'LICENSED', title: 'On a licence', description: 'A display licence from the owner or operator' },
+  { id: 'PERMIT', title: 'On a permit', description: 'Municipal, highway, railway or airport authority — usually renewed each year' },
+];
+
 function documentKinds(category: string) {
   const ownerNoc = {
     id: 'OWNER_NOC',
@@ -325,6 +333,15 @@ function listingBranch(id: string, title: string, description: string, cities: C
          */
         step: 8, totalSteps: 7, badge: 'Verification', ctaLabel: 'Save proofs',
         fields: [
+          /*
+           * QR-24: a hoarding on a highway, a shelter, a digital billboard —
+           * many spots are held on a lease, a licence or a permit a civic body
+           * renews every year. The listing carries how it is held and until
+           * when; ADX reminds the publisher before it runs out and takes the
+           * spot off the shelf after, until the renewed paper is approved.
+           */
+          { type: 'select', id: 'rights_basis', label: 'How do you hold this space?', required: true, options: RIGHTS_OPTIONS },
+          { type: 'date', id: 'rights_valid_until', label: 'Right runs out on', hint: 'YYYY-MM-DD — the end date on the lease, licence or permit. Leave blank if you own the space. ADX reminds you 30 and 7 days before; after that day the spot takes no new booking until you upload the renewal.' },
           {
             /*
              * The hint used to end "and add them later", which no app can do.

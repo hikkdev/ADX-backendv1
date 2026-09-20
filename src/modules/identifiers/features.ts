@@ -17,6 +17,6 @@ feature('system.identifiers', {
   kind: 'FEATURE',
   launch: 'on',
   description:
-    'Identifier formats per party, the preview, and the publisher backfill.',
+    'Identifier formats per party, the preview, and the backfill (publishers, and QR-4: people — the ADX-… id every account is minted with).',
   routes: ['/api/v1/identifiers'],
 });

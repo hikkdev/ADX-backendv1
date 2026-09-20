@@ -609,7 +609,7 @@ export const prismaCampaignsRepository: CampaignsRepository = {
   advertiserContext(advertiserId) {
     return prisma.advertiser.findUnique({
       where: { id: advertiserId },
-      select: { id: true, agentId: true, userId: true },
+      select: { id: true, agentId: true, userId: true, kycStatus: true },
     });
   },
 

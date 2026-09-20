@@ -31,6 +31,16 @@ feature('system.app-status', {
   routes: ['/api/v1/app/status', '/api/v1/app/limits'],
 });
 
+feature('system.branding', {
+  surfaces: ['APP_USER', 'APP_AGENT', 'CONSOLE', 'WEBSITE'],
+  owner: 'platform',
+  kind: 'FEATURE',
+  launch: 'on',
+  description:
+    'QR-9: the brand every surface draws — name, tagline, colours and logo URLs, DR 11 by default and retuned from Settings › Branding. Public: read before sign-in, cached five minutes.',
+  routes: ['/api/v1/app/branding'],
+});
+
 feature('system.platform-settings', {
   surfaces: ['CONSOLE'],
   owner: 'platform',

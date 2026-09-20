@@ -1,6 +1,6 @@
 {
   "generatedBy": "scripts/features-sync.ts",
-  "featureCount": 165,
+  "featureCount": 168,
   "features": [
     {
       "key": "account.closure",
@@ -1815,6 +1815,8 @@
       "aliases": [],
       "routes": [
         "/api/v1/listings/browse",
+        "/api/v1/listings/browse/categories",
+        "/api/v1/listings/browse/venues",
         "/api/v1/listings/:id/similar",
         "/api/v1/listings/content-categories"
       ],
@@ -3344,7 +3346,8 @@
       ],
       "paths": {
         "CONSOLE": [
-          "settings/reports"
+          "settings/reports",
+          "settings/reports/onboarding-board"
         ]
       },
       "declaredIn": [
@@ -3645,6 +3648,30 @@
       ]
     },
     {
+      "key": "supply.rights",
+      "surfaces": [
+        "APP_USER",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "supply",
+      "launch": "on",
+      "description": "QR-24: the right to sell a space and its term — a lease, licence or permit that ends, the reminders before it, the lapse after it, and the renewal the desk approves.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/supply/rights",
+        "/api/v1/supply/rights-queue"
+      ],
+      "jobs": [
+        "rights-renewal"
+      ],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
       "key": "supply.verification",
       "surfaces": [
         "APP_AGENT",
@@ -3822,6 +3849,54 @@
       ]
     },
     {
+      "key": "system.brand-manager",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "QR-11: Settings › Brand & theme — the draft brand (words, colours, logos, website kit) with live previews and legibility checks, Publish to make it the release every surface draws, and the release history with one-click restore.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/branding"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "settings/brand"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "system.branding",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE",
+        "WEBSITE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "QR-9: the brand every surface draws — name, tagline, colours and logo URLs, DR 11 by default and retuned from Settings › Branding. Public: read before sign-in, cached five minutes.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/app/branding"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
       "key": "system.feature-flags",
       "surfaces": [
         "APP_USER",
@@ -3916,7 +3991,7 @@
       "kind": "FEATURE",
       "owner": "platform",
       "launch": "on",
-      "description": "Identifier formats per party, the preview, and the publisher backfill.",
+      "description": "Identifier formats per party, the preview, and the backfill (publishers, and QR-4: people — the ADX-… id every account is minted with).",
       "variants": [],
       "aliases": [],
       "routes": [

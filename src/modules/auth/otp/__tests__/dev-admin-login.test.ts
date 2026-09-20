@@ -46,6 +46,8 @@ vi.mock('../otp-security', () => security);
 vi.mock('../../../../shared/sms', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../../../shared/sms')>()), ...sms }));
 vi.mock('../../../../shared/email', () => ({ sendViaResend: vi.fn() }));
 vi.mock('../../../../shared/logging', () => ({ logger }));
+// QR-4: the person's own id is minted at creation; the series is not under test here.
+vi.mock('../../../identifiers', () => ({ allocateIdentifier: vi.fn(async () => 'ADX-1709-2601') }));
 vi.mock('../../../notifications', () => ({ notify: vi.fn(async () => ({ notificationId: null, templateKey: null, deliveries: [] })) }));
 vi.mock('../../../../shared/audit', () => audit);
 vi.mock('../../auth.ports', () => ports);
@@ -99,7 +101,7 @@ describe('sendOtp with a :ADMIN allowlist entry', () => {
     await sendOtp(ADMIN_MOBILE, 'LOGIN');
 
     expect(repository.createDevLoginUser).not.toHaveBeenCalled();
-    expect(repository.createUnregisteredUser).toHaveBeenCalledWith(ADMIN_MOBILE);
+    expect(repository.createUnregisteredUser).toHaveBeenCalledWith(ADMIN_MOBILE, 'ADX-1709-2601');
     expect(audit.logActivity).not.toHaveBeenCalledWith(expect.anything(), 'DEV_ADMIN_LOGIN_USED', expect.anything());
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('refused'), expect.objectContaining({ mobile: ADMIN_MOBILE, reason: 'NODE_ENV_PRODUCTION' }));
   });
@@ -110,7 +112,7 @@ describe('sendOtp with a :ADMIN allowlist entry', () => {
     await sendOtp(ADMIN_MOBILE, 'LOGIN');
 
     expect(repository.createDevLoginUser).not.toHaveBeenCalled();
-    expect(repository.createUnregisteredUser).toHaveBeenCalledWith(ADMIN_MOBILE);
+    expect(repository.createUnregisteredUser).toHaveBeenCalledWith(ADMIN_MOBILE, 'ADX-1709-2601');
     expect(audit.logActivity).not.toHaveBeenCalledWith(expect.anything(), 'DEV_ADMIN_LOGIN_USED', expect.anything());
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('refused'), expect.objectContaining({ mobile: ADMIN_MOBILE, reason: 'DEV_ADMIN_LOGIN_OFF' }));
   });
@@ -120,7 +122,7 @@ describe('sendOtp with a :ADMIN allowlist entry', () => {
 
     const result = await sendOtp(ADMIN_MOBILE, 'LOGIN');
 
-    expect(repository.createDevLoginUser).toHaveBeenCalledWith(ADMIN_MOBILE, 'ADMIN');
+    expect(repository.createDevLoginUser).toHaveBeenCalledWith(ADMIN_MOBILE, 'ADMIN', 'ADX-1709-2601');
     expect(repository.createUnregisteredUser).not.toHaveBeenCalled();
     expect(audit.logActivity).toHaveBeenCalledWith(
       'usr_dev',
@@ -135,7 +137,7 @@ describe('sendOtp with a :ADMIN allowlist entry', () => {
   it('a plain entry still self-provisions the agent default, flag or no flag, and is not audited as an admin mint', async () => {
     await sendOtp(AGENT_MOBILE, 'LOGIN');
 
-    expect(repository.createDevLoginUser).toHaveBeenCalledWith(AGENT_MOBILE, 'AGENT_PUBLISHER');
+    expect(repository.createDevLoginUser).toHaveBeenCalledWith(AGENT_MOBILE, 'AGENT_PUBLISHER', 'ADX-1709-2601');
     expect(audit.logActivity).not.toHaveBeenCalledWith(expect.anything(), 'DEV_ADMIN_LOGIN_USED', expect.anything());
   });
 

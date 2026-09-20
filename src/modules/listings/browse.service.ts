@@ -4,7 +4,7 @@ import { ApiError } from '../../shared/errors';
 import { Decimal } from '../../shared/money';
 import { toListPage, type ListPage } from '../../shared/pagination';
 import { prismaListingsRepository as repository } from './prisma-listings.repository';
-import type { BrowseFilter, BrowseListing, BrowsePlace, CategoryTileListing } from './listings.repository';
+import type { BrowseFilter, BrowseListing, BrowsePlace, CategoryTileListing, VenueTypeRow } from './listings.repository';
 import { LISTING_CATEGORIES } from './listings.schema';
 import { carriesLoop, slotsHeldFor, slotsLeft, windowFor, type SlotWindow } from './slots.service';
 import { publicPhotoUrl } from './spot-page.service';
@@ -60,6 +60,15 @@ export type BrowseCard = {
   targetAudience: string | null;
   uniqueSellingPoint: string | null;
   publisherName: string | null;
+  /**
+   * QR-5: whether the publisher's identity check is verified. An advertiser
+   * sees the mark on the card; the list puts verified publishers' spots
+   * first. False is "unverified", drawn as such — not hidden. ADX's own
+   * spots (no publisher) count as verified.
+   */
+  publisherVerified: boolean;
+  /** QR-7: the publisher's profile picture, when they added one. */
+  publisherAvatarUrl: string | null;
   /** Metres from the point searched around, when one was given. */
   distanceM: number | null;
   /** Lot D (Q104): the published reviews' average, two places, or null while there are none. */
@@ -177,6 +186,8 @@ export function toBrowseCard(
     targetAudience: listing.targetAudience,
     uniqueSellingPoint: listing.uniqueSellingPoint,
     publisherName: listing.publisher?.name ?? null,
+    publisherVerified: listing.publisher === null || listing.publisher.kycStatus === 'VERIFIED',
+    publisherAvatarUrl: listing.publisher?.user?.avatarUrl ?? null,
     distanceM,
     ratingAvg: listing.ratingAvg === null || listing.ratingAvg === undefined ? null : new Decimal(String(listing.ratingAvg)).toFixed(2),
     reviewCount: listing.reviewCount ?? 0,
@@ -340,6 +351,104 @@ export async function browseCategories(input: BrowsePlace): Promise<{ items: Cat
   }
   const order = new Map(LISTING_CATEGORIES.map((category, index) => [category, index]));
   const items = [...tiles.values()].sort((a, b) => b.count - a.count || order.get(a.category)! - order.get(b.category)!);
+  return { items, total: within.length };
+}
+
+/* ── Venue tiles — QR-20 ─────────────────────────────────────────────── */
+
+/**
+ * QR-20 (the owner, 17 Sep): the home's strip and the Explore grid carry
+ * the sub-categories too — the catalogue's venue types, each its own tile.
+ * A tile is the venue, its category, how many live spots the place has in
+ * it, and the newest such spot's first public photograph. Every active
+ * venue is answered, counted or not: the strip must look full in a city
+ * that has three spots, and a tile with nothing behind it says so.
+ */
+export type VenueTile = {
+  venueTypeId: string;
+  slug: string;
+  /** The catalogue's full name — "Shopping Malls / Retail Centers / Department Stores". */
+  name: string;
+  /** The tile's word — "Malls". */
+  label: string;
+  category: (typeof LISTING_CATEGORIES)[number];
+  count: number;
+  photoUrl: string | null;
+};
+
+/** The tiles' words for the venues the frame names and the ones people look for first; the rest take the first segment of the catalogue name. */
+const VENUE_LABELS: Record<string, string> = {
+  'city-roads-urban-streets-main-roads': 'Roadside billboards',
+  'highways-expressways-national-highways': 'Highways',
+  'flyovers-overpasses-elevated-roads-skywalks': 'Flyovers',
+  'it-parks-sez-tech-parks-business-parks': 'Tech parks',
+  'airports-outdoor-perimeter-areas': 'Airport approaches',
+  'shopping-malls-retail-centers-department-stores': 'Malls',
+  'gyms-fitness-clubs-wellness-centers-yoga-studios': 'Gyms',
+  'restaurants-cafe-s-food-courts-qsrs-cloud-kitchens': 'Cafés & restaurants',
+  'multiplexes-cinemas-movie-theaters': 'Cinemas',
+  'supermarkets-hypermarkets-grocery-stores': 'Supermarkets',
+  'hotels-resorts-lodges-guest-houses-service-apartments': 'Hotels',
+  'hospitals-clinics-diagnostic-centers-pharmacies-medical-faci': 'Hospitals',
+  'colleges-universities-schools-educational-institutions': 'Colleges',
+  'business-centers-corporate-offices-coworking-spaces': 'Offices',
+  'banks-atms-financial-service-centers': 'Banks & ATMs',
+  'beauty-salons-spas-wellness-studios-nail-studios': 'Salons & spas',
+  'residential-societies-apartment-complexes-gated-communities': 'Apartments',
+  'metro-subway-underground': 'Metro',
+  'bus-bus-rapid-transit-brt': 'Buses',
+  'auto-rickshaw': 'Auto-rickshaws',
+  'taxi-cab-app-based-traditional': 'Cabs',
+  'railway-train-stations': 'Railway stations',
+  'aviation-in-flight-in-airport-aircraft': 'Airports',
+  television: 'TV',
+  'news-television': 'News TV',
+  radio: 'Radio',
+  print: 'Print',
+};
+
+/** The order the strip fills in once the counted venues are placed — what people look for first. */
+export const VENUE_ORDER: readonly string[] = Object.keys(VENUE_LABELS);
+
+export function venueLabel(venue: Pick<VenueTypeRow, 'slug' | 'name'>): string {
+  return VENUE_LABELS[venue.slug] ?? (venue.name.split(' / ')[0] ?? venue.name).trim();
+}
+
+export async function browseVenues(input: BrowsePlace): Promise<{ items: VenueTile[]; total: number }> {
+  const place = await placeWithKey(input);
+  const [venues, rows] = await Promise.all([repository.venueTypes(), repository.findActiveForCategories(place)]);
+  const near = place.near;
+  const within = near
+    ? rows.filter((row) => {
+        const distanceM = distanceFrom(near, row);
+        return distanceM !== null && distanceM <= near.radiusKm * 1000;
+      })
+    : rows;
+  const tiles = new Map<string, VenueTile>(
+    venues.map((venue) => [
+      venue.id,
+      { venueTypeId: venue.id, slug: venue.slug, name: venue.name, label: venueLabel(venue), category: venue.category as VenueTile['category'], count: 0, photoUrl: null },
+    ]),
+  );
+  // Rows arrive newest published first, so the first public photograph seen for a venue is the newest spot's.
+  for (const row of within) {
+    const tile = row.venueTypeId ? tiles.get(row.venueTypeId) : undefined;
+    if (!tile) continue;
+    tile.count += 1;
+    if (tile.photoUrl === null) tile.photoUrl = publicPhotoUrl(row.photos);
+  }
+  // The frame's order (4189:2057): billboards first, then indoor, transit, media.
+  const category = new Map<string, number>(['OUTDOOR', 'INDOOR', 'TRANSIT', 'MEDIA'].map((value, index) => [value, index]));
+  const curated = new Map(VENUE_ORDER.map((slug, index) => [slug, index]));
+  const rank = (tile: VenueTile) => curated.get(tile.slug) ?? VENUE_ORDER.length;
+  // The counted venues first, then the curated order, then the catalogue's alphabet — within each category in the frame's order.
+  const items = [...tiles.values()].sort(
+    (a, b) =>
+      category.get(a.category)! - category.get(b.category)! ||
+      b.count - a.count ||
+      rank(a) - rank(b) ||
+      a.label.localeCompare(b.label),
+  );
   return { items, total: within.length };
 }
 

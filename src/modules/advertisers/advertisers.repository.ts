@@ -1,6 +1,7 @@
 import type {
   Advertiser,
   AdvertiserType,
+  Gender,
   PayoutRailName,
   RefundDestination,
   RefundReason,
@@ -24,6 +25,7 @@ import type { ListPage, ListQuery, Page, PageQuery } from '../../shared/paginati
 /* Money over the wire                                                 */
 /* ------------------------------------------------------------------ */
 
+import type { OnboardingSource } from '../../shared/database';
 /**
  * Amounts cross this boundary as decimal strings, never as numbers.
  *
@@ -194,6 +196,11 @@ export type CreateAdvertiserInput = {
   userId?: string | null;
   agentId?: string | null;
   displayId: string;
+  /** QR-14: the door this row came through. */
+  onboardedVia?: OnboardingSource | null;
+  onboardedById?: string | null;
+  onboardedByRole?: string | null;
+  onboardedAt?: Date | null;
 };
 
 export type UpdateAdvertiserInput = Partial<
@@ -216,6 +223,32 @@ export type UpdateAdvertiserInput = Partial<
   >
 >;
 
+/** QR-15: what the desk's onboarding opens (or adopts) the sign-in account with — the person's own columns. */
+export type AccountInput = {
+  mobile: string;
+  displayId: string;
+  name: string;
+  email?: string | null;
+  firstName?: string;
+  lastName?: string;
+  dateOfBirth?: Date;
+  gender?: Gender;
+};
+
+/** QR-15: the person behind an account, as the console's Edit details drawer prefills from them. */
+export type PersonRow = {
+  displayId: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  dateOfBirth: Date | null;
+  gender: Gender | null;
+  avatarUrl: string | null;
+  consentAcceptedAt: Date | null;
+};
+
+/** QR-15: the roster's cuts beside `q` — the door and the person who opened it. */
+export type AdvertiserRosterQuery = PageQuery & { q?: string | undefined; onboardedVia?: OnboardingSource | undefined; onboardedById?: string | undefined };
+
 export type CreateAcceptanceInput = {
   templateId: string;
   templateKind: AgreementKind;
@@ -235,8 +268,16 @@ export type CreateAcceptanceInput = {
  * across two calls is how a wallet goes negative under load.
  */
 export interface AdvertisersRepository {
+  /** QR-14: the name behind `onboardedById`. */
+  findUserLabel(userId: string): Promise<string | null>;
   /* Accounts */
   createAdvertiser(input: CreateAdvertiserInput): Promise<Advertiser>;
+  /** QR-15: open the sign-in account for a desk-onboarded advertiser, or adopt the one the number already has (filling only what is empty, granting ADVERTISER). */
+  ensureAccount(input: AccountInput): Promise<{ id: string; created: boolean }>;
+  updateAccount(userId: string, patch: { firstName?: string; lastName?: string; name?: string; email?: string; dateOfBirth?: Date; gender?: Gender }): Promise<void>;
+  findUserPerson(userId: string): Promise<PersonRow | null>;
+  /** QR-14/15: the names behind `onboardedById`, one query for a page of rows. */
+  userLabels(userIds: readonly string[]): Promise<Map<string, string | null>>;
   /** Links an agent-opened account to the person who has now signed in with its number. */
   attachUser(advertiserId: string, userId: string): Promise<Advertiser>;
   /** Attribution, set once: who brought them in. A later agent does not rewrite it. */
@@ -260,7 +301,7 @@ export interface AdvertisersRepository {
   findLabelsByIds(ids: string[]): Promise<{ id: string; label: string; displayId: string | null }[]>;
   updateAdvertiser(id: string, patch: UpdateAdvertiserInput): Promise<Advertiser>;
   /** E7-3: `q` is a contains over name / email / mobile / displayId beside the cursor page. */
-  listAdvertisers(query: PageQuery & { q?: string | undefined }): Promise<Page<Advertiser>>;
+  listAdvertisers(query: AdvertiserRosterQuery): Promise<Page<Advertiser>>;
   /** Every account this agent opened or looks after. */
   findAdvertisersForAgent(agentId: string): Promise<Advertiser[]>;
 

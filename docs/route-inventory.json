@@ -1,6 +1,6 @@
 {
   "generatedBy": "scripts/route-inventory.ts",
-  "routeCount": 1040,
+  "routeCount": 1057,
   "routes": [
     {
       "method": "GET",
@@ -308,6 +308,19 @@
         "auditAdminWrites",
         "authenticate",
         "getAppMapsHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/app/branding",
+      "chain": [
+        "requestId",
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "auditAdminWrites",
+        "getAppBrandingHandler"
       ]
     },
     {
@@ -1386,6 +1399,20 @@
         "auditAdminWrites",
         "authenticate",
         "updateMe"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/users/me/consent",
+      "chain": [
+        "requestId",
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "auditAdminWrites",
+        "authenticate",
+        "recordMyConsent"
       ]
     },
     {
@@ -3995,7 +4022,7 @@
         "requestLogger",
         "auditAdminWrites",
         "authenticate",
-        "requireRole(AGENT_PUBLISHER)",
+        "requireRole(AGENT_PUBLISHER|ADMIN)",
         "updatePublisherHandler"
       ]
     },
@@ -4160,6 +4187,20 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/listings/browse/venues",
+      "chain": [
+        "requestId",
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "auditAdminWrites",
+        "authenticate",
+        "browseVenuesHandler"
+      ]
+    },
+    {
+      "method": "GET",
       "path": "/api/v1/listings/browse/:listingId",
       "chain": [
         "requestId",
@@ -4258,6 +4299,81 @@
         "authenticate",
         "requireRole(ADMIN)",
         "getAllListingsHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/listings/drafts/desk",
+      "chain": [
+        "requestId",
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "auditAdminWrites",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "deskListingDraftsHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/listings/drafts",
+      "chain": [
+        "requestId",
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "auditAdminWrites",
+        "authenticate",
+        "requireRole(PUBLISHER)",
+        "listMyListingDraftsHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/listings/drafts",
+      "chain": [
+        "requestId",
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "auditAdminWrites",
+        "authenticate",
+        "requireRole(PUBLISHER)",
+        "saveListingDraftHandler"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/listings/drafts/:draftId",
+      "chain": [
+        "requestId",
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "auditAdminWrites",
+        "authenticate",
+        "requireRole(PUBLISHER)",
+        "saveListingDraftHandler"
+      ]
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/v1/listings/drafts/:draftId",
+      "chain": [
+        "requestId",
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "auditAdminWrites",
+        "authenticate",
+        "requireRole(PUBLISHER)",
+        "deleteListingDraftHandler"
       ]
     },
     {
@@ -4648,6 +4764,51 @@
         "authenticate",
         "requireRole(ADMIN)",
         "verificationQueueHandler"
+      ]
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/v1/supply/listings/:listingId/rights",
+      "chain": [
+        "requestId",
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "auditAdminWrites",
+        "authenticate",
+        "requireRole(PUBLISHER|AGENT_PUBLISHER|ADMIN)",
+        "setRightsHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/supply/rights-queue",
+      "chain": [
+        "requestId",
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "auditAdminWrites",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "rightsQueueHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/supply/rights/sweep",
+      "chain": [
+        "requestId",
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "auditAdminWrites",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "rightsSweepHandler"
       ]
     },
     {
@@ -11830,6 +11991,84 @@
     },
     {
       "method": "GET",
+      "path": "/api/v1/branding",
+      "chain": [
+        "requestId",
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "auditAdminWrites",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "getManagerHandler"
+      ]
+    },
+    {
+      "method": "PUT",
+      "path": "/api/v1/branding/draft",
+      "chain": [
+        "requestId",
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "auditAdminWrites",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "requirePermission(settings.edit)",
+        "putDraftHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/branding/publish",
+      "chain": [
+        "requestId",
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "auditAdminWrites",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "requirePermission(settings.edit)",
+        "publishHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/branding/releases",
+      "chain": [
+        "requestId",
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "auditAdminWrites",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "listReleasesHandler"
+      ]
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/branding/releases/:number/restore",
+      "chain": [
+        "requestId",
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "auditAdminWrites",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "requirePermission(settings.edit)",
+        "restoreHandler"
+      ]
+    },
+    {
+      "method": "GET",
       "path": "/api/v1/onboarding/flow-templates",
       "chain": [
         "requestId",
@@ -14142,6 +14381,21 @@
         "authenticate",
         "requireRole(ADMIN)",
         "catalogueHandler"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/reports/boards/onboarding",
+      "chain": [
+        "requestId",
+        "corsMiddleware",
+        "jsonParser",
+        "urlencodedParser",
+        "requestLogger",
+        "auditAdminWrites",
+        "authenticate",
+        "requireRole(ADMIN)",
+        "onboardingBoardHandler"
       ]
     },
     {

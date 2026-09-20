@@ -189,7 +189,7 @@ describe('committing', () => {
   it('reports the rows as CSV, outcome and message first', async () => {
     const csv = await importReportCsv('imp_1');
     const lines = csv.trim().split('\r\n');
-    expect(lines[0]).toBe('rowNumber,outcome,message,publisherId,name,mobile,email,type,gstin,address,city,state,contactName,contactMobile,contactEmail,panNumber');
+    expect(lines[0]).toBe('rowNumber,outcome,message,publisherId,name,mobile,email,type,gstin,address,city,state,contactName,contactMobile,contactEmail,panNumber,firstName,lastName,dateOfBirth,gender,latitude,longitude');
     expect(lines[1]).toContain('2,MERGED,');
     expect(lines[2]).toContain('3,WARNING,');
     expect(lines).toHaveLength(4);

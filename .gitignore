@@ -3,3 +3,7 @@ dist/
 node_modules/
 
 /src/generated/prisma
+
+# Runtime file storage (dev uploads, KYC and verification photos) never belongs in git.
+uploads/
+private-uploads/

@@ -7,7 +7,7 @@
  */
 export { identifierRouter } from './identifiers.routes';
 export { allocateIdentifier, previewIdentifier, getFormat } from './identifiers.service';
-export { backfillPublisherIdentifiers } from './identifiers.backfill';
+export { backfillPublisherIdentifiers, backfillUserIdentifiers } from './identifiers.backfill';
 
 // Lot G (answer 144): the module's feature declarations, loaded with the module so the registry sees them at boot.
 import './features';

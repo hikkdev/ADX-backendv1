@@ -100,6 +100,8 @@ export interface UsersRepository {
 
   findProfile(userId: string): Promise<ProfileRow | null>;
   updateProfile(userId: string, data: UpdateProfileInput): Promise<ProfileRow>;
+  /** QR-6: the terms and privacy consent, stamped with the versions agreed. */
+  recordConsent(userId: string, data: { consentAcceptedAt: Date; consentTermsVersion: number | null; consentPrivacyVersion: number | null }): Promise<ProfileRow>;
   /** `closed` omitted means every account; true or false filters on User.closedAt. E6: `q` and `role`. */
   findAllForAdmin(filter?: AdminListFilter): Promise<AdminListRow[]>;
   findById(userId: string): Promise<User | null>;

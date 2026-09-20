@@ -155,3 +155,6 @@ export function kycStateCounts(counts: Partial<Record<KycQueueState, number>>): 
   const filled = Object.fromEntries(KYC_QUEUE_STATES.map((state) => [state, counts[state] ?? 0])) as Record<KycQueueState, number>;
   return { ...filled, awaitingDocuments: filled.AWAITING_DOCUMENTS };
 }
+
+/** QR-3: how far along a publisher is, and the verified mark every party earns the same way. */
+export * from './readiness';

@@ -32,6 +32,11 @@ const repository = vi.hoisted(
       verificationsDue: vi.fn(),
       findListing: vi.fn(),
       setListingStatus: vi.fn(),
+      // QR-24
+      setRights: vi.fn(),
+      rightsDue: vi.fn(),
+      publisherUserId: vi.fn(),
+      publisherIdOfUser: vi.fn(),
       markListingVerified: vi.fn(),
       markDocumentsCleared: vi.fn(),
       createClaim: vi.fn(),

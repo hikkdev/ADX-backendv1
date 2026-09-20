@@ -147,9 +147,31 @@ export const patchSchemas = {
     webhookSecret: z.string().optional(),
   }),
   branding: z.object({
-    platformName: z.string().nullable().optional(),
+    platformName: z.string().max(60).nullable().optional(),
+    tagline: z.string().max(120).nullable().optional(),
     headerLogoUrl: z.string().url().nullable().optional().or(z.literal('')),
     authLogoUrl: z.string().url().nullable().optional().or(z.literal('')),
+    // QR-9: the DR 11 fields. A colour is #RRGGBB; a logo is the URL an
+    // upload of purpose BRANDING answered; null or '' clears back to DR 11.
+    primaryColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().optional().or(z.literal('')),
+    deepColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().optional().or(z.literal('')),
+    inkColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().optional().or(z.literal('')),
+    groundColor: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().optional().or(z.literal('')),
+    wordmarkUrl: z.string().url().nullable().optional().or(z.literal('')),
+    wordmarkInverseUrl: z.string().url().nullable().optional().or(z.literal('')),
+    markUrl: z.string().url().nullable().optional().or(z.literal('')),
+    markInverseUrl: z.string().url().nullable().optional().or(z.literal('')),
+    iconUrl: z.string().url().nullable().optional().or(z.literal('')),
+    // QR-11: the website kit — edited on Settings › Brand & theme, kept here so the section stays whole.
+    taglines: z.array(z.string().trim().min(1).max(80)).max(6).nullable().optional(),
+    heroImageUrl: z.string().url().nullable().optional().or(z.literal('')),
+    ogImageUrl: z.string().url().nullable().optional().or(z.literal('')),
+    faviconUrl: z.string().url().nullable().optional().or(z.literal('')),
+    // QR-12: per-surface basics.
+    appIconUrl: z.string().url().nullable().optional().or(z.literal('')),
+    consoleTitle: z.string().trim().max(40).nullable().optional().or(z.literal('')),
+    siteTitle: z.string().trim().max(70).nullable().optional().or(z.literal('')),
+    siteDescription: z.string().trim().max(160).nullable().optional().or(z.literal('')),
   }),
   ai: z.object({
     provider: z.enum(['anthropic', 'openai', 'google', 'azure-openai', 'custom']).optional(),

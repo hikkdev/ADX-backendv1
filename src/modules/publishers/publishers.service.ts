@@ -1,4 +1,8 @@
 import type { Request } from 'express';
+import { onboardingFactsOf, type OnboardingFacts } from '../../shared/onboarding';
+import type { Gender, OnboardingSource } from '../../shared/database';
+import { dateOfBirthToDate, dateOfBirthToString, normalizeMobile } from '../../shared/validation';
+import { settleOnboardingIfReady } from './onboarding/publisher-onboarding.service';
 import { ApiError } from '../../shared/errors';
 import { allocateIdentifier } from '../identifiers';
 import { kycUserLabels } from '../kyc';
@@ -31,12 +35,112 @@ import type {
   KycQueueRowWithSla,
 } from './publishers.repository';
 
-export async function createPublisher(data: NewPublisher) {
+/**
+ * QR-13: the person's fields the desk may send beside the publisher's — as
+ * the app's `PATCH /users/me` would take them.
+ */
+export type DeskPerson = { firstName?: string; lastName?: string; dateOfBirth?: string; gender?: Gender };
+
+/** The four basics the readiness rule counts — with them in, the account opens complete. */
+function basicsIn(row: { name: string | null; email: string | null; address: string | null }, dateOfBirth: Date | string | null | undefined): boolean {
+  return Boolean(row.name && row.email && row.address && dateOfBirth);
+}
+
+/**
+ * QR-14: the stamp, with the person named — what the detail read and the
+ * roster answer as `onboarding`. One name lookup for a page of rows.
+ */
+export async function withOnboardingFacts<T extends { onboardedVia: OnboardingSource | null; onboardedById: string | null; onboardedByRole: string | null; onboardedAt: Date | null }>(
+  rows: T[],
+): Promise<(T & { onboarding: OnboardingFacts })[]> {
+  const ids = rows.map((r) => r.onboardedById).filter((id): id is string => Boolean(id));
+  // No stamp names anyone (a page of self-signups, or rows older than QR-14): nothing to look up.
+  const names = ids.length > 0 ? await repository.userLabels(ids) : new Map<string, string | null>();
+  // A row read without the stamp columns (an older fixture, a narrow select) is left as it is.
+  return rows.map((row) =>
+    'onboardedVia' in row ? { ...row, onboarding: onboardingFactsOf(row, row.onboardedById ? (names.get(row.onboardedById) ?? null) : null) } : (row as T & { onboarding: OnboardingFacts }),
+  );
+}
+
+export async function createPublisher(data: NewPublisher & DeskPerson) {
   // Allocated here rather than in the repository so every creation path goes
   // through one place, and so the repository stays pure data access.
   const displayId = await allocateIdentifier('PUBLISHER');
+  const { firstName, lastName, dateOfBirth, gender, ...publisher } = data;
+  // QR-13: the same number the OTP door canonicalises to, so the account the
+  // desk opens is the one the person signs in as.
+  const mobile = normalizeMobile(publisher.mobile);
+  let userId: string | undefined;
+  if (firstName !== undefined) {
+    // A desk onboarding: open (or adopt) the account first, so the sign-in
+    // lands on the publisher's home with nothing left to ask.
+    const account = await repository.ensureAccount({
+      mobile,
+      displayId: await allocateIdentifier('USER'),
+      name: `${firstName} ${lastName ?? ''}`.trim(),
+      ...(publisher.email !== undefined ? { email: publisher.email } : {}),
+      firstName,
+      ...(lastName !== undefined ? { lastName } : {}),
+      ...(dateOfBirth !== undefined ? { dateOfBirth: dateOfBirthToDate(dateOfBirth) } : {}),
+      ...(gender !== undefined ? { gender } : {}),
+    });
+    userId = account.id;
+  }
+  const complete = userId !== undefined && basicsIn({ name: publisher.name, email: publisher.email ?? null, address: publisher.address ?? null }, dateOfBirth);
   // Lot X-B: the city key rides with the typed city (null for a town the catalogue lacks).
-  return repository.create(await withCityKey({ ...data, displayId }));
+  return repository.create(
+    await withCityKey({
+      ...publisher,
+      mobile,
+      displayId,
+      ...(userId !== undefined ? { userId } : {}),
+      // QR-13: with every basic in, the onboarding is done the day the desk does it — the
+      // app's readiness card agrees, and the agreement row shows rather than the setup prompt.
+      ...(complete ? { onboardingStatus: 'ONBOARDING_COMPLETE' as const, activatedAt: new Date() } : {}),
+    }),
+  );
+}
+
+/**
+ * QR-13: the desk's edit — everything the ladder collects, the person's
+ * fields written to their account. A publisher with no account yet who is
+ * given a first name gets one opened, the way the desk onboarding does.
+ */
+export async function updatePublisherAtDesk(publisherId: string, adminId: string, input: PublisherPatch & DeskPerson) {
+  const publisher = await repository.findById(publisherId);
+  if (!publisher) throw new ApiError(404, 'NOT_FOUND', 'Publisher not found');
+  const { firstName, lastName, dateOfBirth, gender, ...patch } = input;
+  const person = {
+    ...(firstName !== undefined ? { firstName } : {}),
+    ...(lastName !== undefined ? { lastName } : {}),
+    ...(dateOfBirth !== undefined ? { dateOfBirth: dateOfBirthToDate(dateOfBirth) } : {}),
+    ...(gender !== undefined ? { gender } : {}),
+  };
+  let userId = publisher.userId as string | null;
+  if (Object.keys(person).length > 0 || patch.email !== undefined) {
+    if (userId) {
+      // The detail include selects the person's names (QR-13); the repository's row type predates them.
+      const held = publisher.user as { firstName?: string | null; lastName?: string | null } | null;
+      const name = firstName !== undefined || lastName !== undefined
+        ? `${firstName ?? held?.firstName ?? ''} ${lastName ?? held?.lastName ?? ''}`.trim()
+        : undefined;
+      await repository.updateAccount(userId, { ...person, ...(name ? { name } : {}), ...(patch.email !== undefined ? { email: patch.email } : {}) });
+    } else if (firstName !== undefined) {
+      const account = await repository.ensureAccount({
+        mobile: normalizeMobile(publisher.mobile),
+        displayId: await allocateIdentifier('USER'),
+        name: `${firstName} ${lastName ?? ''}`.trim(),
+        ...(patch.email !== undefined ? { email: patch.email } : {}),
+        ...person,
+      });
+      userId = account.id;
+      await repository.attachUser(publisherId, userId);
+    }
+  }
+  const updated = await repository.update(publisherId, await withCityKey(patch));
+  await settleOnboardingIfReady(publisherId);
+  await logActivity(adminId, 'PUBLISHER_UPDATED_BY_ADMIN', undefined, { publisherId, fields: Object.keys(input) });
+  return updated;
 }
 
 export async function getPublishersForAgent(agentId: string, category?: string) {
@@ -51,7 +155,8 @@ export async function getAllPublishers(category?: string, q?: string) {
 /** E10-1: the roster on the list contract — `{ items, total, page, pageSize, counts }`, the chips by KYC status. */
 export async function getPublisherRoster(query: PublisherRosterQuery) {
   const { items, total, counts } = await repository.findRosterPage(query);
-  return toListPage(items, total, counts, query);
+  // QR-14: the roster names who onboarded each row.
+  return toListPage(await withOnboardingFacts(items as never[]), total, counts, query);
 }
 
 /**
@@ -85,7 +190,9 @@ export async function getOwnedPublisher(
   // six-column summary with `state` AWAITING_DOCUMENTS.
   const summary = kycSummaryOf(publisher.kyc, publisher.kycStatus);
   const kyc = publisher.kyc ? { ...publisher.kyc, ...(await kycReviewsFor(publisher.kyc)), state: summary.state, kycId: summary.kycId } : { ...summary, status: null };
-  return withDetailFacts({ ...publisher, kyc });
+  // QR-14: who onboarded them, named.
+  const [stamped] = await withOnboardingFacts([publisher]);
+  return withDetailFacts({ ...stamped!, kyc });
 }
 
 /**
@@ -94,12 +201,27 @@ export async function getOwnedPublisher(
  * the profile yet) and `openOrders`, the non-terminal orders across the
  * publisher's listings, which is what STOP_OPEN_WORK would cancel.
  */
-export function withDetailFacts<T extends { listings?: { _count?: { orders: number } }[]; user?: { closedAt: Date | null; closeReason: string | null } | null }>(
+type PersonRow = { displayId?: string | null; firstName?: string | null; lastName?: string | null; dateOfBirth?: Date | null; gender?: string | null; avatarUrl?: string | null; consentAcceptedAt?: Date | null };
+export type DetailPerson = { displayId: string | null; firstName: string | null; lastName: string | null; dateOfBirth: string | null; gender: string | null; avatarUrl: string | null; consentAcceptedAt: Date | null };
+
+export function withDetailFacts<T extends { listings?: { _count?: { orders: number } }[]; user?: ({ closedAt: Date | null; closeReason: string | null } & PersonRow) | null }>(
   publisher: T,
-): T & { user: { closedAt: Date | null; closeReason: string | null } | null; openOrders: number } {
+): T & { user: { closedAt: Date | null; closeReason: string | null } | null; person: DetailPerson | null; openOrders: number } {
   const openOrders = (publisher.listings ?? []).reduce((sum, listing) => sum + (listing._count?.orders ?? 0), 0);
   const user = publisher.user ? { closedAt: publisher.user.closedAt, closeReason: publisher.user.closeReason } : null;
-  return { ...publisher, user, openOrders };
+  // QR-13: the person behind the account, for the desk's Edit details drawer.
+  const person: DetailPerson | null = publisher.user && 'firstName' in publisher.user
+    ? {
+        displayId: publisher.user.displayId ?? null,
+        firstName: publisher.user.firstName ?? null,
+        lastName: publisher.user.lastName ?? null,
+        dateOfBirth: dateOfBirthToString(publisher.user.dateOfBirth ?? null),
+        gender: publisher.user.gender ?? null,
+        avatarUrl: publisher.user.avatarUrl ?? null,
+        consentAcceptedAt: publisher.user.consentAcceptedAt ?? null,
+      }
+    : null;
+  return { ...publisher, user, ...(person ? { person } : {}), openOrders } as never;
 }
 
 /**

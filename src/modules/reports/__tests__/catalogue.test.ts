@@ -14,6 +14,7 @@ const D = (v: string) => new Decimal(v);
 const AT = new Date('2026-09-10T05:00:00Z');
 
 const data: ReportData = {
+  onboardingBoard: async () => [{ actorId: 'usr_ops', actorName: 'Asha Rao', actorRole: 'Ops manager', via: { SELF: 0, AGENT: 0, QR: 0, DESK: 3, IMPORT: 0 }, publishers: 3, advertisers: 0, onboarded: 3, completed: 2, liveWithin7d: 1, verified: 1, firstBooking: 0 }],
   bookings: async () => [
     { kind: 'CAMPAIGN', reference: 'ADX-CMP-1', name: 'Diwali', advertiserDisplayId: 'ADX-ADV-1', advertiserName: 'Acme', agentDisplayId: null, paidAt: AT, subtotal: D('1000'), gst: D('180'), total: D('1180'), status: 'LIVE' },
     { kind: 'PACKAGE', reference: 'ADX-PKG-1', name: 'Starter', advertiserDisplayId: null, advertiserName: 'Beta', agentDisplayId: 'ADX-AGT-9', paidAt: AT, subtotal: D('500'), gst: null, total: D('590'), status: 'ACTIVE' },
@@ -46,9 +47,9 @@ const catalogue = buildCatalogue(data);
 const window = { start: new Date('2026-09-09T18:30:00Z'), end: new Date('2026-09-10T18:30:00Z'), from: '2026-09-10', to: '2026-09-10', label: '2026-09-10' };
 
 describe('the catalogue', () => {
-  it('lists the twelve kinds, in order, each with a name, a description and columns', () => {
+  it('lists the thirteen kinds, in order, each with a name, a description and columns', () => {
     expect(catalogue.map((k) => k.kind)).toEqual([...REPORT_KINDS]);
-    expect(new Set(catalogue.map((k) => k.kind)).size).toBe(12);
+    expect(new Set(catalogue.map((k) => k.kind)).size).toBe(13);
     for (const kind of catalogue) {
       expect(kind.name.length).toBeGreaterThan(3);
       expect(kind.description.length).toBeGreaterThan(10);

@@ -36,6 +36,8 @@ vi.mock('../otp-security', () => security);
 // Lot E: the login OTP is a direct send by kind; the sender's siblings stay real.
 vi.mock('../../../../shared/sms', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../../../shared/sms')>()), ...sms }));
 vi.mock('../../../../shared/email', () => email);
+// QR-4: the person's own id is minted at creation; the series is not under test here.
+vi.mock('../../../identifiers', () => ({ allocateIdentifier: vi.fn(async () => 'ADX-1709-2601') }));
 vi.mock('../../../notifications', () => ({ notify: vi.fn(async () => ({ notificationId: null, templateKey: null, deliveries: [] })) }));
 vi.mock('../../../../shared/audit', () => audit);
 vi.mock('../../auth.ports', () => ports);
@@ -65,7 +67,7 @@ describe('sendOtp on an erased number', () => {
 
     const result = await sendOtp(MOBILE, 'LOGIN');
 
-    expect(repository.createUnregisteredUser).toHaveBeenCalledWith(MOBILE);
+    expect(repository.createUnregisteredUser).toHaveBeenCalledWith(MOBILE, 'ADX-1709-2601');
     expect(sms.sendSms).toHaveBeenCalledWith(expect.objectContaining({ to: MOBILE, kind: 'LOGIN_OTP' }));
     expect(result.expiresInSeconds).toBe(600);
     expect(audit.logActivity).toHaveBeenCalledWith(

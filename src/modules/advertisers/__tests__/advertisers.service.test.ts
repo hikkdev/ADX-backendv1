@@ -8,10 +8,15 @@ const repository = vi.hoisted(
     ({
       findLabelsByIds: vi.fn(),
     createAdvertiser: vi.fn(),
+    findUserLabel: vi.fn(),
   attachUser: vi.fn(),
   attachAgent: vi.fn(),
   findUserSummary: vi.fn(),
   findUserClosure: vi.fn(),
+  findUserPerson: vi.fn(async () => null),
+  ensureAccount: vi.fn(),
+  updateAccount: vi.fn(),
+  userLabels: vi.fn(async () => new Map()),
       findAdvertiserById: vi.fn(),
       findKycSummary: vi.fn(),
       findAdvertiserByMobile: vi.fn(),
@@ -257,13 +262,14 @@ describe('the city key on registration (Lot X-B)', () => {
 describe('acceptPlatformAgreement', () => {
   const ctx = { acceptedByUserId: 'usr-1' };
 
-  it('refuses before KYC is verified', async () => {
+  it('QR-16: accepts before KYC is verified, and activates nothing yet', async () => {
     repository.findAdvertiserById.mockResolvedValue(advertiser({ kycStatus: 'PENDING' }));
     repository.findAcceptance.mockResolvedValue(null);
 
-    await expect(acceptPlatformAgreement('adv-1', ctx)).rejects.toMatchObject({
-      code: 'KYC_REQUIRED',
-    });
+    await acceptPlatformAgreement('adv-1', ctx);
+
+    expect(repository.createAcceptance).toHaveBeenCalledWith(expect.objectContaining({ templateKind: 'ADVERTISER_PLATFORM' }));
+    expect(repository.updateAdvertiser).not.toHaveBeenCalledWith('adv-1', expect.objectContaining({ activatedAt: expect.any(Date) }));
   });
 
   it('records the acceptance and activates the account', async () => {
@@ -465,7 +471,9 @@ describe('bookingEligibility', () => {
     const result = await bookingEligibility('adv-1');
 
     expect(result.eligible).toBe(false);
-    expect(result.blockedBy).toEqual(['PROFILE', 'KYC', 'AGREEMENT', 'FUNDS']);
+    // QR-16: KYC holds the launch, not the booking.
+    expect(result.blockedBy).toEqual(['PROFILE', 'AGREEMENT', 'FUNDS']);
+    expect(result.launchBlockedBy).toEqual(['KYC']);
   });
 
   it('Lot D (Q55): an old click is behind a live version that demands re-acceptance', async () => {
@@ -485,13 +493,21 @@ describe('bookingEligibility', () => {
 });
 
 describe('holdForCampaign', () => {
-  it('checks every gate before touching the wallet', async () => {
-    repository.findAdvertiserById.mockResolvedValue(advertiser({ kycStatus: 'PENDING' }));
+  it('checks every booking gate before touching the wallet', async () => {
+    repository.findAdvertiserById.mockResolvedValue(advertiser({ billingAddress: null }));
 
     await expect(holdForCampaign('adv-1', 'cmp-1', '10000.00')).rejects.toMatchObject({
-      code: 'KYC_REQUIRED',
+      code: 'CONFLICT',
     });
     expect(repository.placeHold).not.toHaveBeenCalled();
+  });
+
+  it('QR-16: an unverified advertiser may hold money — the verification gates the launch, not the booking', async () => {
+    repository.findAdvertiserById.mockResolvedValue(advertiser({ kycStatus: 'PENDING' }));
+    repository.walletSnapshot.mockResolvedValue(wallet({ spendable: '50000.00' }));
+    repository.placeHold.mockResolvedValue({ id: 'hold-1' });
+    await expect(holdForCampaign('adv-1', 'cmp-1', '10000.00')).resolves.toBeDefined();
+    expect(repository.placeHold).toHaveBeenCalled();
   });
 
   it('turns a short balance into INSUFFICIENT_FUNDS rather than a generic error', async () => {

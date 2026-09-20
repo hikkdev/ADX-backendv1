@@ -35,11 +35,22 @@ be repointed.
 | 1 | Account | Mobile + OTP, or an `AGENT_ADVERTISER` creating it on their behalf | Everything |
 | 2 | Profile | Advertiser type, company details, GSTIN, billing address | KYC submission |
 | 3 | KYC verified | Digio, documents per type, reviewed in `/kyc/advertisers` | Agreement |
-| 4 | Platform agreement | One click, one per account, post-KYC | Booking |
+| 4 | Platform agreement | One click, one per account — since QR-16 no longer post-KYC | Booking |
 | 5 | Funded | Wallet balance or a payment method on file | Booking |
 
 Browsing and pricing are open from gate 1 — an advertiser sees inventory and
 what it costs before proving anything. Booking blocks until gate 5.
+
+**QR-16 (the owner, 17 Sep 2026): gate 3 holds the launch, not the booking.**
+An unverified advertiser browses, fills a cart, accepts the agreement and
+pays; `bookingEligibility` names KYC under `launchBlockedBy` rather than
+`blockedBy`. A paid campaign whose advertiser is still unverified stays
+SCHEDULED — its hold uncaptured, one due today included — and the lifecycle
+tick launches it on the first pass after the record is verified (identity,
+and the business documents for a business). The advertiser is told at
+authorisation and once a day after; ops once a day. `GET /campaigns/:id`
+carries `launchBlockedBy` so the app says "paid — verify to launch".
+`Advertiser.activatedAt` still means gates 3 and 4 both clear.
 
 An `AGENT_ADVERTISER` can drive gates 1 and 2 for an account and can assemble a
 campaign, but **gate 4 is the advertiser's own click**. This is the same rule
@@ -55,7 +66,8 @@ agreement.
 Symmetrical with the publisher's platform + per-attempt structure.
 
 **Advertiser platform agreement** — `AgreementKind.ADVERTISER_PLATFORM`. One
-per account, click-accepted after KYC. The terms under which ADX sells
+per account, click-accepted once the profile is in (QR-16: before the KYC
+too — activation still waits for both). The terms under which ADX sells
 inventory: what is being bought, what ADX warrants about a site, what happens
 when a site lapses mid-campaign, how goodwill credit works, and what the
 advertiser may not advertise.

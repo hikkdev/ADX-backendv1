@@ -259,6 +259,22 @@ export async function getRoleConfigForUser(userId: string): Promise<{ id: string
  * predicate above. A non-admin has no console: null and false, with no
  * membership read. Registered on `auth`'s port at load (see index.ts).
  */
+/**
+ * QR-14: what to write as `onboardedByRole` — the console role's name for an
+ * admin ("Super admin", "Ops manager", …; "Admin" while the membership is
+ * unset), "Agent" for the two agent roles, else the platform role as it is.
+ * A snapshot: roles move, the stamp on a party does not.
+ */
+export async function actorLabelFor(userId: string, roles: readonly Role[]): Promise<string> {
+  if (roles.includes('ADMIN')) {
+    const standing = await consoleStandingFor(userId, roles);
+    if (standing.isSuperAdmin) return 'Super admin';
+    return standing.roleConfig?.name ?? 'Admin';
+  }
+  if (roles.includes('AGENT_PUBLISHER') || roles.includes('AGENT_ADVERTISER')) return 'Agent';
+  return roles[0] ? roles[0].charAt(0) + roles[0].slice(1).toLowerCase() : 'Unknown';
+}
+
 export async function consoleStandingFor(userId: string, roles: readonly Role[]): Promise<ConsoleStanding> {
   if (!roles.includes('ADMIN')) return { roleConfig: null, isSuperAdmin: false };
   const membership = await repository.findMembership(userId);

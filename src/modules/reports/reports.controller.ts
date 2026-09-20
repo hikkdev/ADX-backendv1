@@ -1,4 +1,8 @@
 import type { NextFunction, Request, Response } from 'express';
+import { prismaReportData } from './prisma-reports.repository';
+import { resolveWindow } from './windows';
+import type { OnboardingBoardRow } from './reports.repository';
+import { onboardingBoardQuerySchema } from './reports.schema';
 import { authenticate, requireRole } from '../../shared/auth';
 import { ApiError } from '../../shared/errors';
 import { logger } from '../../shared/logging';
@@ -39,6 +43,22 @@ export function catalogueHandler(_req: Request, res: Response): void {
 }
 
 /** POST /reports/run — rendered now; answers the run (its id, status, row count, expiry). */
+// QR-14: GET /reports/boards/onboarding?preset=last30 | from=&to= [&via=&role=] — the team board, ranked.
+export async function onboardingBoardHandler(req: Request, res: Response): Promise<void> {
+  const parsed = onboardingBoardQuerySchema.safeParse(req.query);
+  if (!parsed.success) throw invalid(parsed.error);
+  const { via, role, ...windowInput } = parsed.data;
+  const window = resolveWindow('preset' in windowInput && windowInput.preset ? { preset: windowInput.preset } : { from: windowInput.from!, to: windowInput.to! });
+  const rows = await prismaReportData.onboardingBoard(window, { via, role });
+  res.json({
+    success: true,
+    data: {
+      window: { from: window.from, to: window.to, label: window.label },
+      rows: rows.map((row: OnboardingBoardRow, i: number) => ({ ...row, rank: row.actorId ? i + 1 : null })),
+    },
+  });
+}
+
 export async function runHandler(req: Request, res: Response): Promise<void> {
   const parsed = runReportSchema.safeParse(req.body ?? {});
   if (!parsed.success) throw invalid(parsed.error);

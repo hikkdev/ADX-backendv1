@@ -215,14 +215,14 @@ describe('the artwork (Q120)', () => {
     it('goes LIVE when every artwork with a file is approved', async () => {
       repository.findCampaign.mockResolvedValue(due());
       const result = await runCampaignTransitions(new Date('2026-04-01T06:00:00Z'));
-      expect(result).toEqual({ wentLive: 1, completed: 0, skipped: 0, blocked: 0 });
+      expect(result).toEqual({ wentLive: 1, completed: 0, skipped: 0, blocked: 0, awaitingVerification: 0 });
       expect(advertisers.captureCampaignHold).toHaveBeenCalledWith('hold_1');
     });
 
     it('stays SCHEDULED, uncaptured, and ops are told, when artwork is not approved', async () => {
       repository.findCampaign.mockResolvedValue(due({ creatives: [creative({ status: 'CHANGES_REQUESTED' })] }));
       const result = await runCampaignTransitions(new Date('2026-04-01T06:00:00Z'));
-      expect(result).toEqual({ wentLive: 0, completed: 0, skipped: 0, blocked: 1 });
+      expect(result).toEqual({ wentLive: 0, completed: 0, skipped: 0, blocked: 1, awaitingVerification: 0 });
       expect(advertisers.captureCampaignHold).not.toHaveBeenCalled();
       expect(repository.updateCampaign).not.toHaveBeenCalled();
       expect(orders.notifyAdmins).toHaveBeenCalledWith('Launch blocked: artwork not approved', expect.stringContaining('ADX-CMP-2026-482913'), 'cmp_1');
@@ -246,7 +246,7 @@ describe('the artwork (Q120)', () => {
         id === 'cmp_1' ? due({ creatives: [creative({ status: 'IN_REVIEW' })] }) : due({ id: 'cmp_2', walletHoldId: 'hold_2' }),
       );
       const result = await runCampaignTransitions(new Date('2026-04-01T06:00:00Z'));
-      expect(result).toEqual({ wentLive: 1, completed: 0, skipped: 0, blocked: 1 });
+      expect(result).toEqual({ wentLive: 1, completed: 0, skipped: 0, blocked: 1, awaitingVerification: 0 });
       expect(advertisers.captureCampaignHold).toHaveBeenCalledWith('hold_2');
     });
   });

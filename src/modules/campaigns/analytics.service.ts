@@ -14,6 +14,9 @@ import { prismaCampaignsRepository as repository } from './prisma-campaigns.repo
 import type { CampaignAggregate, MetricRow } from './campaigns.repository';
 import { flightDays, type Actor } from './campaigns.service';
 
+/** QR-20: the tile's basis prints rupees the way the phone does — the sign, en-IN grouping, whole rupees. */
+const rupees = (amount: Decimal): string => `₹${Math.round(amount.toNumber()).toLocaleString('en-IN')}`;
+
 /**
  * Campaign analytics.
  *
@@ -874,7 +877,7 @@ export async function portfolioAnalytics(
     budgetSpent: {
       value: money(spend),
       basis: committed.greaterThan(0)
-        ? `${Math.round(spend.dividedBy(committed).times(100).toNumber())}% of ${money(committed)} committed`
+        ? `${Math.round(spend.dividedBy(committed).times(100).toNumber())}% of ${rupees(committed)} committed`
         : 'Nothing committed yet',
       // On track when spend is running no faster than the flight is.
       onTrack: committed.greaterThan(0) ? spend.lessThanOrEqualTo(committed) : null,

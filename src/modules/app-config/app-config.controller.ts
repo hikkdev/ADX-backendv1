@@ -20,6 +20,8 @@ import {
 } from './platform-settings';
 import { ApiError } from '../../shared/errors';
 import { getMapsClientConfig } from '../../shared/maps';
+import { getBrand } from '../../shared/integrations';
+import { env } from '../../config/env';
 import { auditDiff, logActivity } from '../../shared/audit';
 
 /**
@@ -71,6 +73,18 @@ export async function getAppLimitsHandler(_req: Request, res: Response): Promise
 export async function getAppMapsHandler(_req: Request, res: Response): Promise<void> {
   res.set('Cache-Control', 'no-store');
   res.json({ success: true, data: await getMapsClientConfig() });
+}
+
+/**
+ * QR-9: GET /app/branding — the effective brand, DR 11 where the console
+ * has not retuned it. Public and cacheable for a short while: the version
+ * stamp changes with any field, so a client re-reads on a mismatch.
+ */
+export async function getAppBrandingHandler(req: Request, res: Response): Promise<void> {
+  const hostHeader = req.headers['host'] ?? `localhost:${env.PORT}`;
+  const baseUrl = env.BASE_URL ?? (env.NODE_ENV !== 'production' ? `http://${hostHeader}` : '');
+  res.set('Cache-Control', 'public, max-age=300');
+  res.json({ success: true, data: await getBrand(baseUrl) });
 }
 
 const APP_STATUS_FIELDS = ['minimumBuild', 'latestBuild', 'storeUrl', 'maintenance', 'incident', 'services'] as const;

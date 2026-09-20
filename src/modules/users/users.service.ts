@@ -1,11 +1,14 @@
 import { ApiError } from '../../shared/errors';
+import { dateOfBirthToDate } from '../../shared/validation';
 import { auditDiff, logActivity, type AuditDiff } from '../../shared/audit';
 import { logger } from '../../shared/logging';
 import { expireOutstandingOtpsForUser, normalizeMobile, requireTwoFactorFor, revokeSessions, sendPasswordResetLink } from '../auth';
 import { assertNotLastSuperAdmin, assignRoleConfig, getRoleConfigForUser } from '../access-control';
 import type { AdvertiserType, PublisherType, Role } from '../../shared/database';
-import { registerPublisher } from '../publishers';
-import { registerAdvertiser } from '../advertisers';
+import { registerPublisher, updateMyPublisherProfile } from '../publishers';
+import { registerAdvertiser, updateProfile as updateAdvertiserProfile } from '../advertisers';
+import { selfProvenance } from '../../shared/onboarding';
+import { currentLegalDocument } from '../legal';
 import { prismaUsersRepository as repository } from './prisma-users.repository';
 import type { AdminListFilter, AdminUserDetail, WithRoles } from './users.repository';
 import { assertIdentityFree } from './users-identity';
@@ -86,6 +89,9 @@ export async function chooseParty(userId: string, input: ChoosePartyInput): Prom
     userId,
     name: name ?? user.mobile,
     type: ADVERTISER_TYPE[accountType],
+    // QR-14/15: the app's own door — nobody's achievement, "organic" on the
+    // board. (The publisher side stamps the same in `createSelfRegistered`.)
+    ...selfProvenance(),
   });
   await repository.grantRole(userId, 'ADVERTISER');
   return { party, accountType, profileId: advertiser.id, displayId: advertiser.displayId, created: true };
@@ -104,13 +110,103 @@ export async function getProfile(userId: string) {
  * person could take an address that is another account's contact row, which
  * no database constraint spans, or the same address in another case.
  */
-export async function updateProfile(userId: string, data: UpdateProfileInput) {
-  if (data.email === undefined) return repository.updateProfile(userId, data);
-  const email = data.email.trim().toLowerCase();
+export async function updateProfile(userId: string, input: UpdateProfileInput) {
+  // The row as it stands is needed to compose a name, to move an email, and
+  // (QR-22) to tell a party row still named after the number from one named
+  // on purpose. A patch that carries none of those reads nothing first.
+  const touchesIdentity = input.firstName !== undefined || input.lastName !== undefined || input.email !== undefined;
+  const current = touchesIdentity ? await repository.findById(userId) : null;
+  if (touchesIdentity && !current) throw new ApiError(404, 'NOT_FOUND', 'User not found');
+  // QR-4: the two names compose the display name unless one was given
+  // outright; a person who gives only a first name is called by it.
+  let data: UpdateProfileInput & { name?: string } = input;
+  // QR-5: the date of birth travels as YYYY-MM-DD and is stored as a date.
+  if (input.dateOfBirth !== undefined) data = { ...data, dateOfBirth: dateOfBirthToDate(input.dateOfBirth) as never };
+  if ((input.firstName !== undefined || input.lastName !== undefined) && input.name === undefined && current) {
+    const first = input.firstName ?? current.firstName ?? '';
+    const last = input.lastName ?? current.lastName ?? '';
+    const composed = `${first} ${last}`.trim();
+    // QR-22: composed onto `data`, not `input` — a patch that carries the
+    // names and the date of birth together keeps the date converted.
+    if (composed) data = { ...data, name: composed };
+  }
+  if (data.email !== undefined && current) {
+    const email = data.email.trim().toLowerCase();
+    if (email !== current.email) await assertIdentityFree('EMAIL', email, { ownPrimaryOf: userId });
+    data = { ...data, email };
+  }
+  const updated = await repository.updateProfile(userId, data);
+  if (current) {
+    await mirrorBasicsToParties(updated, { name: current.name ?? null, mobile: current.mobile }, {
+      ...(data.name ? { name: data.name } : {}),
+      ...(data.email ? { email: data.email } : {}),
+    });
+  }
+  return updated;
+}
+
+type PartyRow = { id: string; name?: string | null; email?: string | null } | null | undefined;
+
+/**
+ * QR-22 (the owner, 17 Sep 2026): the basics are asked after the side is
+ * chosen, so the party row `chooseParty` opened still carries the number
+ * (or the old display name) as its name. The person's name and email land
+ * on that row the moment they are given — unless the row already has its
+ * own (a business name the desk typed, a contact address), which is not
+ * this screen's to overwrite. A mirror that fails does not undo the
+ * person's own row: the party row can be corrected from its profile.
+ */
+async function mirrorBasicsToParties(
+  user: { id: string; publisherProfile?: unknown; advertiserProfile?: unknown },
+  before: { name: string | null; mobile: string },
+  given: { name?: string; email?: string },
+) {
+  if (!given.name && !given.email) return;
+  const placeholder = (held: string | null | undefined) => !held || !held.trim() || held === before.mobile || (before.name !== null && held === before.name);
+  const patchFor = (row: NonNullable<PartyRow>) => ({
+    ...(given.name && placeholder(row.name) ? { name: given.name } : {}),
+    ...(given.email && !row.email ? { email: given.email } : {}),
+  });
+  try {
+    const publisher = user.publisherProfile as PartyRow;
+    if (publisher) {
+      const patch = patchFor(publisher);
+      if (Object.keys(patch).length > 0) await updateMyPublisherProfile(user.id, patch);
+    }
+    const advertiser = user.advertiserProfile as PartyRow;
+    if (advertiser) {
+      const patch = patchFor(advertiser);
+      if (Object.keys(patch).length > 0) await updateAdvertiserProfile(advertiser.id, patch);
+    }
+  } catch (cause) {
+    logger.warn('Basics mirror onto the party row failed', { userId: user.id, err: cause instanceof Error ? cause.message : String(cause) });
+  }
+}
+
+/**
+ * QR-6 (the owner, 17 Sep 2026): the terms of use and the privacy policy,
+ * agreed before any detail is asked. The app shows the two documents right
+ * after the OTP and posts the click here; the versions live at that moment
+ * are read server-side and stamped with it, so nothing a client sends can
+ * misstate what was agreed. Idempotent: a second click re-stamps with the
+ * versions live now, which is also how a re-consent to a new version lands.
+ * A document ADX has not published yet (the legal module seeds a marked
+ * placeholder, so this is rare) is recorded as version null rather than
+ * refused — the consent is the person's; the text is ADX's to catch up on.
+ */
+export async function recordConsent(userId: string, now = new Date()) {
   const current = await repository.findById(userId);
   if (!current) throw new ApiError(404, 'NOT_FOUND', 'User not found');
-  if (email !== current.email) await assertIdentityFree('EMAIL', email, { ownPrimaryOf: userId });
-  return repository.updateProfile(userId, { ...data, email });
+  const version = async (kind: 'TERMS_OF_SERVICE' | 'PRIVACY_POLICY'): Promise<number | null> => {
+    try {
+      return (await currentLegalDocument(kind)).version;
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.statusCode === 404) return null;
+      throw cause;
+    }
+  };
+  const [consentTermsVersion, consentPrivacyVersion] = await Promise.all([version('TERMS_OF_SERVICE'), version('PRIVACY_POLICY')]);
+  return repository.recordConsent(userId, { consentAcceptedAt: now, consentTermsVersion, consentPrivacyVersion });
 }
 
 /**

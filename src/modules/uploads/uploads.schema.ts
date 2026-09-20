@@ -15,6 +15,8 @@ export const purposeSchema = z.enum([
   'LISTING_PHOTO',
   'VERIFICATION',
   'AVATAR',
+  /// QR-9: a brand file the console uploads — the wordmark, the mark, the icon. Public.
+  'BRANDING',
   /// Campaign artwork: a print-ready image, or a video for a digital screen.
   'CAMPAIGN_CREATIVE',
   /// Lot B (Q41): the proof behind a wallet top-up — a transfer receipt, a cheque scan.
@@ -85,6 +87,7 @@ export const PURPOSE_FOLDER: Record<string, string> = {
   LISTING_PHOTO: 'listings',
   VERIFICATION: 'verification',
   AVATAR: 'avatars',
+  BRANDING: 'brand',
   CAMPAIGN_CREATIVE: 'creatives',
   TOPUP_PROOF: 'top-up-proofs',
   PAYOUT_EXPORT: 'payout-exports',

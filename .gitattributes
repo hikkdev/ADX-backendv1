@@ -1,0 +1,19 @@
+# Normalise line endings so Windows checkouts stop showing every file as
+# modified. Git stores LF; working copies get LF on checkout everywhere.
+* text=auto eol=lf
+
+# Binary assets: never touch these.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+
+# Generated: keep out of diffs and language stats.
+package-lock.json -diff linguist-generated

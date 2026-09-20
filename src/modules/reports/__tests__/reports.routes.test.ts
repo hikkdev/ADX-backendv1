@@ -32,6 +32,7 @@ const { repository, data, uploads, notifications, users, audit } = vi.hoisted(()
     enabledScheduleRecipients: vi.fn(),
   } satisfies Record<keyof ReportsRepository, ReturnType<typeof vi.fn>>,
   data: {
+    onboardingBoard: vi.fn(),
     bookings: vi.fn(),
     publisherEarnings: vi.fn(),
     publisherPayouts: vi.fn(),
@@ -157,9 +158,9 @@ describe('access', () => {
 });
 
 describe('GET /reports/catalogue', () => {
-  it('answers the twelve kinds with filters and columns', async () => {
+  it('answers the thirteen kinds with filters and columns', async () => {
     const res = await request(app()).get('/api/v1/reports/catalogue').set('Authorization', `Bearer ${admin}`).expect(200);
-    expect(res.body.data).toHaveLength(12);
+    expect(res.body.data).toHaveLength(13);
     expect(res.body.data[0]).toMatchObject({ kind: 'bookings-gmv', filters: expect.arrayContaining([{ key: 'kind', label: 'Kind', type: 'enum', values: ['CAMPAIGN', 'PACKAGE'] }]) });
     expect(res.body.data[0].query).toBeUndefined();
     // G11-2: the filter fields' labels keyed by field, so a row's `kind=CAMPAIGN` can print as `Kind: CAMPAIGN`.

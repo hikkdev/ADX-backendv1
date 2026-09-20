@@ -149,8 +149,29 @@ export function toIntegrationsResponse(cfg: IntegrationsConfig, extras: Integrat
       // Not secrets — shown as-is (no masking), unlike the sections above.
       branding: {
         platformName: cfg.branding?.platformName ?? null,
+        tagline: cfg.branding?.tagline ?? null,
         headerLogoUrl: cfg.branding?.headerLogoUrl ?? null,
         authLogoUrl: cfg.branding?.authLogoUrl ?? null,
+        // QR-9: the DR 11 fields, as stored (null = the default).
+        primaryColor: cfg.branding?.primaryColor ?? null,
+        deepColor: cfg.branding?.deepColor ?? null,
+        inkColor: cfg.branding?.inkColor ?? null,
+        groundColor: cfg.branding?.groundColor ?? null,
+        wordmarkUrl: cfg.branding?.wordmarkUrl ?? null,
+        wordmarkInverseUrl: cfg.branding?.wordmarkInverseUrl ?? null,
+        markUrl: cfg.branding?.markUrl ?? null,
+        markInverseUrl: cfg.branding?.markInverseUrl ?? null,
+        iconUrl: cfg.branding?.iconUrl ?? null,
+        // QR-11: the website kit.
+        taglines: cfg.branding?.taglines ?? null,
+        heroImageUrl: cfg.branding?.heroImageUrl ?? null,
+        ogImageUrl: cfg.branding?.ogImageUrl ?? null,
+        faviconUrl: cfg.branding?.faviconUrl ?? null,
+        // QR-12: per-surface basics.
+        appIconUrl: cfg.branding?.appIconUrl ?? null,
+        consoleTitle: cfg.branding?.consoleTitle ?? null,
+        siteTitle: cfg.branding?.siteTitle ?? null,
+        siteDescription: cfg.branding?.siteDescription ?? null,
       },
       ai: {
         provider: cfg.ai?.provider ?? env.AI_PROVIDER ?? 'anthropic',

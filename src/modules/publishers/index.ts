@@ -22,7 +22,7 @@ export { PUBLISHER_TYPES } from './publishers.schema';
  * side of an account through this, so there is one place a publisher comes
  * into being from the app and one place its identifier is minted.
  */
-export { registerProfile as registerPublisher } from './onboarding/publisher-onboarding.service';
+export { registerProfile as registerPublisher, updateMyProfile as updateMyPublisherProfile } from './onboarding/publisher-onboarding.service';
 export { digioWebhookHandler } from './kyc/digio.controller';
 
 /**

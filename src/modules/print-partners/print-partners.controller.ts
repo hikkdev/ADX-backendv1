@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { auditDiff, logActivity } from '../../shared/audit';
 import { ApiError } from '../../shared/errors';
+import { isVerifiedParty } from '../../shared/kyc-state';
 import { money } from '../../shared/money';
 import { addMethodSchema, shapeMethod, shapeWithdrawal, type AddMethodInput } from '../payouts';
 import * as schema from './print-partners.schema';
@@ -97,6 +98,8 @@ export const shapePartner = (row: PartnerRow & { lastLoginAt?: Date | null; kyc?
   displayId: row.displayId,
   userId: row.userId,
   name: row.name,
+  // QR-3: the verified mark every external party earns the same way.
+  verified: isVerifiedParty(row.kycStatus),
   legalName: row.legalName,
   gstin: row.gstin,
   panNumber: row.panNumber,
