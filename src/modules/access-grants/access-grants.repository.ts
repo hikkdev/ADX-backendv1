@@ -34,6 +34,14 @@ export interface AccessGrantsRepository {
   }): Promise<DelegatedAccessGrant>;
   /** Closes every live ONBOARDING authority on an account. */
   expireOnboarding(subject: GrantSubject, now: Date): Promise<number>;
+  /** QR-27: a live grant opened by an approved scan — no ticket, the scanning agent, the ask's scope and span. */
+  createRequested(input: {
+    subject: GrantSubject;
+    assignedAgentId: string;
+    scope: AccessGrantScope;
+    reason: string;
+    durationMinutes: number;
+  }): Promise<DelegatedAccessGrant>;
   /** Whether any agent holds a live ONBOARDING authority on an account. */
   findLiveOnboarding(subject: GrantSubject, now: Date): Promise<DelegatedAccessGrant | null>;
   attachQr(grantId: string, qrId: string): Promise<void>;

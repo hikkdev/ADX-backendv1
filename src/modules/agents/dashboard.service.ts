@@ -1,3 +1,6 @@
+import type { AgentGrade, AgentStage } from '../../shared/database';
+import { GRADE_META, agentMayWork } from './application/application.rules';
+import { engagementSide, engagementSigning } from './engagement-signing';
 import type { SuspensionScope } from '../../shared/database';
 import { ApiError } from '../../shared/errors';
 import { dayWindowIST } from '../../shared/time';
@@ -64,6 +67,12 @@ export type AgentDashboard = {
     reason: string | null;
     since: Date | null;
   };
+  /** AG-1: the application ladder — the app shows the application, not the dashboard, until `mayWork`. DS-1: nor until the engagement terms are signed, when the policy asks. */
+  application: { stage: AgentStage; mayWork: boolean; activatedAt: Date | null };
+  /** DS-1: the engagement terms e-signed — the app shows the signing door instead of the dashboard while `required` and not `satisfied`. */
+  signing: { required: boolean; satisfied: boolean; status: string | null; requestId: string | null; signingUrl: string | null; mock: boolean; expiresAt: Date | null; label: string | null };
+  /** AG-1: the desk-set grade beside the earned tier; null until activation. */
+  grade: { code: AgentGrade; label: string } | null;
   leads: LeadCluster[];
   /**
    * DR 05's hero line — "Milestone / Onboard 10 Publishers" — is the first
@@ -99,12 +108,14 @@ export async function getAgentDashboard(
   if (!profile) throw new ApiError(404, 'NOT_FOUND', 'Agent profile not found');
 
   const { start, end } = dayWindowIST(now);
-  const [onboarded, wallet, today, sales] = await Promise.all([
+  const [onboarded, wallet, today, sales, signing] = await Promise.all([
     repository.countOnboarded(profile.id),
     repository.walletBalance(profile.id),
     repository.countToday(profile.id, start, end),
     // Two more counts, and neither may take the header down with it.
     repository.countSales(profile.id).catch(() => ({ packagesSold: 0, campaignsLaunched: 0 })),
+    // DS-1: nor may the signing rail.
+    engagementSigning(profile.id, engagementSide(profile.roles)).catch(() => null),
   ]);
 
   // The map layer. Failing to draw bubbles must never fail the dashboard —
@@ -154,5 +165,18 @@ export async function getAgentDashboard(
       reason: profile.suspensionReason,
       since: profile.suspendedAt,
     },
+    // AG-1: the application ladder and the grade — the app shows the application until ACTIVE.
+    application: { stage: profile.stage, mayWork: agentMayWork(profile.stage) && (signing?.satisfied ?? true), activatedAt: profile.activatedAt },
+    signing: {
+      required: signing?.required ?? false,
+      satisfied: signing?.satisfied ?? true,
+      status: signing?.status ?? null,
+      requestId: signing?.request?.id ?? null,
+      signingUrl: signing?.request && ['REQUESTED', 'PARTIALLY_SIGNED'].includes(signing.request.status) ? signing.request.signingUrl : null,
+      mock: signing?.request?.mock ?? false,
+      expiresAt: signing?.request?.expiresAt ?? null,
+      label: signing?.request?.label ?? null,
+    },
+    grade: profile.grade ? { code: profile.grade, label: GRADE_META[profile.grade].label } : null,
   };
 }

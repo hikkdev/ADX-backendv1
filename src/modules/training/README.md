@@ -29,6 +29,19 @@ read it, guarded by a session and no role, and neither had to change.
 | `GET /training/certifications` | ADMIN | Everyone certified, with revocations. |
 | `POST /training/certifications/:id/revoke` | ADMIN | `{ reason }`; logged. T-B: answers the list's row — `agentDisplayId`, `agentName` beside the revoked certificate (the same include on the write). |
 
+## AG-4 (20 Sep 2026): a curriculum per side, and the assessment
+
+`TrainingModule.audience` (ALL, PUBLISHER_AGENT, ADVERTISER_AGENT) and
+`kind` (LESSON, ASSESSMENT), with `timeLimitMins` for an assessment's
+clock. An agent's curriculum is the active modules for the sides they hold
+(`repository.agentSides`); the certificate counts the lessons alone, and
+only a lesson pass mints it. An assessment is the sales applicant's
+screening test — scored on the same quiz door, the best attempt kept, never
+certified; `getAssessmentStanding(agentId)` (on the agents port) says
+whether one is published for the side and whether it is passed. The quiz
+view carries `kind` and `timeLimitMins`; the app counts down and submits
+what is answered at zero.
+
 ## Invariants
 
 - **Decision 12 — the curriculum is the exam.** There is no separate exam:

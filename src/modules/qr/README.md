@@ -52,6 +52,32 @@ The route-inventory test asserts this.
 - `confirmPickupHandover` (Lot H) — the print partner's handover scan, above.
 - `registerPublisherOnboardingPort` and its types.
 
+## The identity code (QR-27)
+
+The owner, 21 Sep 2026: "a QR is for a multitude of access, not just agent
+access". The `PUBLISHER` and `ADVERTISER` types are now the account's own
+durable code — one per account, no expiry, never burnt by a decision,
+minted by `getOrCreateIdentityQr` (which retires the old ninety-second
+codes) and refreshed with the owner's fix each time the app shows it. The
+image encodes `${PUBLIC_WEB_URL}/q/<token>` when the site is configured so
+a plain camera can read it; `resolveQr` accepts the link or the bare token
+(`tokenOf`).
+
+What a scan means is decided by who scans and by the owner:
+
+| Scanner | Account state | Action | Then |
+| --- | --- | --- | --- |
+| the side's agent | onboarding open | `ONBOARD_PUBLISHER` / `ONBOARD_ADVERTISER` | the claim waits for the owner's approval, as before |
+| the side's agent | onboarded | `REQUEST_ACCESS` | with no `ask` the answer says `needsAsk` and logs nothing; with an `ask` (`scope`, `reason`, `durationMinutes`, kept on `QrScan.ask`) the scan waits for the owner; approval calls the access-grant port's `openRequested` — a SUPPORT grant on the scanning agent, no ticket, capped at a day |
+| anyone else signed in | any | `VIEW_PUBLISHER` / `VIEW_ADVERTISER` | the `identity` summary — no mobile leaves the resolver into a public answer |
+| nobody (a camera) | any | — | `GET /qr/public/:token`, no session: type, display id, name, city, verified, and the `adx://q/<token>` app link |
+
+The party modules answer `describe(refId)` (the `IdentitySummary`, with
+`onboarded`) and `workingAgentId(userId)` on their onboarding ports; a
+publisher is onboarded by `onboardingStatus`, an advertiser by the basics
+being in. `decideOnboardingScan` handles both kinds of pending scan; the
+owner's status read says which (`pending.kind`, `pending.ask`).
+
 ## The pickup code (A9)
 
 `orders` mints an `ORDER` code with `metadata.purpose = PICKUP` when the prints

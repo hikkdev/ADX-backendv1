@@ -1,5 +1,5 @@
 import { registerPublisherOnboardingPort } from '../qr';
-import { commitClaim, prepareClaim } from './onboarding/publisher-onboarding.service';
+import { commitClaim, prepareClaim, describeForQr, workingAgentIdForQr } from './onboarding/publisher-onboarding.service';
 
 /**
  * Publishers — the people and organisations who own advertising inventory,
@@ -48,7 +48,7 @@ export { onUnmatchedDigioWebhook } from './kyc/digio.service';
  * since `publishers` imports `qr` to mint onboarding codes.
  */
 export function registerPublisherModule(): void {
-  registerPublisherOnboardingPort({ prepareClaim, commitClaim });
+  registerPublisherOnboardingPort({ prepareClaim, commitClaim, describe: describeForQr, workingAgentId: workingAgentIdForQr });
 }
 
 /**

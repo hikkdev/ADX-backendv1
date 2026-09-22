@@ -79,7 +79,7 @@ describe('relatedType and payload', () => {
   });
 
   it('names the eleven records a push can open', () => {
-    expect([...RELATED_TYPES]).toEqual(['ORDER', 'PUBLISHER', 'ADVERTISER', 'CAMPAIGN', 'STATEMENT', 'WITHDRAWAL', 'TICKET', 'DISPUTE', 'ANNOUNCEMENT', 'LISTING', 'WORK']);
+    expect([...RELATED_TYPES]).toEqual(['ORDER', 'PUBLISHER', 'ADVERTISER', 'CAMPAIGN', 'STATEMENT', 'WITHDRAWAL', 'TICKET', 'DISPUTE', 'ANNOUNCEMENT', 'LISTING', 'WORK', 'LEAD']);
   });
 });
 

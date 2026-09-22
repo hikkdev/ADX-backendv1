@@ -3,9 +3,9 @@ import { actorLabelFor } from '../access-control';
 import { doorProvenance } from '../../shared/onboarding';
 import { ApiError } from '../../shared/errors';
 import { logActivity } from '../../shared/audit';
-import { agentExists, requireAgentProfile } from '../agents';
+import { agentExists, requireAgentProfile, requireWorkingAgent } from '../agents';
 import { getListingsForPublisher } from '../listings';
-import type { KycStatus, PublisherType } from '../../shared/database';
+import type { KycStatus, PartySizeBand, PublisherType } from '../../shared/database';
 import { translateListings } from '../ai';
 import { assignCaseSchema, bulkAssignSchema, documentDecisionSchema, kycEscalateSchema, kycRequestSchema, reuploadRequestSchema } from '../kyc';
 import { assignKycCase, assignKycCases, escalateKycCase, recordKycAtDesk, requestKycFromDesk, requestKycReupload, reviewKycDocument } from './kyc/kyc-desk.service';
@@ -18,6 +18,7 @@ import {
   kycQueueQuerySchema,
   publisherBareQuerySchema,
   publisherRosterQuerySchema,
+  partyBandSchema,
 } from './publishers.schema';
 import {
   createPublisher,
@@ -33,6 +34,7 @@ import {
   listKycQueue,
   getKycCase,
   restartDigioKyc,
+  setPublisherBand,
 } from './publishers.service';
 
 /**
@@ -59,7 +61,8 @@ export async function createPublisherHandler(req: Request, res: Response): Promi
     }
     agentId = attributeToAgentId ?? null;
   } else {
-    agentId = (await requireAgentProfile(req.user!.sub)).id;
+    // AG-1: an agent onboards a publisher only once activated.
+    agentId = (await requireWorkingAgent(req.user!.sub)).id;
   }
 
   // QR-14: the door and the person — an admin at the desk, or an agent at the door.
@@ -248,4 +251,12 @@ export async function recordKycAtDeskHandler(req: Request, res: Response): Promi
 // POST /publishers/kyc-queue/:publisherId/digio/restart — the desk asks Digio again.
 export async function restartDigioKycHandler(req: Request, res: Response): Promise<void> {
   res.json({ success: true, data: await restartDigioKyc(req.params['publisherId'] as string, req.user!.sub, req) });
+}
+
+/** AG-5: the desk sets the publisher's band. */
+export async function setPublisherBandHandler(req: Request, res: Response): Promise<void> {
+  const parsed = partyBandSchema.safeParse(req.body);
+  if (!parsed.success) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid request', parsed.error.flatten());
+  const publisher = await setPublisherBand(req.params['publisherId'] as string, req.user!.sub, parsed.data.sizeBand as PartySizeBand, req);
+  res.json({ success: true, data: publisher });
 }

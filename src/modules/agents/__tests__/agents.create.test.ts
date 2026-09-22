@@ -76,6 +76,7 @@ describe('creating an agent', () => {
       name: 'Rahul Kumar',
       role: 'AGENT_PUBLISHER',
       displayId: 'AGT-1009-2601',
+      stage: 'ACTIVE',
     });
     expect(agent).toMatchObject({ id: 'agt_new', displayId: 'AGT-1009-2601' });
   });

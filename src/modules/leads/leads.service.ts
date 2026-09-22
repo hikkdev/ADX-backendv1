@@ -1,15 +1,23 @@
 import { ApiError } from '../../shared/errors';
 import { money } from '../../shared/money';
 import { toListPage } from '../../shared/pagination';
-import { assertAgentAcceptsWork } from '../agents';
+import { agentMeetsGrade, assertAgentAcceptsWork, findAgentProfile, getRoutingSettings } from '../agents';
+import { gradeRank, requiredGradeForLead, type AgentGradeCode } from '../../shared/dispatch';
+import { logger } from '../../shared/logging';
 import { allocateIdentifier } from '../identifiers';
 import { rateFor } from '../payouts';
 import { cityKeyFor, citySupport, withCityKey } from '../pricing';
 import { createVisit } from '../visits';
 import { prismaLeadsRepository as repository } from './prisma-leads.repository';
+import { prismaOutreachRepository as outreach } from './prisma-outreach.repository';
+import { inviteView } from './invites.rules';
 import { distanceM } from './prisma-leads.repository';
 import type { AccountByPhone, LeadCluster, LeadClusterScope, NewLead } from './leads.repository';
 import { foldNameCity, normalisePhone } from './leads.phone';
+import { recomputeLead, reasonsOf, touchLead } from './scoring.service';
+import type { ScoreReason } from './scoring.rules';
+import { advanceStage, moveStage, payConversion } from './stages.service';
+import { nextStepOf, type Attribution, type LeadStageValue } from './stages.rules';
 import {
   isOpenLead,
   leadPillOf,
@@ -18,6 +26,7 @@ import {
   type ImportLeadRow,
   type ImportRowReport,
   type LeadStatusValue,
+  type LeadTemperatureValue,
   type NearLeadsQuery,
 } from './leads.schema';
 
@@ -54,9 +63,44 @@ export type LeadCard = {
   bestTimeTo: string | null;
   firstContactedAt: string | null;
   assignedAgentId: string | null;
+  /** AG-5: the band, and the grade it is routed to. */
+  importance: string;
+  requiredGrade: AgentGradeCode;
+  /** LH1: the score and the temperature it lands in; null until the first computation. */
+  score: number | null;
+  temperature: LeadTemperatureValue | null;
+  /** LH1: what the business is worth to ADX (not the agent's fee); a decimal string or null. */
+  estimatedValue: string | null;
+  /** LH1: the breakdown behind the score — "why it is hot". */
+  scoreReasons: ScoreReason[];
+  /** LH1: the agent's flag, while it lives. */
+  agentFlaggedHotAt: string | null;
+  lastTouchedAt: string | null;
+  /** LH2: where the deal is (D12), and what moves it forward. */
+  stage: LeadStageValue;
+  stageChangedAt: string | null;
+  nextStep: { label: string; action: string };
+  lostReason: string | null;
+  lostNote: string | null;
+  activatedAt: string | null;
+  retainedAt: string | null;
+  recycleAt: string | null;
+  /** LH11: when it last came back to the cold pool, and how many times — the board's "recycled" flag. */
+  recycledAt: string | null;
+  recycleCount: number;
+  /** LH2 (D14): which channel produced the first contact, the engagement, the conversion. */
+  attribution: Attribution;
+  /** LH4: spotted in the street — by whom, when, and the photo file ids (opened through `/files/:id`). */
+  capturedByAgentId: string | null;
+  capturedAt: string | null;
+  photoFileIds: string[];
+  /** LH5 (D3): the claim on it, while the hold runs. */
+  claimedByAgentId: string | null;
+  claimExpiresAt: string | null;
+  territoryId: string | null;
 };
 
-type LeadRow = {
+export type LeadRow = {
   id: string;
   displayId: string | null;
   side: string;
@@ -76,13 +120,39 @@ type LeadRow = {
   bestTimeTo: string | null;
   firstContactedAt: Date | null;
   assignedAgentId: string | null;
+  importance?: string | null;
+  score?: number | null;
+  temperature?: string | null;
+  estimatedValue?: unknown;
+  scoreReasons?: unknown;
+  agentFlaggedHotAt?: Date | null;
+  lastTouchedAt?: Date | null;
+  stage?: string;
+  stageChangedAt?: Date | null;
+  lostReason?: string | null;
+  lostNote?: string | null;
+  activatedAt?: Date | null;
+  retainedAt?: Date | null;
+  recycleAt?: Date | null;
+  recycledAt?: Date | null;
+  recycleCount?: number;
+  attribution?: unknown;
+  capturedByAgentId?: string | null;
+  capturedAt?: Date | null;
+  photoFileIds?: string[];
+  claimedByAgentId?: string | null;
+  claimExpiresAt?: Date | null;
+  territoryId?: string | null;
 };
 
 export function toLeadCard(
   lead: LeadRow,
   near: { latitude: number; longitude: number } | null,
+  requiredGradeOf: (importance: string) => AgentGradeCode = (importance) => requiredGradeForLead(importance),
 ): LeadCard {
+  const importance = lead.importance ?? 'STANDARD';
   const status = lead.status as LeadStatusValue;
+  const temperature = (lead.temperature as LeadTemperatureValue | null | undefined) ?? null;
   return {
     id: lead.id,
     displayId: lead.displayId,
@@ -92,8 +162,8 @@ export function toLeadCard(
     locality: lead.locality,
     city: lead.city,
     status,
-    pill: leadPillOf(status),
-    estimatedCommission: lead.estimatedCommission === null ? null : money(lead.estimatedCommission as never),
+    pill: leadPillOf(status, temperature),
+    estimatedCommission: lead.estimatedCommission === null || lead.estimatedCommission === undefined ? null : money(lead.estimatedCommission as never),
     distanceM: near ? distanceM(near, lead) : null,
     visitBooked: status === 'VISIT_BOOKED',
     latitude: lead.latitude,
@@ -106,7 +176,124 @@ export function toLeadCard(
     bestTimeTo: lead.bestTimeTo,
     firstContactedAt: lead.firstContactedAt?.toISOString() ?? null,
     assignedAgentId: lead.assignedAgentId,
+    importance,
+    requiredGrade: requiredGradeOf(importance),
+    score: lead.score ?? null,
+    temperature,
+    estimatedValue: lead.estimatedValue === null || lead.estimatedValue === undefined ? null : money(lead.estimatedValue as never),
+    scoreReasons: reasonsOf(lead.scoreReasons),
+    agentFlaggedHotAt: lead.agentFlaggedHotAt?.toISOString() ?? null,
+    lastTouchedAt: lead.lastTouchedAt?.toISOString() ?? null,
+    stage: (lead.stage as LeadStageValue | undefined) ?? 'SOURCED',
+    stageChangedAt: lead.stageChangedAt?.toISOString() ?? null,
+    nextStep: nextStepOf({ stage: (lead.stage as LeadStageValue | undefined) ?? 'SOURCED', side: lead.side, lostReason: lead.lostReason ?? null, recycleAt: lead.recycleAt ?? null }),
+    lostReason: lead.lostReason ?? null,
+    lostNote: lead.lostNote ?? null,
+    activatedAt: lead.activatedAt?.toISOString() ?? null,
+    retainedAt: lead.retainedAt?.toISOString() ?? null,
+    recycleAt: lead.recycleAt?.toISOString() ?? null,
+    recycledAt: lead.recycledAt?.toISOString() ?? null,
+    recycleCount: lead.recycleCount ?? 0,
+    attribution: (lead.attribution && typeof lead.attribution === 'object' ? (lead.attribution as Attribution) : {}),
+    capturedByAgentId: lead.capturedByAgentId ?? null,
+    capturedAt: lead.capturedAt?.toISOString() ?? null,
+    photoFileIds: lead.photoFileIds ?? [],
+    claimedByAgentId: lead.claimedByAgentId ?? null,
+    claimExpiresAt: lead.claimExpiresAt?.toISOString() ?? null,
+    territoryId: lead.territoryId ?? null,
   };
+}
+
+/* ── LH1: sources ───────────────────────────────────────────────────────── */
+
+/** The source key a label folds to — lower-cased, trimmed; the migration folded the legacy labels the same way. */
+export const sourceKeyOf = (label: string): string => label.trim().toLowerCase();
+
+/**
+ * The `LeadSource` row a label names, created on first sight under the
+ * kind the door says (an import batch is IMPORT, the console MANUAL, the
+ * waitlist INBOUND). A door that knows its row passes the key straight.
+ */
+export async function resolveSource(label: string | null | undefined, kind: 'IMPORT' | 'FEED' | 'CAPTURE' | 'QR' | 'INBOUND' | 'REFERRAL' | 'ADS' | 'MANUAL'): Promise<string | null> {
+  const key = label ? sourceKeyOf(label) : kind.toLowerCase();
+  if (!key) return null;
+  const existing = await repository.findSourceByKey(key);
+  if (existing) return existing.id;
+  try {
+    return (await repository.createSource({ key, kind, label: label?.trim() || key })).id;
+  } catch (error) {
+    // Two doors racing on a new label: the unique refuses the second insert and the first row wins.
+    if (isUniqueViolation(error)) return (await repository.findSourceByKey(key))?.id ?? null;
+    throw error;
+  }
+}
+
+export async function listSources() {
+  return (await repository.listSources()).map(sourceView);
+}
+
+export function sourceView(row: { id: string; key: string; kind: string; label: string; quality: unknown; quotaPerDay: number | null; termsAcceptedAt: Date | null; isActive: boolean; config: unknown; createdAt: Date; updatedAt: Date }) {
+  return {
+    id: row.id,
+    key: row.key,
+    kind: row.kind,
+    label: row.label,
+    quality: Number(row.quality),
+    quotaPerDay: row.quotaPerDay,
+    termsAcceptedAt: row.termsAcceptedAt?.toISOString() ?? null,
+    isActive: row.isActive,
+    config: row.config ?? null,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+export async function patchSource(id: string, patch: { label?: string | undefined; quality?: number | undefined; isActive?: boolean | undefined; quotaPerDay?: number | null | undefined; termsAccepted?: boolean | undefined }) {
+  const sources = await repository.listSources();
+  const source = sources.find((row) => row.id === id);
+  if (!source) throw new ApiError(404, 'NOT_FOUND', 'No such source');
+  const { termsAccepted, ...rest } = patch;
+  const updated = await repository.updateSource(id, {
+    ...(rest.label !== undefined ? { label: rest.label } : {}),
+    ...(rest.quality !== undefined ? { quality: rest.quality } : {}),
+    ...(rest.isActive !== undefined ? { isActive: rest.isActive } : {}),
+    ...(rest.quotaPerDay !== undefined ? { quotaPerDay: rest.quotaPerDay } : {}),
+    ...(termsAccepted !== undefined ? { termsAcceptedAt: termsAccepted ? new Date() : null } : {}),
+  });
+  return sourceView(updated);
+}
+
+/**
+ * LH1: the agent's "this one is hot" — the flag the score reads for 14
+ * days (renewed by flagging again), and the only thing the old HOT status
+ * meant. Off clears it. Either way the score is recomputed at once so the
+ * pill answers the tap.
+ */
+export async function flagHot(leadId: string, actorUserId: string, hot: boolean) {
+  const lead = await repository.findById(leadId);
+  if (!lead) throw new ApiError(404, 'NOT_FOUND', 'No such lead');
+  if (!isOpenLead(lead.status as LeadStatusValue)) throw new ApiError(409, 'CONFLICT', 'That lead is closed');
+  await repository.update(leadId, { agentFlaggedHotAt: hot ? new Date() : null });
+  await repository.logActivity({ leadId, actorUserId, kind: 'NOTE', note: hot ? 'Flagged hot by the agent' : 'Hot flag cleared' });
+  await touchLead(leadId);
+  return getLead(leadId);
+}
+
+/* ── AG-5: routing by grade ─────────────────────────────────────────────── */
+
+/** The importance bands an agent of this grade may take — every band whose required grade is at or below theirs. */
+export function importancesForGrade(grade: string | null | undefined, settings: Parameters<typeof requiredGradeForLead>[1]): string[] {
+  const rank = gradeRank(grade);
+  return (['STANDARD', 'KEY', 'ENTERPRISE'] as const).filter((band) => gradeRank(requiredGradeForLead(band, settings)) <= rank);
+}
+
+/** The desk assigning a lead over its band — allowed, and said so. */
+async function noteGradeOverride(leadId: string, agentId: string, importance: string | null | undefined): Promise<void> {
+  const settings = await getRoutingSettings();
+  const required = requiredGradeForLead(importance ?? 'STANDARD', settings);
+  if (!(await agentMeetsGrade(agentId, required))) {
+    logger.info('Lead assigned below the grade its band asks for (desk override)', { leadId, agentId, importance: importance ?? 'STANDARD', required });
+  }
 }
 
 /**
@@ -157,7 +344,10 @@ async function assertPhoneFree(phoneNormalised: string | null): Promise<void> {
 export async function createLead(input: CreateLeadInput, createdByUserId: string | null) {
   // Lot A BLOCK_NEW: a lead handed to an agent is work, so a suspended agent
   // is refused here rather than quietly holding a lead nobody will call.
-  if (input.assignedAgentId) await assertAgentAcceptsWork(input.assignedAgentId);
+  if (input.assignedAgentId) {
+    await assertAgentAcceptsWork(input.assignedAgentId);
+    await noteGradeOverride('(new)', input.assignedAgentId, input.importance);
+  }
   const phoneNormalised = normalisePhone(input.phone);
   if (input.phone && !phoneNormalised) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'That does not look like a phone number', { phone: input.phone });
@@ -173,6 +363,9 @@ export async function createLead(input: CreateLeadInput, createdByUserId: string
       phoneNormalised,
       estimatedCommission: estimate,
       createdByUserId,
+      // LH1: the source door (the label's row, MANUAL for the desk's bare create) and the recency clock.
+      sourceId: await resolveSource(input.source, 'MANUAL'),
+      lastTouchedAt: new Date(),
     }),
   );
   await repository.logActivity({
@@ -181,6 +374,10 @@ export async function createLead(input: CreateLeadInput, createdByUserId: string
     kind: 'IMPORTED',
     note: input.source ? `Added from ${input.source}` : 'Added',
   });
+  // LH1: scored before the answer, so the card carries its temperature from birth.
+  await recomputeLead(lead.id).catch((err) => logger.warn('New lead not scored', { leadId: lead.id, err }));
+  // LH2: a lead born on an agent's list is theirs — CLAIMED.
+  if (input.assignedAgentId) await advanceStage(lead.id, 'CLAIMED', { actorUserId: createdByUserId, note: 'assigned at creation' });
   // T-B: the create answers what GET /leads/:leadId answers — the card
   // (`pill`, `distanceM`, `visitBooked`) with the address, email and the
   // activity just written — the way the patch already does.
@@ -235,6 +432,8 @@ export async function registerWaitlistLead(input: WaitlistLeadInput, userId: str
         phoneNormalised,
         estimatedCommission: await quotedEstimate(fields.side),
         createdByUserId: userId,
+        sourceId: await resolveSource(WAITLIST_SOURCE, 'INBOUND'),
+        lastTouchedAt: new Date(),
       }),
     );
   } catch (error) {
@@ -252,6 +451,7 @@ export async function registerWaitlistLead(input: WaitlistLeadInput, userId: str
     kind: 'IMPORTED',
     note: `Added from ${WAITLIST_SOURCE}${note ? `: ${note}` : ''}`,
   });
+  await recomputeLead(lead.id).catch((err) => logger.warn('Waitlist lead not scored', { leadId: lead.id, err }));
   return { lead: await getLead(lead.id), created: true };
 }
 
@@ -271,7 +471,7 @@ export async function importLeads(
   source: string,
   rows: ImportLeadRow[],
   createdByUserId: string | null,
-  options: { dryRun?: boolean } = {},
+  options: { dryRun?: boolean; sourceKind?: 'IMPORT' | 'FEED' | 'ADS' | 'INBOUND'; feedRunId?: string } = {},
 ) {
   const phones = rows.map((row) => normalisePhone(row.phone));
   const known = phones.filter((phone): phone is string => phone !== null);
@@ -350,6 +550,9 @@ export async function importLeads(
     if (entry.row.assignedAgentId) await assertAgentAcceptsWork(entry.row.assignedAgentId);
   }
   const batch: (NewLead & { displayId: string })[] = [];
+  // LH1: one source row per batch label, resolved once.
+  const sourceId = await resolveSource(source, options.sourceKind ?? 'IMPORT');
+  const now = new Date();
   for (const entry of toCreate) {
     // Lot X-B: the key beside each row's typed city — cached a minute per spelling, so one lookup per distinct town.
     batch.push(
@@ -360,6 +563,10 @@ export async function importLeads(
         phoneNormalised: entry.phoneNormalised,
         estimatedCommission: entry.row.estimatedCommission ?? (await quotedEstimate(entry.row.side)),
         createdByUserId,
+        sourceId,
+        lastTouchedAt: now,
+        ...(entry.row.externalKey ? { externalKey: entry.row.externalKey } : {}),
+        ...(options.feedRunId ? { feedRunId: options.feedRunId } : {}),
       }),
     );
   }
@@ -368,6 +575,8 @@ export async function importLeads(
     const entry = report[toCreate[i]!.index]!;
     entry.ref = lead.displayId ?? lead.id;
   });
+  // LH1: every new row scored — a batch of 500 is 500 small reads, well inside a request.
+  for (const lead of created) await recomputeLead(lead.id, now).catch((err) => logger.warn('Imported lead not scored', { leadId: lead.id, err }));
   return { dryRun: false, imported: created.length, skipped, warnings, ids: created.map((lead) => lead.id), report };
 }
 
@@ -385,27 +594,61 @@ export async function closeOpenLeadsInCity(city: { cityId: string | null; spelli
   return repository.closeOpenLeadsInCities(city, actorUserId, CITY_WITHDRAWN_LOSS);
 }
 
-export async function leadsNear(query: NearLeadsQuery) {
+/**
+ * The agent's own list. AG-5: narrowed to the importance bands their grade
+ * may take, when the settings enforce it — a G1 does not see a KEY lead on
+ * the map; an ops read (no viewer) sees every band.
+ */
+export async function leadsNear(query: NearLeadsQuery, viewer?: { userId: string }) {
   const near =
     query.lat !== undefined && query.lng !== undefined
       ? { latitude: query.lat, longitude: query.lng }
       : null;
-  const { items, total, counts } = await repository.findNear(query);
-  return toListPage(items.map((lead) => toLeadCard(lead as LeadRow, near)), total, counts, query);
+  const settings = await getRoutingSettings();
+  let importances: string[] | undefined;
+  if (viewer && settings.enforce) {
+    const agent = await findAgentProfile(viewer.userId);
+    importances = importancesForGrade(agent?.grade ?? null, settings);
+  }
+  const { items, total, counts, temperatureCounts, stageCounts } = await repository.findNear(query, importances);
+  return { ...toListPage(items.map((lead) => toLeadCard(lead as LeadRow, near, (importance) => requiredGradeForLead(importance, settings))), total, counts, query), temperatureCounts, stageCounts };
 }
 
 export async function leadsForAdmin(query: AdminLeadsQuery) {
   // Lot X-B: `?city=` is a slug (or a name, for the console's older links) — matched by key, the spelling as the fallback.
   const keyed = query.city ? { ...query, cityId: (await cityKeyFor(query.city))?.cityId ?? null } : query;
-  const { items, total, counts } = await repository.findForAdmin(keyed);
-  return toListPage(items.map((lead) => toLeadCard(lead as LeadRow, null)), total, counts, query);
+  const { items, total, counts, temperatureCounts, stageCounts } = await repository.findForAdmin(keyed);
+  return { ...toListPage(items.map((lead) => toLeadCard(lead as LeadRow, null)), total, counts, query), temperatureCounts, stageCounts };
 }
 
-export async function getLead(leadId: string) {
+/**
+ * One lead with its thread. LH5: `viewerUserId` names the caller so the
+ * answer can say whose the hold is — `claim.mine` is what the agent app's
+ * Claim / Release door reads, since a phone does not know its own agent id.
+ */
+export async function getLead(leadId: string, viewerUserId?: string) {
   const lead = await repository.findById(leadId);
   if (!lead) throw new ApiError(404, 'NOT_FOUND', 'No such lead');
+  const now = new Date();
+  const held = lead.claimedByAgentId && lead.claimExpiresAt && lead.claimExpiresAt > now ? lead.claimedByAgentId : lead.assignedAgentId;
+  let mine = false;
+  if (held && viewerUserId) {
+    try {
+      const viewer = await findAgentProfile(viewerUserId);
+      mine = viewer?.id === held;
+    } catch {
+      mine = false;
+    }
+  }
+  // LH7: the live invite, for Share and "opened 2 h ago".
+  const invite = await outreach.findActiveInvite(leadId, now).catch(() => null);
+  // LH8: what the hunt paid on this lead — the phone's success modal on ACTIVATED reads the figure here, never off a card.
+  const rewards = lead.status === 'CONVERTED' ? await repository.rewardsFor({ id: lead.id, convertedPublisherId: lead.convertedPublisherId, convertedAdvertiserId: lead.convertedAdvertiserId }).catch(() => []) : [];
   return {
     ...toLeadCard(lead as LeadRow, null),
+    claim: held ? { agentId: held, mine, expiresAt: lead.claimExpiresAt && lead.claimExpiresAt > now ? lead.claimExpiresAt.toISOString() : null } : null,
+    invite: invite ? inviteView(invite, now) : null,
+    rewards: rewards.map((reward) => ({ id: reward.id, event: reward.event, amount: money(reward.amount), status: reward.status, note: reward.note, at: reward.at.toISOString() })),
     address: lead.address,
     email: lead.email,
     activity: lead.activity.map((entry) => ({
@@ -445,6 +688,12 @@ export async function logContact(
   // agent makes and a visit is a fact; neither is undone by a phone call.
   if (lead.status === 'NEW') patch['status'] = 'CONTACTED';
   if (Object.keys(patch).length > 0) await repository.update(leadId, patch);
+  // LH1: a contact is a touch — the recency clock restarts and the score follows.
+  await touchLead(leadId);
+  // LH2: a call or a message is the first touch — CONTACTED, with the channel stamped (D14).
+  if (entry.kind === 'CALLED' || entry.kind === 'MESSAGED') {
+    await advanceStage(leadId, 'CONTACTED', { actorUserId, channel: entry.kind === 'CALLED' ? 'CALL' : 'OTHER' });
+  }
 
   return getLead(leadId);
 }
@@ -488,6 +737,8 @@ export async function bookVisit(leadId: string, actorUserId: string, note?: stri
     kind: 'VISIT_BOOKED',
     note: note ?? `Visit ${visit.displayId ?? visit.id}`,
   });
+  await touchLead(leadId);
+  await advanceStage(leadId, 'VISIT_BOOKED', { actorUserId, note: `visit ${visit.displayId ?? visit.id}` });
   return { ...(await getLead(leadId)), visit };
 }
 
@@ -499,6 +750,8 @@ export async function convertLead(
   leadId: string,
   actorUserId: string,
   target: { publisherId?: string | undefined; advertiserId?: string | undefined },
+  /** LH2 (D14): the channel the conversion came through — the field by default; LINK from the invite page. */
+  channel: string = 'IN_PERSON',
 ) {
   const lead = await repository.findById(leadId);
   if (!lead) throw new ApiError(404, 'NOT_FOUND', 'No such lead');
@@ -536,6 +789,21 @@ export async function convertLead(
     kind: 'STATUS_CHANGED',
     note: 'Converted',
   });
+  await touchLead(leadId);
+  // LH2: the stage, the channel that closed it, and D1's LEAD_CONVERTED to the agent holding it (or the agent converting it).
+  await moveStage(leadId, 'CONVERTED', 'SYSTEM', { actorUserId, channel, note: channel === 'LINK' ? 'through the invite link' : null }).catch((err) => logger.warn('Conversion stage not moved', { leadId, err }));
+  const converted = await repository.findById(leadId);
+  if (converted) {
+    let actorAgentId: string | null = null;
+    if (!lead.assignedAgentId) {
+      try {
+        actorAgentId = (await findAgentProfile(actorUserId))?.id ?? null;
+      } catch {
+        actorAgentId = null;
+      }
+    }
+    await payConversion(converted, actorAgentId);
+  }
   return getLead(leadId);
 }
 
@@ -558,6 +826,7 @@ export async function patchLead(leadId: string, actorUserId: string, patch: Reco
   // agent and back into the open pool.
   if (typeof patch['assignedAgentId'] === 'string') {
     await assertAgentAcceptsWork(patch['assignedAgentId']);
+    await noteGradeOverride(leadId, patch['assignedAgentId'], (patch['importance'] as string | undefined) ?? (lead as { importance?: string }).importance);
   }
   // Converting is its own act, with its own record. A PATCH that could set the
   // status to CONVERTED would leave `convertedAt` null and break the table's
@@ -574,6 +843,21 @@ export async function patchLead(leadId: string, actorUserId: string, patch: Reco
     if (phoneNormalised !== lead.phoneNormalised) await assertPhoneFree(phoneNormalised);
     patch = { ...patch, phoneNormalised };
   }
+  // LH1: the status HOT the desk used to set is the agent's flag now — the
+  // score reads it for 14 days and the pill reads the temperature. The row
+  // keeps its lifecycle status; a console that still sends HOT is honoured.
+  if (patch['status'] === 'HOT') {
+    const { status: _hot, ...rest } = patch;
+    patch = { ...rest, agentFlaggedHotAt: new Date() };
+  }
+  // LH2: a loss goes through the stage door so it carries a reason (OTHER,
+  // "closed at the desk", for a console still sending the status).
+  if (patch['status'] === 'LOST') {
+    const { status: _lost, ...rest } = patch;
+    await moveStage(leadId, 'LOST', 'ADMIN', { actorUserId, reason: 'OTHER', lostNote: 'Closed at the desk' });
+    patch = rest;
+    if (Object.keys(patch).length === 0) return getLead(leadId);
+  }
   // Lot X-B: a patched city carries its key; a patch of other fields leaves the key alone.
   await repository.update(leadId, await withCityKey(patch as { city?: string | null }));
   if (patch['status'] && patch['status'] !== lead.status) {
@@ -583,6 +867,19 @@ export async function patchLead(leadId: string, actorUserId: string, patch: Reco
       kind: 'STATUS_CHANGED',
       note: `${lead.status} → ${String(patch['status'])}`,
     });
+  }
+  if ('agentFlaggedHotAt' in patch) {
+    await repository.logActivity({ leadId, actorUserId, kind: 'NOTE', note: 'Flagged hot at the desk' });
+  }
+  // LH1: a category, an importance or a flag moves the score; recomputed either way.
+  await recomputeLead(leadId).catch((err) => logger.warn('Lead score not recomputed after a patch', { leadId, err }));
+  // LH2: an assignment is a claim in the desk's hand; LH5 (D3): it overrides a running claim.
+  if (typeof patch['assignedAgentId'] === 'string') {
+    if (lead.claimedByAgentId && lead.claimedByAgentId !== patch['assignedAgentId']) {
+      await repository.closeOpenClaims(leadId, new Date(), 'overridden by ops');
+      await repository.update(leadId, { claimedByAgentId: null, claimExpiresAt: null });
+    }
+    await advanceStage(leadId, 'CLAIMED', { actorUserId, note: 'assigned at the desk' });
   }
   return getLead(leadId);
 }

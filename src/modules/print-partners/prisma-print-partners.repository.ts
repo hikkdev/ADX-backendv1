@@ -44,6 +44,44 @@ export const prismaPrintPartnersRepository: PrintPartnersRepository = {
     return Boolean(user);
   },
 
+  createApplication({ userId, appliedAt, ...data }) {
+    return prisma.$transaction(async (tx) => {
+      await tx.userRole.upsert({ where: { userId_role: { userId, role: 'PARTNER' } }, update: {}, create: { userId, role: 'PARTNER' } });
+      return tx.printPartner.create({
+        data: {
+          displayId: data.displayId,
+          userId,
+          name: data.name,
+          legalName: data.legalName ?? null,
+          gstin: data.gstin ?? null,
+          panNumber: data.panNumber ?? null,
+          contactName: data.contactName ?? null,
+          mobile: data.mobile,
+          email: data.email ?? null,
+          address: data.address ?? null,
+          city: data.city ?? null,
+          cityId: data.cityId ?? null,
+          latitude: data.latitude ?? null,
+          longitude: data.longitude ?? null,
+          capabilities: data.capabilities ?? [],
+          maxWidthFt: data.maxWidthFt ?? null,
+          turnaroundDays: data.turnaroundDays ?? null,
+          notes: data.notes ?? null,
+          appliedAt,
+        },
+      });
+    });
+  },
+
+  async findUserRoles(userId: string) {
+    const rows = await prisma.userRole.findMany({ where: { userId }, select: { role: true } });
+    return rows.map((row) => row.role as string);
+  },
+
+  findPartnerByUserId(userId: string) {
+    return prisma.printPartner.findUnique({ where: { userId } });
+  },
+
   createPartner(data) {
     // The account is created inactive: a print partner cannot sign in until
     // ops activates the account (Lot H, Q147; before that, owner decision
@@ -122,6 +160,8 @@ export const prismaPrintPartnersRepository: PrintPartnersRepository = {
     const base: Prisma.PrintPartnerWhereInput = {
       // Lot X-B: the key is the identity — by the key when the facet resolved
       // to one, the spelling catching only the rows whose key is null.
+      // PP-1: the applications — self-applied, not yet switched on.
+      ...(filter.applied ? { appliedAt: { not: null }, activatedAt: null } : {}),
       ...(filter.city
         ? filter.cityId
           ? { OR: [{ cityId: filter.cityId }, { cityId: null, city: { equals: filter.city, mode: 'insensitive' } }] }

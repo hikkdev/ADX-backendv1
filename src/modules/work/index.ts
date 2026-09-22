@@ -8,6 +8,8 @@
 export { workRouter } from './work.routes';
 /** The daily due sweep (`src/jobs/work-due.job.ts`): due tomorrow and overdue, once per task per day. */
 export { sweepDueTasks } from './work.service';
+/** LH6: tasks the platform raises on its own (a callback a lead asked for), and their reads and closes by tag. */
+export { completeTaggedTasks, createSystemTask, openTaggedTasks } from './work.service';
 export type { Actor, Board, Overview, PersonView, ProjectDetail, ProjectView, TaskCard, TaskDetail } from './work.service';
 
 // Lot G (answer 144): the module's feature declarations, loaded with the module so the registry sees them at boot.

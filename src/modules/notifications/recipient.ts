@@ -40,12 +40,12 @@ export function maskEmail(email: string): string {
  * however it was typed. G6: a PUSH delivery's "address" is the user id —
  * the devices behind it come and go — so it hashes as typed.
  */
-export function canonicalRecipient(channel: 'EMAIL' | 'SMS' | 'PUSH', address: string): string {
+export function canonicalRecipient(channel: 'EMAIL' | 'SMS' | 'PUSH' | 'WHATSAPP', address: string): string {
   if (channel === 'PUSH') return address.trim();
   return channel === 'EMAIL' ? address.trim().toLowerCase() : toE164(address);
 }
 
-export function hashRecipient(channel: 'EMAIL' | 'SMS' | 'PUSH', address: string): string {
+export function hashRecipient(channel: 'EMAIL' | 'SMS' | 'PUSH' | 'WHATSAPP', address: string): string {
   return createHmac('sha256', env.JWT_ACCESS_SECRET).update(`${channel}:${canonicalRecipient(channel, address)}`).digest('hex');
 }
 
@@ -54,7 +54,7 @@ export function maskDevices(count: number): string {
   return `${count} device${count === 1 ? '' : 's'}`;
 }
 
-export function maskRecipient(channel: 'EMAIL' | 'SMS', address: string): string {
+export function maskRecipient(channel: 'EMAIL' | 'SMS' | 'WHATSAPP', address: string): string {
   return channel === 'EMAIL' ? maskEmail(address) : maskMobile(address);
 }
 

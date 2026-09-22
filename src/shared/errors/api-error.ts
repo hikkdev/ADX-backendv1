@@ -85,6 +85,17 @@ export type ApiErrorCode =
   // reporting a generic conflict.
   | 'ADVERTISER_SUSPENDED'
   | 'AGENT_SUSPENDED'
+  // AG-1: the agent application — the ladder is not through, or the desk's move is not open from this stage.
+  | 'AGENT_NOT_ACTIVE'
+  | 'APPLICATION_CLOSED'
+  | 'APPLICATION_INCOMPLETE'
+  | 'DOCUMENT_HELD_ELSEWHERE'
+  | 'DECISION_NOT_ALLOWED'
+  | 'IDENTITY_UNVERIFIED'
+  // AG-4: the screen and the certificate gate activation; a Cashfree check that could not run.
+  | 'SCREENING_INCOMPLETE'
+  | 'TRAINING_INCOMPLETE'
+  | 'VERIFICATION_UNAVAILABLE'
   // Suspension: FREEZE_WALLET — money may land but may not leave.
   | 'WALLET_FROZEN'
   // Users: the account has money, orders, listings, agreements or KYC behind
@@ -152,6 +163,16 @@ export type ApiErrorCode =
   // version live now — the insertion order, the package terms. The app sends
   // the party to the agreement screen on it, so it is more than a 403.
   | 'AGREEMENT_REQUIRED'
+  // DS-1 (Digio eSign): the document must be e-signed, not clicked — the
+  // gate carries the open signing request (`details.signing`) so the app
+  // sends the party to the signing screen (403). ESIGN_UNAVAILABLE is a
+  // production server with no rail configured (503); ESIGN_PROVIDER_ERROR
+  // is Digio answering badly (502); SIGNING_NOT_OPEN is an act on a request
+  // that is not REQUESTED any more (409).
+  | 'SIGNATURE_REQUIRED'
+  | 'ESIGN_UNAVAILABLE'
+  | 'ESIGN_PROVIDER_ERROR'
+  | 'SIGNING_NOT_OPEN'
   // Campaigns (Lot D, Q120): the print step or the launch is held because
   // artwork with a file is short of APPROVED. 409, named so ops' console
   // can route to the review queue.
@@ -186,6 +207,9 @@ export type ApiErrorCode =
   | 'REPORT_EXPIRED'
   | 'REPORT_FAILED'
   | 'STORAGE_UNAVAILABLE'
+  // PP-1: the sign-up chose "I print and install" on a server where the
+  // print-partner application port is not wired (503).
+  | 'PARTY_UNAVAILABLE'
   // Print partners (Lot H, Q147): an AUTO invite found no active partner
   // accepting requests in the order's city or within reach of the site (409;
   // invite by id); a quote after the request's deadline (409); an award with

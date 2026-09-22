@@ -28,6 +28,9 @@ const { repository, agents, payouts } = vi.hoisted(() => ({
     countActivity: vi.fn(),
     sumCreditedIncentives: vi.fn(),
     countOnTimeArrivals: vi.fn(),
+    countLeadConversions: vi.fn(),
+    countLeadContacts: vi.fn(),
+    hasTemplateOfType: vi.fn(),
   },
   agents: { requireAgentProfile: vi.fn(), findAgentProfile: vi.fn() },
   payouts: { recordIncentive: vi.fn() },
@@ -41,7 +44,9 @@ import { Decimal } from '../../../shared/money';
 import {
   claimMilestone,
   createMilestoneTemplate,
+  ensureLeadMilestoneTemplates,
   getMilestoneBoard,
+  LEAD_MILESTONE_TEMPLATES,
   patchMilestoneTemplate,
 } from '../milestones/agent-milestones.service';
 import { createMilestoneTemplateSchema } from '../milestones/agent-milestones.schema';
@@ -93,6 +98,9 @@ beforeEach(() => {
   repository.countActivity.mockResolvedValue(0);
   repository.sumCreditedIncentives.mockResolvedValue(new Decimal(0));
   repository.countOnTimeArrivals.mockResolvedValue(0);
+  repository.countLeadConversions.mockResolvedValue(0);
+  repository.countLeadContacts.mockResolvedValue(0);
+  repository.hasTemplateOfType.mockResolvedValue(false);
   payouts.recordIncentive.mockResolvedValue({ id: 'inc_1', amount: new Decimal('5000.00'), status: 'PENDING_VERIFICATION' });
   repository.claim.mockImplementation(async (_id, data) => row({ ...data, completedAt: NOW }));
 });
@@ -207,6 +215,50 @@ describe('the claim', () => {
   it('is somebody else\'s milestone, so it is refused', async () => {
     repository.findById.mockResolvedValue(row({ agentId: 'agt_other', completedAt: day(-1) }));
     await expect(claimMilestone('ms_1', 'usr_agent', NOW)).rejects.toMatchObject({ statusCode: 403 });
+  });
+});
+
+describe('the lead milestones (LH8)', () => {
+  it('derives a LEAD_CONVERSIONS card from the conversions counter and a LEAD_CONTACTS card from the first contacts, both linking to the hunt', async () => {
+    const conversions = template({ id: 'tpl_conv', type: 'LEAD_CONVERSIONS', title: '5 lead conversions this month', target: 5, windowDays: 30, rewardAmount: new Decimal('1500.00') });
+    const contacts = template({ id: 'tpl_contact', type: 'LEAD_CONTACTS', title: '10 first contacts this week', target: 10, windowDays: 7, rewardAmount: new Decimal('300.00') });
+    repository.findActiveTemplates.mockResolvedValue([conversions, contacts]);
+    repository.findForAgent.mockResolvedValue([
+      row({ id: 'ms_conv', templateId: 'tpl_conv', progress: 0, template: conversions }),
+      row({ id: 'ms_contact', templateId: 'tpl_contact', progress: 0, template: contacts, createdAt: day(-3) }),
+    ]);
+    repository.countLeadConversions.mockResolvedValue(3);
+    repository.countLeadContacts.mockResolvedValue(10);
+    const board = await getMilestoneBoard('usr_agent', 'ALL', NOW);
+    const [conv, contact] = board.milestones;
+    expect(conv).toMatchObject({ type: 'LEAD_CONVERSIONS', progress: 3, pct: 60, state: 'ACTIVE', link: 'LEADS', reward: '1500.00' });
+    expect(contact).toMatchObject({ type: 'LEAD_CONTACTS', progress: 10, state: 'COMPLETED', link: 'LEADS', claimable: true });
+    // Counted by the holder inside the row's own window.
+    expect(repository.countLeadConversions).toHaveBeenCalledWith('agt_1', { from: day(-20), to: day(10) });
+    expect(repository.countLeadContacts).toHaveBeenCalledWith('agt_1', { from: day(-3), to: day(4) });
+    expect(repository.countOnboarded).not.toHaveBeenCalled();
+  });
+
+  it('seeds the two templates once per type, and never hands back one the desk retired', async () => {
+    repository.createTemplate.mockImplementation(async (data) => template({ ...data, id: `tpl_${data.type}` }));
+    expect(await ensureLeadMilestoneTemplates()).toBe(2);
+    expect(repository.createTemplate).toHaveBeenCalledTimes(2);
+    expect(repository.createTemplate.mock.calls.map(([data]) => [data.type, data.title, data.target, data.windowDays, data.rewardAmount.toFixed(2), data.isActive])).toEqual([
+      ['LEAD_CONVERSIONS', '5 lead conversions this month', 5, 30, '1500.00', true],
+      ['LEAD_CONTACTS', '10 first contacts this week', 10, 7, '300.00', true],
+    ]);
+
+    vi.clearAllMocks();
+    // One of the types exists (active or not): only the other is seeded.
+    repository.hasTemplateOfType.mockImplementation(async (type: string) => type === 'LEAD_CONVERSIONS');
+    expect(await ensureLeadMilestoneTemplates()).toBe(1);
+    expect(repository.createTemplate.mock.calls[0]![0].type).toBe('LEAD_CONTACTS');
+    expect(LEAD_MILESTONE_TEMPLATES.map((t) => t.type)).toEqual(['LEAD_CONVERSIONS', 'LEAD_CONTACTS']);
+  });
+
+  it('the desk may create either type, lower-cased or not', () => {
+    expect(createMilestoneTemplateSchema.parse({ type: 'lead_contacts', title: 'x', description: 'y', target: 3, rewardAmount: '100' }).type).toBe('LEAD_CONTACTS');
+    expect(createMilestoneTemplateSchema.parse({ type: 'LEAD_CONVERSIONS', title: 'x', description: 'y', target: 3, rewardAmount: '100' }).type).toBe('LEAD_CONVERSIONS');
   });
 });
 

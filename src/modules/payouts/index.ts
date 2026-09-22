@@ -50,6 +50,8 @@ export type { IncentiveNotice } from './incentives.service';
  * quotes it on the offer and `price-model` prints it as a cost line.
  */
 export { recordIncentiveOnce, installationFeeFor } from './incentives.service';
+/** LH10 (the Lead Hunt): the clawback — a reward earned on something that did not last comes back. */
+export { clawbackIncentive } from './incentives.service';
 export type { IncentiveInput } from './incentives.service';
 
 /** Read by anything that needs to know what a party may take out today. */

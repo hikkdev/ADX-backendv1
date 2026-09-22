@@ -10,6 +10,8 @@ export type NewQrScan = {
   /** GRANTED, PENDING_APPROVAL, EXPIRED, ALREADY_USED, NOT_AN_AGENT, USER_DECLINED. */
   outcome: string;
   distanceM?: number;
+  /** QR-27: what the scanner asked for, on an identity code after onboarding. */
+  ask?: Record<string, unknown>;
 };
 
 /** A scan with the person who made it, and their agent id when they have one. */
@@ -64,6 +66,8 @@ export interface QrRepository {
   /** The live code issued for a given subject, if any. */
   findActiveForSubject(type: QrCode['type'], refId: string): Promise<QrCode | null>;
   deactivate(qrId: string): Promise<unknown>;
+  /** QR-27: a durable code's fix follows the owner's phone — refreshed whenever the code is shown. */
+  setPosition(qrId: string, position: { latitude: number; longitude: number }): Promise<unknown>;
   /** Expires every live code for a subject. */
   deactivateForSubject(type: QrCode['type'], refId: string): Promise<unknown>;
   logScan(data: NewQrScan): Promise<QrScan>;

@@ -18,7 +18,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const { repository, identifiers, payouts, visits, agents } = vi.hoisted(() => ({
   visits: { createVisit: vi.fn() },
   /** Lot A: a lead handed to an agent is work, so the assignment asks first. */
-  agents: { assertAgentAcceptsWork: vi.fn() },
+  agents: { assertAgentAcceptsWork: vi.fn(), dispatchAskFor: vi.fn(async () => ({})), isBelowRequiredGrade: vi.fn(async () => false), agentMeetsGrade: vi.fn(async () => true), getRoutingSettings: vi.fn(async () => ({ bands: { INDIVIDUAL: 'G1', SMALL_AGENCY: 'G2', LARGE_AGENCY: 'G3' }, leadBands: { STANDARD: 'G1', KEY: 'G3', ENTERPRISE: 'G4' }, enforce: true })), findAgentProfile: vi.fn() },
   repository: {
     create: vi.fn(),
     findById: vi.fn(),
@@ -32,6 +32,14 @@ const { repository, identifiers, payouts, visits, agents } = vi.hoisted(() => ({
     findAccountsByPhones: vi.fn().mockResolvedValue([]),
     findByNameAndCity: vi.fn().mockResolvedValue([]),
     importBatch: vi.fn(),
+    // LH1: the source door and the score — the source row exists, the score is computed elsewhere (scoring.test.ts).
+    findSourceByKey: vi.fn().mockResolvedValue({ id: 'lsrc_1', key: 'referral', kind: 'REFERRAL' }),
+    createSource: vi.fn(),
+    listSources: vi.fn().mockResolvedValue([]),
+    updateSource: vi.fn(),
+    findForScoring: vi.fn().mockResolvedValue(null),
+    // LH8: the rewards the hunt recorded on a converted lead.
+    rewardsFor: vi.fn().mockResolvedValue([]),
   },
   identifiers: { allocateIdentifier: vi.fn() },
   payouts: { rateFor: vi.fn() },
@@ -41,12 +49,16 @@ vi.mock('../prisma-leads.repository', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../prisma-leads.repository')>();
   return { prismaLeadsRepository: repository, distanceM: actual.distanceM };
 });
+// LH7: the detail's invite read — none in these tests.
+vi.mock('../prisma-outreach.repository', () => ({ prismaOutreachRepository: { findActiveInvite: vi.fn(async () => null) } }));
 vi.mock('../../identifiers', () => ({ allocateIdentifier: identifiers.allocateIdentifier }));
+// LH1: the settings read behind the score is not this test's subject.
+vi.mock('../../app-config', () => ({ getPlatformSettings: vi.fn(async () => ({ leads: { scoring: { weights: { fitMax: 30, intentMax: 35, recencyMin: -25, sourceMax: 15, agentFlag: 10 }, recency: { afterDays7: -5, afterDays21: -15, afterDays45: -25 }, thresholds: { hot: 70, warm: 40 }, agentFlagDays: 14, intent: {}, fit: { defaultCategory: 12, categoryBySide: { PUBLISHER: {}, ADVERTISER: {} }, importanceBonus: { KEY: 4, ENTERPRISE: 8 }, localityBonus: 6, localityRadiusM: 1000 } } } })) }));
 vi.mock('../../payouts', () => ({ rateFor: payouts.rateFor }));
 vi.mock('../../visits', () => ({ createVisit: visits.createVisit }));
 vi.mock('../../agents', () => agents);
 
-import { bookVisit, convertLead, createLead, leadsNear, logContact, patchLead } from '../leads.service';
+import { bookVisit, convertLead, createLead, getLead, leadsNear, logContact, patchLead } from '../leads.service';
 import { isOpenLead, leadPillOf, nearLeadsQuerySchema } from '../leads.schema';
 
 const lead = (over: Record<string, unknown> = {}) => ({
@@ -266,6 +278,25 @@ describe('converting a lead', () => {
     await expect(convertLead('led_1', 'usr_1', { publisherId: 'pub_1' })).rejects.toMatchObject({
       statusCode: 409,
     });
+  });
+
+  it('LH8: the detail carries what the hunt paid on a converted lead, as money, and nothing on an open one', async () => {
+    repository.findById.mockResolvedValue(lead({ status: 'CONVERTED', convertedAt: new Date('2026-09-20T09:00:00.000Z'), convertedPublisherId: 'pub_1', convertedAdvertiserId: null, activity: [] }));
+    repository.rewardsFor.mockResolvedValue([
+      { id: 'inc_1', event: 'LEAD_CONVERTED', amount: '100.00', status: 'CREDITED', note: 'Lead LED-0001 converted', at: new Date('2026-09-20T09:00:00.000Z') },
+      { id: 'inc_2', event: 'LEAD_ACTIVATED', amount: '500.00', status: 'PENDING_VERIFICATION', note: null, at: new Date('2026-09-21T09:00:00.000Z') },
+    ]);
+    const detail = await getLead('led_1');
+    expect(repository.rewardsFor).toHaveBeenCalledWith({ id: 'led_1', convertedPublisherId: 'pub_1', convertedAdvertiserId: null });
+    expect(detail.rewards).toEqual([
+      { id: 'inc_1', event: 'LEAD_CONVERTED', amount: '100.00', status: 'CREDITED', note: 'Lead LED-0001 converted', at: '2026-09-20T09:00:00.000Z' },
+      { id: 'inc_2', event: 'LEAD_ACTIVATED', amount: '500.00', status: 'PENDING_VERIFICATION', note: null, at: '2026-09-21T09:00:00.000Z' },
+    ]);
+
+    vi.clearAllMocks();
+    repository.findById.mockResolvedValue(lead({ activity: [] }));
+    expect((await getLead('led_1')).rewards).toEqual([]);
+    expect(repository.rewardsFor).not.toHaveBeenCalled();
   });
 
   it("will not let a PATCH convert one behind the domain's back", async () => {

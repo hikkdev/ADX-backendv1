@@ -14,6 +14,7 @@ import {
   staleHandler,
   updateTemplateHandler,
 } from './agreements.controller';
+import { signingRouter } from './esign/esign.routes';
 
 /**
  * Agreement templates and who accepted them. Mounted at `/agreements`.
@@ -32,6 +33,10 @@ agreementRouter.use(authenticate);
    signed-in user — the apps render it, and there is nothing secret in terms
    of service. Registered ahead of the admin guard on purpose. */
 agreementRouter.get('/current/:kind', asyncHandler(currentTemplateHandler));
+
+/* DS-1: e-signatures — the party's own reads and the desk's acts, guarded
+   inside (the party half needs no ADMIN). Mounted ahead of the guard. */
+agreementRouter.use('/signing', signingRouter);
 
 agreementRouter.use(requireRole('ADMIN'));
 

@@ -45,6 +45,22 @@ export interface StorageConfig { accountId?: string; accessKeyId?: string; secre
 export type KycProviderState = 'DIGIO' | 'DEGRADED' | 'MANUAL';
 export const KYC_PROVIDER_STATES: readonly KycProviderState[] = ['DIGIO', 'DEGRADED', 'MANUAL'];
 export interface KycConfig { clientId?: string; clientSecret?: string; baseUrl?: string; kycProvider?: KycProviderState }
+/**
+ * DS-1 (Digio eSign, 22 Sep 2026): the signing rail's own keys and hosts.
+ * Empty, the KYC section's Digio credentials (the same account) and the
+ * `DIGIO_ESIGN_*` env values stand in. `adxSigner*` name the person ADX
+ * countersigns as (DS-4) — the Document Signer Certificate is enabled on
+ * the Digio account itself. Whether documents are e-signed at all, and
+ * which, is platform settings (`esign`), not this row: this is the wire.
+ */
+export interface EsignConfig {
+  clientId?: string;
+  clientSecret?: string;
+  apiUrl?: string;
+  gatewayUrl?: string;
+  adxSignerName?: string;
+  adxSignerIdentifier?: string;
+}
 export interface TwilioConfig { accountSid?: string; authToken?: string; phoneNumber?: string }
 /** The pre-G7 row: one Google key. Kept so an old row parses; read as the server key's last fallback. */
 export interface GoogleMapsConfig { apiKey?: string }
@@ -367,11 +383,124 @@ export interface QrEngineStyle {
   logoUrl?: string;
 }
 
+/**
+ * LH3 (the Lead Hunt, D4): a directory feed's credential — a partner
+ * endpoint, the key and the header it travels in. Google Places needs
+ * none (it rides the maps server key); IndiaMART needs only the CRM key.
+ */
+export interface LeadFeedCredential {
+  endpoint?: string;
+  apiKey?: string;
+  headerName?: string;
+}
+export type LeadFeedKey = 'justdial' | 'indiamart' | 'mca' | 'gst' | 'rera';
+export type LeadFeedsConfig = Partial<Record<LeadFeedKey, LeadFeedCredential>>;
+
+/**
+ * LH3: the lead-form ad webhooks — Meta (app secret for the signature, the
+ * verify token for the subscription handshake, a page token to fetch the
+ * form's answers), Google Ads (the key Google puts in each payload),
+ * LinkedIn (the client secret for the signature).
+ */
+export interface LeadFormsConfig {
+  meta?: { appSecret?: string; verifyToken?: string; pageAccessToken?: string };
+  google?: { key?: string };
+  linkedin?: { clientSecret?: string };
+}
+
+/**
+ * LH6 (the Lead Hunt, D5): the outreach hub's channel credentials — one card
+ * per provider under Settings › Integrations › Channels. Every adapter is
+ * NOT_CONFIGURED until its card is filled; SMS and email ride the comms
+ * doors above and have no card here.
+ *
+ * WhatsApp is BSP-selectable: Gupshup (`apiKey` + `appName` + `sourceNumber`),
+ * Interakt (`apiKey`), or Meta's own Cloud API (`phoneNumberId` +
+ * `accessToken`). `templates` are the BSP-approved templates the hub may send
+ * outside the 24-hour window, keyed by the comms template key a sequence step
+ * names — `name` is the BSP's id for it, `body` the approved text with
+ * `{{1}}`-style or `{{name}}` placeholders (for the preview), `params` the
+ * variables in the order the BSP takes them.
+ *
+ * Instagram DM and Messenger are the same Meta app: a page token, the app
+ * secret that signs the webhooks, the verify token of the subscription
+ * handshake. Google Business Messages is a partner agent with a service
+ * account (Google retired the public product in July 2024 — the card stays
+ * for a partner endpoint). Telephony is Exotel / Knowlarity / Twilio Voice:
+ * `callerIds` are the masked numbers the lead sees, `missedCallNumber` the
+ * number a lead gives a missed call to, `ivrNumber` the number the IVR
+ * answers, and the consent line is what plays before a recorded call.
+ */
+export type WhatsAppBsp = 'GUPSHUP' | 'INTERAKT' | 'META';
+export const WHATSAPP_BSPS: readonly WhatsAppBsp[] = ['GUPSHUP', 'INTERAKT', 'META'];
+export interface WhatsAppTemplate {
+  name: string;
+  language?: string;
+  body?: string;
+  params?: string[];
+}
+export interface WhatsAppChannelConfig {
+  bsp?: WhatsAppBsp;
+  apiKey?: string;
+  appName?: string;
+  sourceNumber?: string;
+  phoneNumberId?: string;
+  accessToken?: string;
+  appSecret?: string;
+  verifyToken?: string;
+  templates?: Record<string, WhatsAppTemplate>;
+}
+export interface MetaDmChannelConfig {
+  pageId?: string;
+  accessToken?: string;
+  appSecret?: string;
+  verifyToken?: string;
+}
+export interface GoogleBusinessChannelConfig {
+  agentId?: string;
+  serviceAccountJson?: string;
+  partnerKey?: string;
+}
+export type TelephonyProvider = 'EXOTEL' | 'KNOWLARITY' | 'TWILIO';
+export const TELEPHONY_PROVIDERS: readonly TelephonyProvider[] = ['EXOTEL', 'KNOWLARITY', 'TWILIO'];
+export interface TelephonyChannelConfig {
+  provider?: TelephonyProvider;
+  accountSid?: string;
+  apiKey?: string;
+  apiToken?: string;
+  /** Exotel's subdomain (`api.exotel.com` / `api.in.exotel.com`) or Knowlarity's SR number; unused by Twilio. */
+  subdomain?: string;
+  callerIds?: string[];
+  missedCallNumber?: string;
+  ivrNumber?: string;
+  recordCalls?: boolean;
+  consentLine?: string;
+  ivrGreeting?: string;
+  ivrPublisherPrompt?: string;
+  ivrAdvertiserPrompt?: string;
+  webhookSecret?: string;
+}
+export interface LeadChannelsConfig {
+  whatsapp?: WhatsAppChannelConfig;
+  instagram?: MetaDmChannelConfig;
+  messenger?: MetaDmChannelConfig;
+  googleBusiness?: GoogleBusinessChannelConfig;
+  telephony?: TelephonyChannelConfig;
+}
+/** D5: the consent line a recorded call opens with when the card has none. */
+export const DEFAULT_CONSENT_LINE = 'This call may be recorded for quality';
+export const DEFAULT_IVR = {
+  greeting: 'Welcome to ADX.',
+  publisherPrompt: 'Press 1 if you own a wall, a shop front or a screen and want to earn from it.',
+  advertiserPrompt: 'Press 2 if you want to advertise.',
+} as const;
+
 export interface IntegrationsConfig {
   sms?: SmsConfig;
   email?: EmailConfig;
   storage?: StorageConfig;
   kyc?: KycConfig;
+  esign?: EsignConfig;
   twilio?: TwilioConfig;
   resend?: ResendConfig;
   googleMaps?: GoogleMapsConfig;
@@ -386,6 +515,9 @@ export interface IntegrationsConfig {
   maps?: MapsConfig;
   audience?: AudienceConfig;
   qrEngine?: QrEngineConfig;
+  leadFeeds?: LeadFeedsConfig;
+  leadForms?: LeadFormsConfig;
+  leadChannels?: LeadChannelsConfig;
 }
 
 const CONFIG_KEY = 'integrations';
@@ -424,9 +556,21 @@ export async function updateIntegrationsConfig(
   const current = await loadConfig();
   const merged: Record<string, unknown> = { ...(current[section] as object ?? {}) };
 
+  // LH3: the feed and ad-form sections are cards of cards — a patch to one
+  // card merges into it field by field (a masked key is never sent back, so a
+  // card replaced whole would lose it), on the same blank-keeps / null-clears rule.
+  const nested = section === 'leadFeeds' || section === 'leadForms' || section === 'leadChannels';
+
   for (const [key, value] of Object.entries(patch)) {
     if (value === null) {
       delete merged[key];
+    } else if (nested && value && typeof value === 'object' && !Array.isArray(value)) {
+      const card: Record<string, unknown> = { ...((merged[key] as Record<string, unknown> | undefined) ?? {}) };
+      for (const [field, fieldValue] of Object.entries(value as Record<string, unknown>)) {
+        if (fieldValue === null) delete card[field];
+        else if (fieldValue !== undefined && fieldValue !== '') card[field] = fieldValue;
+      }
+      merged[key] = card;
     } else if (value !== undefined && value !== '') {
       merged[key] = value;
     }
@@ -445,6 +589,34 @@ export async function updateIntegrationsConfig(
 }
 
 // ─── Effective config getters — DB value wins, per field, over .env ──────────
+
+/** LH3: the directory feeds' credentials, the row only (there is no env for them). */
+export async function getEffectiveLeadFeedsConfig(): Promise<LeadFeedsConfig> {
+  const cfg = await loadConfig();
+  return cfg.leadFeeds ?? {};
+}
+
+/** LH3: the lead-form webhooks' secrets. */
+export async function getEffectiveLeadFormsConfig(): Promise<LeadFormsConfig> {
+  const cfg = await loadConfig();
+  return cfg.leadForms ?? {};
+}
+
+/** LH6 (D5): the outreach channels' cards, the row only; the consent line and the IVR prompts fall back to the defaults. */
+export async function getEffectiveLeadChannelsConfig(): Promise<LeadChannelsConfig> {
+  const cfg = await loadConfig();
+  const channels = cfg.leadChannels ?? {};
+  return {
+    ...channels,
+    telephony: {
+      ...(channels.telephony ?? {}),
+      consentLine: channels.telephony?.consentLine?.trim() || DEFAULT_CONSENT_LINE,
+      ivrGreeting: channels.telephony?.ivrGreeting?.trim() || DEFAULT_IVR.greeting,
+      ivrPublisherPrompt: channels.telephony?.ivrPublisherPrompt?.trim() || DEFAULT_IVR.publisherPrompt,
+      ivrAdvertiserPrompt: channels.telephony?.ivrAdvertiserPrompt?.trim() || DEFAULT_IVR.advertiserPrompt,
+    },
+  };
+}
 
 export async function getEffectiveSmsConfig(): Promise<SmsConfig> {
   const cfg = await getIntegrationsConfig();
@@ -489,6 +661,19 @@ export async function getEffectiveStorageConfig(): Promise<StorageConfig> {
     secretAccessKey: cfg.storage?.secretAccessKey || env.R2_SECRET_ACCESS_KEY,
     bucketName: cfg.storage?.bucketName || env.R2_BUCKET_NAME,
     publicUrl: cfg.storage?.publicUrl || env.R2_PUBLIC_URL,
+  };
+}
+
+/** DS-1: the eSign wire — its own keys, else the KYC section's (one Digio account), else env. */
+export async function getEffectiveEsignConfig(): Promise<Required<Pick<EsignConfig, 'apiUrl' | 'gatewayUrl'>> & EsignConfig> {
+  const cfg = await getIntegrationsConfig();
+  return {
+    clientId: cfg.esign?.clientId || cfg.kyc?.clientId || env.DIGIO_CLIENT_ID,
+    clientSecret: cfg.esign?.clientSecret || cfg.kyc?.clientSecret || env.DIGIO_CLIENT_SECRET,
+    apiUrl: cfg.esign?.apiUrl || env.DIGIO_ESIGN_API_URL,
+    gatewayUrl: cfg.esign?.gatewayUrl || env.DIGIO_ESIGN_GATEWAY_URL,
+    adxSignerName: cfg.esign?.adxSignerName || 'ADX (Keysquare Technologies)',
+    adxSignerIdentifier: cfg.esign?.adxSignerIdentifier || env.RESEND_FROM_EMAIL || '',
   };
 }
 

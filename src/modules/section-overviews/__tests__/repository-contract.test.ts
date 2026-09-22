@@ -3,7 +3,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { prismaSectionOverviewsRepository } from '../prisma-section-overviews.repository';
 import type { SectionOverviewsRepository } from '../section-overviews.repository';
-import { NOW, QUERY, advertisersSeed, agentsSeed, employeesSeed, printPartnersSeed, publishersSeed, usersSeed } from './fixtures';
+import { NOW, QUERY, advertisersSeed, agentsSeed, employeesSeed, leadsSeed, printPartnersSeed, publishersSeed, usersSeed } from './fixtures';
 import { inMemoryRepository, type Seed } from './in-memory.repository';
 import { resolveWindow } from '../section-overviews.service';
 
@@ -105,6 +105,22 @@ const CALLS: Record<Method, unknown[]> = {
   contactsVerified: [scope],
   usersByLanguage: [scope],
   usersByPartyCity: [scope],
+  leadsOpen: [scope],
+  leadsCreated: [window, scope],
+  leadsCreatedByDay: [window, scope],
+  leadsContacted: [window, scope],
+  leadsConverted: [window, scope],
+  leadsConvertedByDay: [window, scope],
+  leadsActivated: [window, scope],
+  leadsActivatedByDay: [window, scope],
+  leadsLost: [window, scope],
+  leadsByTemperature: [scope],
+  leadsByCity: [window, scope],
+  leadsTimeToConvert: [window, scope],
+  leadIncentivesRecorded: [window, scope],
+  leadTopUpsRecorded: [window, scope],
+  leadsRecycled: [window, scope],
+  leadsConvertedAfterRecycle: [window, scope],
 };
 
 const MONEY = /^-?\d+\.\d{2}$/;
@@ -163,7 +179,7 @@ const merge = (...seeds: Seed[]): Seed => {
 };
 
 describe('the repository contract', () => {
-  const memory = inMemoryRepository(merge(publishersSeed(), advertisersSeed(), agentsSeed(), printPartnersSeed(), employeesSeed(), usersSeed()));
+  const memory = inMemoryRepository(merge(publishersSeed(), advertisersSeed(), agentsSeed(), printPartnersSeed(), employeesSeed(), usersSeed(), leadsSeed()));
   const methods = Object.keys(CALLS) as Method[];
 
   it('names every method the Prisma repository implements, and nothing else', () => {

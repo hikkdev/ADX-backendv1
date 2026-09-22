@@ -1,6 +1,6 @@
 {
   "generatedBy": "scripts/features-sync.ts",
-  "featureCount": 168,
+  "featureCount": 181,
   "features": [
     {
       "key": "account.closure",
@@ -183,6 +183,43 @@
       ]
     },
     {
+      "key": "agent.application",
+      "surfaces": [
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "agent-experience",
+      "launch": "on",
+      "description": "AG-1: the agent application — apply in the app, the profile, papers, bank and engagement terms, submission; the desk's queue, per-paper review, decision, grade and exit.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/agents/apply",
+        "/api/v1/agents/me/application",
+        "/api/v1/agents/applications",
+        "/api/v1/agents/:id/application",
+        "/api/v1/agents/:id/grade",
+        "/api/v1/agents/:id/exit"
+      ],
+      "jobs": [
+        "agent-document-expiry"
+      ],
+      "paths": {
+        "CONSOLE": [
+          "agents/applications"
+        ],
+        "APP_AGENT": [
+          "apply"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE",
+        "APP_AGENT"
+      ]
+    },
+    {
       "key": "agent.certification",
       "surfaces": [
         "APP_USER",
@@ -263,6 +300,34 @@
       ]
     },
     {
+      "key": "agent.fleets",
+      "surfaces": [
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "agent-experience",
+      "launch": "on",
+      "description": "AG-5: fleet partners — the delivery and ride fleets whose riders ADX invites by SMS to apply as field agents, with the partner kept as the provenance on the application.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/agents/fleet-partners",
+        "/api/v1/agents/fleet-partners/:partnerId",
+        "/api/v1/agents/fleet-partners/:partnerId/invites"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "agents/fleets"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
       "key": "agent.home",
       "surfaces": [
         "APP_AGENT"
@@ -329,7 +394,8 @@
       "jobs": [],
       "paths": {
         "CONSOLE": [
-          "leads"
+          "leads/list",
+          "leads/[id]"
         ]
       },
       "declaredIn": [
@@ -393,6 +459,32 @@
         "backend",
         "CONSOLE",
         "APP_AGENT"
+      ]
+    },
+    {
+      "key": "agent.routing",
+      "surfaces": [
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "agent-experience",
+      "launch": "on",
+      "description": "AG-5: routing by grade — the importance bands on publishers, advertisers and leads mapped to the agent grade they are routed to; dispatch prefers the closest fit at or above it, then the tier, then the nearer agent; the desk may assign over it.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/agents/routing-settings"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "settings/agent-routing"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
       ]
     },
     {
@@ -1204,7 +1296,8 @@
           "agents",
           "print-partners",
           "employees",
-          "users"
+          "users",
+          "leads"
         ]
       },
       "declaredIn": [
@@ -1746,6 +1839,298 @@
       ]
     },
     {
+      "key": "leads.capture",
+      "surfaces": [
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "agent-experience",
+      "launch": "on",
+      "description": "An agent spots a lead in the street: photos, side, category, the fix; dedup within 30 m; the lead lands on their own list.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/leads/capture"
+      ],
+      "jobs": [],
+      "paths": {
+        "APP_AGENT": [
+          "leads"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "APP_AGENT"
+      ]
+    },
+    {
+      "key": "leads.integrity",
+      "surfaces": [
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "growth",
+      "launch": "on",
+      "description": "The integrity scan and its flags, QA sampling of visits and recorded calls with the agent quality score, and the activation clawback.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/leads/flags",
+        "/api/v1/leads/qa",
+        "/api/v1/leads/quality",
+        "/api/v1/leads/clawbacks/run"
+      ],
+      "jobs": [
+        "lead-integrity"
+      ],
+      "paths": {
+        "CONSOLE": [
+          "leads/integrity"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "leads.invites",
+      "surfaces": [
+        "APP_AGENT",
+        "CONSOLE",
+        "BACKEND",
+        "WEBSITE"
+      ],
+      "kind": "FEATURE",
+      "owner": "agent-experience",
+      "launch": "on",
+      "description": "The invite link and its landing: share, opens as intent, the OTP door that converts through the link, callback and slot asks, proposals (rate estimate, campaign estimate, package quote), the landing copy per side.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/leads/landing-copy",
+        "/api/v1/leads/:leadId/invite",
+        "/api/v1/leads/:leadId/proposals",
+        "/api/v1/leads/:leadId/proposals/:proposalId/accept",
+        "/api/v1/j/:code",
+        "/api/v1/j/:code/otp",
+        "/api/v1/j/:code/verify",
+        "/api/v1/j/:code/callback",
+        "/api/v1/j/:code/slot",
+        "/api/v1/j/:code/proposals/:proposalId/accept",
+        "/api/v1/j/:code/link"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "public/j"
+        ],
+        "APP_AGENT": [
+          "leads"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE",
+        "APP_AGENT"
+      ]
+    },
+    {
+      "key": "leads.map",
+      "surfaces": [
+        "APP_AGENT",
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "agent-experience",
+      "launch": "on",
+      "description": "The hunting map: viewport clusters / pins, the heat, claims (72 h, caps, cooldown), territories, priority zones, the lapse sweep and the nearby-hot alerts.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/leads/map",
+        "/api/v1/leads/territories",
+        "/api/v1/leads/priority-zones",
+        "/api/v1/leads/:leadId/claim",
+        "/api/v1/leads/:leadId/release"
+      ],
+      "jobs": [
+        "lead-claim-sweep"
+      ],
+      "paths": {
+        "CONSOLE": [
+          "leads/map",
+          "leads/territories",
+          "leads/priority-zones"
+        ],
+        "APP_AGENT": [
+          "leads"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE",
+        "APP_AGENT"
+      ]
+    },
+    {
+      "key": "leads.outreach",
+      "surfaces": [
+        "APP_AGENT",
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "agent-experience",
+      "launch": "on",
+      "description": "The outreach hub: the unified thread per lead, sends over SMS / email / WhatsApp / the Meta DMs / Business Messages, click-to-call with consented recordings, missed-call and IVR doors, callback tasks, sequences per side and temperature, the inbound and tele-team queues, the funnel by channel.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/leads/outreach/channels",
+        "/api/v1/leads/outreach/inbox",
+        "/api/v1/leads/outreach/tele-queue",
+        "/api/v1/leads/outreach/funnel",
+        "/api/v1/leads/sequences",
+        "/api/v1/leads/sequences/preview",
+        "/api/v1/leads/sequences/:sequenceId",
+        "/api/v1/leads/:leadId/thread",
+        "/api/v1/leads/:leadId/messages",
+        "/api/v1/leads/:leadId/touch",
+        "/api/v1/leads/:leadId/call",
+        "/api/v1/leads/:leadId/call-log",
+        "/api/v1/leads/:leadId/callback",
+        "/api/v1/leads/:leadId/sequence",
+        "/api/v1/webhooks/outreach/meta",
+        "/api/v1/webhooks/outreach/gupshup",
+        "/api/v1/webhooks/outreach/interakt",
+        "/api/v1/webhooks/outreach/google-business",
+        "/api/v1/webhooks/outreach/telephony/status",
+        "/api/v1/webhooks/outreach/telephony/missed-call",
+        "/api/v1/webhooks/outreach/telephony/answer",
+        "/api/v1/webhooks/outreach/telephony/ivr",
+        "/api/v1/webhooks/outreach/telephony/ivr/choice"
+      ],
+      "jobs": [
+        "lead-outreach-tick"
+      ],
+      "paths": {
+        "CONSOLE": [
+          "leads/inbox",
+          "leads/tele-queue",
+          "leads/sequences"
+        ],
+        "APP_AGENT": [
+          "leads"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE",
+        "APP_AGENT"
+      ]
+    },
+    {
+      "key": "leads.pipeline",
+      "surfaces": [
+        "APP_AGENT",
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "agent-experience",
+      "launch": "on",
+      "description": "The twelve pipeline stages, loss reasons, the retention watch (ACTIVATED / RETAINED pay), the recycle, the funnel.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/leads/funnel",
+        "/api/v1/leads/:leadId/stage",
+        "/api/v1/leads/:leadId/engaged",
+        "/api/v1/leads/:leadId/proposed",
+        "/api/v1/leads/:leadId/lost"
+      ],
+      "jobs": [
+        "lead-pipeline"
+      ],
+      "paths": {
+        "CONSOLE": [
+          "leads/board",
+          "leads/funnel"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "leads.scoring",
+      "surfaces": [
+        "APP_AGENT",
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "agent-experience",
+      "launch": "on",
+      "description": "Hot / warm / cold from five signals, the sources with their learned quality, the nightly re-score.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/leads/sources",
+        "/api/v1/leads/:leadId/flag-hot",
+        "/api/v1/leads/:leadId/rescore"
+      ],
+      "jobs": [
+        "lead-scoring"
+      ],
+      "paths": {
+        "CONSOLE": [
+          "settings/leads-scoring"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "leads.sources",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "agent-experience",
+      "launch": "on",
+      "description": "Directory feeds (Google Places live, five partner adapters), inbound forms and posters, lead-form ad webhooks, referrals with a wallet credit, routing.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/leads/feeds",
+        "/api/v1/leads/inbound",
+        "/api/v1/leads/referrals",
+        "/api/v1/webhooks/leads"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "leads/sources",
+          "leads/import"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
       "key": "legal.agreements",
       "surfaces": [
         "APP_USER",
@@ -1799,6 +2184,31 @@
       "declaredIn": [
         "backend",
         "CONSOLE"
+      ]
+    },
+    {
+      "key": "legal.esign",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "senior",
+      "launch": "on",
+      "description": "Digio eSign on the five documents: the Signatures desk, the parties' signing doors, the gates that wait on a signature, the e-stamp and ADX countersign.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/agreements/signing",
+        "/api/v1/webhooks/digio/esign"
+      ],
+      "jobs": [
+        "esign-expiry"
+      ],
+      "paths": {},
+      "declaredIn": [
+        "backend"
       ]
     },
     {
@@ -2150,6 +2560,35 @@
       "paths": {
         "CONSOLE": [
           "onboarding/submissions"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "ops.live-map",
+      "surfaces": [
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "senior",
+      "launch": "on",
+      "description": "Live agent tracking: the agent app reports its position on a job (foreground), Redis holds the live fix, Postgres the trail; the ops live map with states, alerts (idle / late / off-route / offline), trails, ETA and the per-order timeline across the print and install legs.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/agent-locations"
+      ],
+      "jobs": [
+        "agent-trail-retention"
+      ],
+      "paths": {
+        "CONSOLE": [
+          "live-map",
+          "settings/tracking"
         ]
       },
       "declaredIn": [

@@ -26,6 +26,22 @@ export const SMS_KINDS = [
   'INVITE',
   /** E9: the old number is told the sign-in number moved — `mobile-changed` template, MOBILE_CHANGED event. */
   'CHANGE_MOBILE',
+  // AG-1: the agent application's three messages.
+  'AGENT_APPLICATION_RECEIVED',
+  'AGENT_APPLICATION_DECISION',
+  'AGENT_DOCUMENT_RETURNED',
+  // AG-4: the interview slot and the paper-expiry reminders.
+  'AGENT_INTERVIEW_SCHEDULED',
+  'AGENT_DOCUMENT_EXPIRING',
+  'AGENT_DOCUMENT_EXPIRED',
+  // AG-5: a fleet partner's rider invited to apply.
+  'AGENT_FLEET_INVITE',
+  // DS-1 (Digio eSign): a document to sign, its link; the signed receipt; an expired link.
+  'AGREEMENT_SIGNATURE_REQUESTED',
+  'AGREEMENT_SIGNED',
+  'AGREEMENT_SIGNATURE_EXPIRED',
+  // LH6 (the Lead Hunt): a prospect's outreach — one registered template whose single variable is the copy.
+  'LEAD_OUTREACH',
 ] as const;
 
 export type SmsKind = (typeof SMS_KINDS)[number];

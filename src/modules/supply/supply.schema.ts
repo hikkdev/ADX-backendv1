@@ -63,6 +63,8 @@ export const submitDocumentSchema = z.object({
     'OWNER_NOC',
     'ADDRESS_PROOF',
     'MUNICIPAL_PERMIT',
+    /** AG-4: the registration certificate of a vehicle put up as a spot. */
+    'VEHICLE_RC',
     'OTHER',
   ]),
   url: z.string().url(),

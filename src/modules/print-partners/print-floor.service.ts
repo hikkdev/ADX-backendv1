@@ -4,6 +4,7 @@ import { confirmPickupHandover } from '../qr';
 import { prismaPrintPartnersRepository as repository } from './prisma-print-partners.repository';
 import { reopenRequestAfterDecline } from './print-quotes.service';
 import { tellJobReady, tellOps } from './print-partners.notify';
+import { assertServiceAgreementSigned } from './service-agreement';
 import type { JobRow, JobWithPartner, OrderForPrint, PartnerJobsFilter, PartnerRow } from './print-partners.repository';
 
 /**
@@ -68,6 +69,8 @@ export async function acceptJob(partner: PartnerRow, jobId: string, now = new Da
   const before = await getPartnerJob(partner, jobId);
   if (before.status === 'ACCEPTED') return { before, after: before };
   refuseFinished(before);
+  // DS-2: a job is accepted under a signed service agreement, when the policy asks for one.
+  await assertServiceAgreementSigned(partner.id, 'Accepting a job');
   if (before.status !== 'REQUESTED') {
     throw new ApiError(409, 'CONFLICT', `This job is already ${before.status.toLowerCase()}.`);
   }

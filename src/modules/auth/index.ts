@@ -28,6 +28,8 @@ export {
 export type { SessionMeta } from './tokens/tokens.service';
 /** QR-2: a running session's access token re-signed with the roles the account holds now. */
 export { reissueAccessToken } from './auth.session';
+/** LH7: the invite landing signs the prospect in after the OTP — the same session the app's own door starts. */
+export { startSession, sessionMeta } from './auth.session';
 
 export { hashPassword, verifyPassword } from './password/password.service';
 /** E6: the desk's `POST /users/:id/reset-password` sends the ordinary reset link. */

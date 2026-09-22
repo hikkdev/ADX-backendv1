@@ -15,6 +15,10 @@ export const createModuleSchema = z.object({
   passPercent: z.number().int().min(1).max(100).default(80),
   /** Off by default: a module lands on every agent's index the moment it is active. */
   isActive: z.boolean().default(false),
+  /** AG-4: whom it is for; an ASSESSMENT is the screening test, scored but never certified; the clock in minutes. */
+  audience: z.enum(['ALL', 'PUBLISHER_AGENT', 'ADVERTISER_AGENT']).default('ALL'),
+  kind: z.enum(['LESSON', 'ASSESSMENT']).default('LESSON'),
+  timeLimitMins: z.number().int().min(1).max(240).nullable().default(null),
 });
 export type CreateModuleInput = z.infer<typeof createModuleSchema>;
 
@@ -31,6 +35,9 @@ export const patchModuleSchema = z
     unlockAfterOrdinal: z.number().int().min(1).nullable().optional(),
     passPercent: z.number().int().min(1).max(100).optional(),
     isActive: z.boolean().optional(),
+    audience: z.enum(['ALL', 'PUBLISHER_AGENT', 'ADVERTISER_AGENT']).optional(),
+    kind: z.enum(['LESSON', 'ASSESSMENT']).optional(),
+    timeLimitMins: z.number().int().min(1).max(240).nullable().optional(),
   })
   .refine((body) => Object.keys(body).length > 0, { message: 'Nothing to change' });
 export type PatchModuleInput = z.infer<typeof patchModuleSchema>;

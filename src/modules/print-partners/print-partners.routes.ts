@@ -33,6 +33,8 @@ const partnerKyc = [requireRole('PARTNER'), requireFeature('print.partner-kyc')]
 
 printPartnerRouter.get('/me', ...floor, asyncHandler(h.myProfileHandler));
 printPartnerRouter.patch('/me', ...floor, asyncHandler(h.updateMyProfileHandler));
+/* PP-1: the shop's own application details, while the desk has not activated it. */
+printPartnerRouter.post('/me/application', ...floor, asyncHandler(h.completeMyApplicationHandler));
 printPartnerRouter.put('/me/rate-card', ...floor, asyncHandler(h.setMyRateCardHandler));
 
 /* Lot N: the partner's KYC on their own phone — literal paths, ahead of /:id. */

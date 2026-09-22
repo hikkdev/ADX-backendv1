@@ -126,6 +126,13 @@ const spotAttributes = {
   /** "Evenings and weekends" — when the spot is worth most, not when it is free. */
   peakPeriodNote: z.string().max(300).optional(),
   rateCardUrl: z.string().url().max(2000).optional(),
+  /** AG-4: a vehicle put up as a spot — an auto, a cab, a van wrap — by its registration (KA01AB1234); the desk checks it against the RC. */
+  vehicleNumber: z
+    .string()
+    .trim()
+    .max(20)
+    .transform((value) => value.toUpperCase().replace(/[^A-Z0-9]/g, ''))
+    .optional(),
 } as const;
 
 /**
@@ -278,6 +285,8 @@ export const browseQuerySchema = z
     category: z.enum(LISTING_CATEGORIES).optional(),
     /** QR-20: the sub-category — a `VenueType` id, as the home's and the Explore grid's venue tiles hand it over. */
     venueTypeId: z.string().trim().min(1).max(64).optional(),
+    /** QR-27: one publisher's live spaces, by the publisher's id. */
+    publisherId: z.string().trim().min(1).max(64).optional(),
     display: z.enum(['DIGITAL', 'STATIC']).optional(),
     minRate: z.string().regex(/^\d+(\.\d{1,2})?$/).optional(),
     maxRate: z.string().regex(/^\d+(\.\d{1,2})?$/).optional(),

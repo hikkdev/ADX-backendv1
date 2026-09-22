@@ -20,7 +20,7 @@ import type { BookingRecord, BookingReportRepository } from '../publisher-report
 
 const { repo, agents, grants, flags, uploads, audit, photos } = vi.hoisted(() => ({
   repo: { findBooking: vi.fn(), countInteractions: vi.fn() } satisfies Record<keyof BookingReportRepository, ReturnType<typeof vi.fn>>,
-  agents: { findAgentProfile: vi.fn() },
+  agents: { findAgentProfile: vi.fn(), dispatchAskFor: vi.fn(async () => ({})), isBelowRequiredGrade: vi.fn(async () => false), agentMeetsGrade: vi.fn(async () => true), getRoutingSettings: vi.fn(async () => ({ bands: { INDIVIDUAL: 'G1', SMALL_AGENCY: 'G2', LARGE_AGENCY: 'G3' }, leadBands: { STANDARD: 'G1', KEY: 'G3', ENTERPRISE: 'G4' }, enforce: true })) },
   grants: { liveGrantFor: vi.fn() },
   flags: { isFeatureEnabled: vi.fn() },
   uploads: { storeGeneratedFile: vi.fn(), openStoredFile: vi.fn(), fileIdFromUrl: vi.fn(() => null) },

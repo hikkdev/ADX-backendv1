@@ -762,11 +762,15 @@ export const prismaPayoutsRepository: PayoutsRepository = {
 
   /* ── Incentives ────────────────────────────────────────────────── */
 
-  findIncentiveRate(event, tier, on) {
+  findIncentiveRate(event, tier, on, side) {
+    // LH2: a rate may be qualified by the lead's side (`GOLD:ADVERTISER`,
+    // `*:ADVERTISER`); the side-qualified tier row wins, then the tier, then
+    // the side wildcard, then the wildcard — which is the string order.
+    const keys = side ? [`${tier}:${side}`, tier, `*:${side}`, '*'] : [tier, '*'];
     return prisma.incentiveRate.findFirst({
       where: {
         event,
-        tier: { in: [tier, '*'] },
+        tier: { in: keys },
         effectiveFrom: { lte: on },
         OR: [{ effectiveTo: null }, { effectiveTo: { gt: on } }],
       },

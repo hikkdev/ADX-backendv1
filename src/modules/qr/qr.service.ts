@@ -11,9 +11,11 @@ import {
   advertiserOnboardingPort,
   publisherOnboardingPort,
   qrRefLabelResolver,
+  type AccessAsk,
   type ClaimedAdvertiser,
   type ClaimedGrant,
   type ClaimedPublisher,
+  type IdentitySummary,
 } from './qr.ports';
 
 export type QrAction =
@@ -25,6 +27,17 @@ export type QrAction =
   | 'AD_HEALTH_CHECK'
   | 'AGENT_REFERRAL'
   | 'CLAIM_ACCESS_GRANT'
+  /**
+   * QR-27: an agent scanned an onboarded account's identity code. With an
+   * `ask` the scan waits for the owner's approval (`pendingApproval`,
+   * `scanId`); without one the answer says `needsAsk` and logs nothing, so
+   * the app can ask the agent what they need first.
+   */
+  | 'REQUEST_ACCESS'
+  /** QR-27: an advertiser (or anyone signed in who is not an agent) scanned a publisher's code — open their profile and spaces. */
+  | 'VIEW_PUBLISHER'
+  /** QR-27: the mirror — a publisher scanned an advertiser's code. */
+  | 'VIEW_ADVERTISER'
   | 'VIEW_ONLY';
 
 export type QrResolution = {
@@ -48,7 +61,40 @@ export type QrResolution = {
   advertiser?: ClaimedAdvertiser;
   /** Populated when action === 'CLAIM_ACCESS_GRANT'. Says what was granted. */
   grant?: ClaimedGrant;
+  /** QR-27: the account behind an identity code, for REQUEST_ACCESS / VIEW_PUBLISHER / VIEW_ADVERTISER. */
+  identity?: IdentitySummary;
+  /** QR-27: REQUEST_ACCESS without an ask — nothing logged yet; send the ask and scan again. */
+  needsAsk?: boolean;
+  /** QR-27: the ask the pending scan carries, echoed back. */
+  ask?: AccessAsk;
 };
+
+/** QR-27: the two identity types — the account's own durable code. */
+export const IDENTITY_QR_TYPES: readonly QrType[] = ['PUBLISHER', 'ADVERTISER'];
+export function isIdentityType(type: QrType): boolean {
+  return IDENTITY_QR_TYPES.includes(type);
+}
+
+/** QR-27: how long a requested grant runs when the agent does not say. Capped at a day. */
+export const REQUESTED_GRANT_MINUTES = 4 * 60;
+export const REQUESTED_GRANT_MAX_MINUTES = 24 * 60;
+
+/**
+ * QR-27: what an identity code encodes. A phone camera with no ADX app
+ * needs a URL, so the code carries `${PUBLIC_WEB_URL}/q/<token>` when the
+ * site is configured; the apps' scanners accept either form (`tokenOf`).
+ */
+export function identityContent(token: string): string {
+  const base = env.PUBLIC_WEB_URL;
+  return base ? `${base.replace(/\/$/, '')}/q/${token}` : token;
+}
+
+/** The signed token inside whatever a scanner read: the bare token, or the `/q/<token>` link around it. */
+export function tokenOf(scanned: string): string {
+  const text = scanned.trim();
+  const match = text.match(/\/q\/([^/?#\s]+)/);
+  return match ? decodeURIComponent(match[1]!) : text;
+}
 
 /** How long a door-to-door onboarding code lives. Settled at ninety seconds. */
 export const ONBOARDING_QR_TTL_SECONDS = 90;
@@ -159,17 +205,20 @@ function purposeOf(metadata: unknown): string | null {
   return typeof purpose === 'string' ? purpose : null;
 }
 
-function resolveAction(type: QrType, role: Role | null, purpose: string | null = null): QrAction {
+function resolveAction(type: QrType, role: Role | null, purpose: string | null = null, onboarded = false): QrAction {
   switch (type) {
     case 'PUBLISHER':
-      // Publisher identity QR — only agent publishers can act on it
-      if (role === 'AGENT_PUBLISHER') return 'ONBOARD_PUBLISHER';
-      return 'VIEW_ONLY';
+      // QR-27: the publisher's own code. A publisher-side agent claims the
+      // onboarding while it is open and asks for access once it is done;
+      // anyone else signed in is shown the profile and the spaces.
+      if (role === 'AGENT_PUBLISHER') return onboarded ? 'REQUEST_ACCESS' : 'ONBOARD_PUBLISHER';
+      if (role === 'AGENT_ADVERTISER') return 'VIEW_PUBLISHER';
+      return 'VIEW_PUBLISHER';
 
     case 'ADVERTISER':
-      // The demand side's door-to-door code — only advertiser agents act on it.
-      if (role === 'AGENT_ADVERTISER') return 'ONBOARD_ADVERTISER';
-      return 'VIEW_ONLY';
+      // The demand side's code, the same way round.
+      if (role === 'AGENT_ADVERTISER') return onboarded ? 'REQUEST_ACCESS' : 'ONBOARD_ADVERTISER';
+      return 'VIEW_ADVERTISER';
 
     case 'ACCESS_GRANT':
       // Delegated access. The role gate is the coarse one; the grant itself
@@ -201,15 +250,16 @@ function resolveAction(type: QrType, role: Role | null, purpose: string | null =
 }
 
 export async function resolveQr(
-  token: string,
+  scanned: string,
   scannedById: string,
   role: Role | null,
   coords?: { latitude: number; longitude: number },
+  ask?: AccessAsk,
 ): Promise<QrResolution> {
-  // 1. Verify signature
+  // 1. Verify signature — the bare token, or the link an identity code carries.
   let payload: QrPayload;
   try {
-    payload = verify(token);
+    payload = verify(tokenOf(scanned));
   } catch {
     throw new Error('QR_INVALID');
   }
@@ -237,13 +287,19 @@ export async function resolveQr(
   if (!qr.isActive) return refuse('ALREADY_USED', 'QR_ALREADY_USED');
   if (isExpired(qr)) return refuse('EXPIRED', 'QR_EXPIRED');
 
-  // 3. Role-based access check
-  if (qr.allowedRoles.length > 0 && role && !qr.allowedRoles.includes(role)) {
+  // 3. Role-based access check. QR-27: an identity code is for everyone —
+  // the action, not the gate, is what differs by who scans — so the roles
+  // minted on older codes no longer refuse a non-agent.
+  if (!isIdentityType(qr.type) && qr.allowedRoles.length > 0 && role && !qr.allowedRoles.includes(role)) {
     return refuse('NOT_AN_AGENT', 'QR_ACCESS_DENIED');
   }
 
+  // QR-27: the account behind an identity code decides the action.
+  const identity = isIdentityType(qr.type) ? await describeIdentity(qr.type, qr.refId) : null;
+  if (isIdentityType(qr.type) && !identity) return refuse('ALREADY_USED', 'QR_NOT_FOUND');
+
   // 4. Determine action based on type + scanning user's role
-  const action = resolveAction(qr.type, role, purposeOf(qr.metadata));
+  const action = resolveAction(qr.type, role, purposeOf(qr.metadata), identity?.onboarded ?? false);
 
   const result: QrResolution = {
     qrId: qr.id,
@@ -252,11 +308,40 @@ export async function resolveQr(
     metadata: qr.metadata,
     action,
   };
+  if (identity) result.identity = identity;
 
   const distanceM =
     coords && qr.latitude !== null && qr.longitude !== null
       ? distanceMetres({ latitude: qr.latitude, longitude: qr.longitude }, coords)
       : undefined;
+
+  // QR-27: an agent at the door of an account that is already onboarded.
+  // Nothing is claimed; the owner is asked. The agent has to say what for
+  // first — a request with no ask is a question the owner cannot answer.
+  if (action === 'REQUEST_ACCESS' && identity) {
+    if (!ask) {
+      result.needsAsk = true;
+      return result;
+    }
+    const agentId = await identityPortFor(qr.type).workingAgentId(scannedById);
+    if (!agentId) return refuse('NOT_AN_AGENT', 'QR_ACCESS_DENIED');
+    const scan = await repository.logScan({
+      qrId: qr.id,
+      scannedById,
+      role: role ?? undefined,
+      latitude: coords?.latitude,
+      longitude: coords?.longitude,
+      action,
+      outcome: 'PENDING_APPROVAL',
+      distanceM,
+      ask,
+    });
+    result.pendingApproval = true;
+    result.scanId = scan.id;
+    result.distanceM = distanceM ?? null;
+    result.ask = ask;
+    return result;
+  }
 
   // 5. An onboarding code (from the user app) claims nothing on the scan. The
   // agent's identity and the publisher's state are checked now, so a refusal
@@ -342,29 +427,40 @@ export async function decideOnboardingScan(
   if (!scan) throw new Error('QR_NOT_FOUND');
   const qr = await repository.findById(scan.qrId);
   if (!qr || qr.refId !== refId) throw new Error('QR_NOT_FOUND');
-  const claim = claimPortFor(qr.type, resolveAction(qr.type, qr.type === 'ADVERTISER' ? 'AGENT_ADVERTISER' : 'AGENT_PUBLISHER'));
-  if (!claim) throw new Error('QR_NOT_FOUND');
   if (scan.outcome !== 'PENDING_APPROVAL') throw new Error('QR_NOT_PENDING');
+  // QR-27: a durable identity code outlives every decision on it; only the
+  // old ninety-second codes (an expiry set) are burnt with the answer.
+  const burn = () => (qr.expiresAt === null ? Promise.resolve() : repository.deactivate(qr.id));
 
   if (scan.createdAt.getTime() + APPROVAL_WINDOW_SECONDS * 1000 <= Date.now()) {
-    await Promise.all([
-      repository.updateScan(scan.id, { outcome: 'EXPIRED', decidedAt: new Date() }),
-      repository.deactivate(qr.id),
-    ]);
+    await Promise.all([repository.updateScan(scan.id, { outcome: 'EXPIRED', decidedAt: new Date() }), burn()]);
     throw new Error('QR_EXPIRED');
   }
 
   if (decision === 'decline') {
-    await Promise.all([
-      repository.updateScan(scan.id, { outcome: 'USER_DECLINED', decidedAt: new Date() }),
-      repository.deactivate(qr.id),
-    ]);
+    await Promise.all([repository.updateScan(scan.id, { outcome: 'USER_DECLINED', decidedAt: new Date() }), burn()]);
     return { outcome: 'USER_DECLINED', grantId: null };
   }
 
+  // QR-27: an access request opens the authority the agent asked for, on
+  // the agent who scanned — no ticket, no pre-assignment.
+  if (scan.action === 'REQUEST_ACCESS') {
+    const ask = askOf(scan.ask);
+    if (!ask) throw new Error('QR_NOT_PENDING');
+    const agentId = await identityPortFor(qr.type).workingAgentId(scan.scannedById);
+    if (!agentId) throw new Error('QR_ACCESS_DENIED');
+    const subject = qr.type === 'ADVERTISER' ? { advertiserId: qr.refId } : { publisherId: qr.refId };
+    const { grantId } = await accessGrantPort().openRequested({ subject, agentId, scannedByUserId: scan.scannedById, ask });
+    await repository.updateScan(scan.id, { outcome: 'GRANTED', decidedAt: new Date(), grantId });
+    return { outcome: 'GRANTED', grantId };
+  }
+
+  const claim = claimPortFor(qr.type, resolveAction(qr.type, qr.type === 'ADVERTISER' ? 'AGENT_ADVERTISER' : 'AGENT_PUBLISHER'));
+  if (!claim) throw new Error('QR_NOT_FOUND');
+
   // Validated again: the account's state may have moved since the scan.
   const { party, agentId } = await claim.prepare(qr.refId, scan.scannedById);
-  await repository.deactivate(qr.id);
+  await burn();
   const { grantId } = await claim.commit(party.id, agentId, { qrId: qr.id, scanId: scan.id });
   await repository.updateScan(scan.id, {
     outcome: 'GRANTED',
@@ -386,7 +482,89 @@ export async function getScanForScanner(scanId: string, userId: string) {
     grantId: scan.grantId,
     distanceM: scan.distanceM,
     createdAt: scan.createdAt,
+    ask: askOf(scan.ask),
   };
+}
+
+/* ── QR-27: identity codes ────────────────────────────────────────────────── */
+
+function identityPortFor(type: QrType): { workingAgentId(userId: string): Promise<string | null> } {
+  return type === 'ADVERTISER' ? advertiserOnboardingPort() : publisherOnboardingPort();
+}
+
+/** The account behind an identity code, by type. */
+export async function describeIdentity(type: QrType, refId: string): Promise<IdentitySummary | null> {
+  if (type === 'PUBLISHER') return publisherOnboardingPort().describe(refId);
+  if (type === 'ADVERTISER') return advertiserOnboardingPort().describe(refId);
+  return null;
+}
+
+/** The ask a scan row carries, or null when the row has none (an onboarding scan, an older row). */
+export function askOf(raw: unknown): AccessAsk | null {
+  const value = raw as Partial<AccessAsk> | null | undefined;
+  if (!value || (value.scope !== 'PROFILE' && value.scope !== 'LISTINGS')) return null;
+  return {
+    scope: value.scope,
+    reason: typeof value.reason === 'string' ? value.reason : '',
+    durationMinutes: typeof value.durationMinutes === 'number' ? value.durationMinutes : REQUESTED_GRANT_MINUTES,
+  };
+}
+
+/**
+ * The web landing behind `/q/<token>` and the desk's camera: who this code
+ * belongs to, for anyone — signed-out included. The signed token proves the
+ * link came off a real code; the answer carries nothing a public profile
+ * does not (no mobile, no internal id).
+ */
+export async function describeIdentityByToken(scanned: string): Promise<{
+  type: QrType;
+  displayId: string | null;
+  name: string;
+  city: string | null;
+  verified: boolean;
+  /** Where the ADX apps take a scan of this code. */
+  appLink: string;
+} | null> {
+  let payload: QrPayload;
+  try {
+    payload = verify(tokenOf(scanned));
+  } catch {
+    return null;
+  }
+  const qr = await repository.findById(payload.id);
+  if (!qr || !qr.isActive || !isIdentityType(qr.type)) return null;
+  const identity = await describeIdentity(qr.type, qr.refId);
+  if (!identity) return null;
+  return {
+    type: qr.type,
+    displayId: identity.displayId,
+    name: identity.name,
+    city: identity.city,
+    verified: identity.verified,
+    appLink: `adx://q/${encodeURIComponent(qr.token)}`,
+  };
+}
+
+/**
+ * QR-27: the account's own durable code, made once and kept. The fix on it
+ * follows the phone each time the code is shown, so a scan's distance is
+ * measured against where the owner is now, not where they were the day the
+ * code was minted. Codes from before (a ninety-second expiry set) are
+ * retired and replaced.
+ */
+export async function getOrCreateIdentityQr(
+  type: 'PUBLISHER' | 'ADVERTISER',
+  refId: string,
+  position?: { latitude: number; longitude: number },
+): Promise<{ qrId: string; token: string; expiresAt: Date | null; created: boolean }> {
+  const existing = await repository.findActiveForSubject(type, refId);
+  if (existing && existing.expiresAt === null) {
+    if (position) await repository.setPosition(existing.id, position);
+    return { qrId: existing.id, token: existing.token, expiresAt: null, created: false };
+  }
+  if (existing) await repository.deactivateForSubject(type, refId);
+  const { qrId, token } = await generateQr(type, refId, [], undefined, { position });
+  return { qrId, token, expiresAt: null, created: true };
 }
 
 export async function deactivateQr(qrId: string): Promise<void> {

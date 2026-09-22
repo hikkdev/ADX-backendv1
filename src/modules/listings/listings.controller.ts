@@ -202,6 +202,7 @@ import {
   submitListingForReview,
   suggestedRateOffer,
   updateListing,
+  verifyListingVehicleRc,
 } from './listings.service';
 
 export async function createListingHandler(req: Request, res: Response): Promise<void> {
@@ -394,6 +395,14 @@ export async function acceptSuggestedRateHandler(req: Request, res: Response): P
  * The decision is written to the activity log because a listing going live is
  * exactly the kind of act somebody asks "who did that?" about later.
  */
+/** AG-4: the desk checks a vehicle-spot's RC with Cashfree; `vehicleNumber` in the body sets or corrects the registration first. */
+export async function verifyListingVehicleRcHandler(req: Request, res: Response): Promise<void> {
+  const listingId = req.params['listingId'] as string;
+  const raw = (req.body ?? {}) as { vehicleNumber?: unknown };
+  const vehicleNumber = typeof raw.vehicleNumber === 'string' && raw.vehicleNumber.trim() ? raw.vehicleNumber.trim() : undefined;
+  res.json({ success: true, data: await verifyListingVehicleRc(listingId, { vehicleNumber }, req.user!.sub) });
+}
+
 export async function publishListingHandler(req: Request, res: Response): Promise<void> {
   const listingId = req.params['listingId'] as string;
   const listing = await publishListing(listingId);

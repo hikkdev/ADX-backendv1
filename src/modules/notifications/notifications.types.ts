@@ -14,6 +14,13 @@ export const NOTIFICATION_TYPES = ['ORDER', 'BOOKING', 'PAYOUT', 'KYC', 'MESSAGE
  * so rather than implying a push that does not exist.
  */
 export const NOTIFICATION_CHANNELS = ['IN_APP', 'PUSH', 'EMAIL', 'SMS'] as const;
+/**
+ * LH6: the channels a comms template may name — the four above plus
+ * WhatsApp, which the outreach hub's BSP adapter carries. WhatsApp has no
+ * row of its own on the preferences screen: it follows the person's SMS
+ * preference (`mayDeliver`), the way a WhatsApp message stands in for an SMS.
+ */
+export const TEMPLATE_CHANNELS = [...NOTIFICATION_CHANNELS, 'WHATSAPP'] as const;
 
 /**
  * OTP and security messages are not a preference: they always go. So does a
@@ -89,6 +96,8 @@ export const RELATED_TYPES = [
   'LISTING',
   /** AB-B: a work task — every `work` notice, so a tap opens the task. */
   'WORK',
+  /** LH5: a lead — the hunting map's three pushes, so a tap opens the lead in the agent app. */
+  'LEAD',
 ] as const;
 
 export type RelatedType = (typeof RELATED_TYPES)[number];

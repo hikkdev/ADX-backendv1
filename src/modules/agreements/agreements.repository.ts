@@ -56,6 +56,9 @@ export type NewAcceptance = AcceptanceParty &
     ipAddress?: string | null | undefined;
     userAgent?: string | null | undefined;
     renderedDocument?: string | null | undefined;
+    /** DS-1: DIGIO with the SigningRequest id when the row came from an e-signature rather than a click. */
+    signatureProvider?: 'NONE' | 'DIGIO' | undefined;
+    signatureRef?: string | null | undefined;
   };
 
 /**
@@ -158,6 +161,8 @@ export interface AgreementsRepository {
   /** The newest acceptance anchored on one transaction — any version. */
   findAnchoredAcceptance(kind: AgreementKind, anchor: AcceptanceAnchor): Promise<AgreementAcceptance | null>;
   createAcceptance(data: NewAcceptance): Promise<AgreementAcceptance>;
+  /** DS-1: a click on the same version is upgraded to the signature that followed. */
+  markAcceptanceSigned(id: string, signatureRef: string): Promise<AgreementAcceptance>;
   /** Parties whose highest accepted version of a platform kind is below `currentVersion`. */
   partiesBehind(kind: AgreementKind, currentVersion: number): Promise<StaleParty[]>;
 

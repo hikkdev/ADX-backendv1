@@ -121,6 +121,15 @@ const envSchema = z.object({
    * webhook until the secret is set; failing open costs real money.
    */
   DIGIO_WEBHOOK_SECRET: z.string().optional(),
+  /**
+   * DS-1 (Digio eSign, 22 Sep 2026): the same Digio account signs documents
+   * — the client id/secret above are reused — but the eSign API and its
+   * signing gateway sit on other hosts than the KYC flow. Sandbox defaults;
+   * production is https://api.digio.in and https://app.digio.in. The
+   * integrations row's `esign` section overrides all four.
+   */
+  DIGIO_ESIGN_API_URL: z.string().url().default('https://ext.digio.in:444'),
+  DIGIO_ESIGN_GATEWAY_URL: z.string().url().default('https://ext-gateway.digio.in'),
   // Twilio — SMS/WhatsApp for the future agent/publisher/advertiser apps
   TWILIO_ACCOUNT_SID: z.string().optional(),
   TWILIO_AUTH_TOKEN: z.string().optional(),
@@ -202,6 +211,16 @@ const envSchema = z.object({
   // to manual NEFT; unset, finance pays by hand and records the UTR.
   RAZORPAY_X_KEY: z.string().optional(),
   CASHFREE_PAYOUT_KEY: z.string().optional(),
+  // AG-4: Cashfree's Verification Suite (vehicle RC lookup, bank penny drop).
+  // Its own client id/secret when the dashboard issues one; the payouts
+  // client id/secret otherwise (the owner's test pair, 20 Sep 2026). Test
+  // mode targets sandbox.cashfree.com. Unset: every check is MANUAL.
+  CASHFREE_VERIFICATION_CLIENT_ID: z.string().optional(),
+  CASHFREE_VERIFICATION_CLIENT_SECRET: z.string().optional(),
+  CASHFREE_VERIFICATION_TEST_MODE: z.string().optional(),
+  CASHFREE_PAYOUT_CLIENT_ID: z.string().optional(),
+  CASHFREE_PAYOUT_CLIENT_SECRET: z.string().optional(),
+  CASHFREE_PAYOUT_TEST_MODE: z.string().optional(),
   // Stripe — payments
   STRIPE_PUBLISHABLE_KEY: z.string().optional(),
   STRIPE_SECRET_KEY: z.string().optional(),

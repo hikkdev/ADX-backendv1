@@ -47,7 +47,7 @@ vi.mock('../../listings', () => listings);
 vi.mock('../../notifications', () => notifications);
 vi.mock('../../orders', () => orders);
 vi.mock('../../advertisers', () => ({ getAdvertiserForUser: vi.fn(async () => null), assertCanBook: vi.fn() }));
-vi.mock('../../agents', () => ({ findAgentProfile: vi.fn(async () => null), findAgentTier: vi.fn() }));
+vi.mock('../../agents', () => ({ findAgentProfile: vi.fn(async () => null), findWorkingAgentProfile: vi.fn(async () => null), findAgentTier: vi.fn() }));
 vi.mock('../../qr', () => ({ IMAGE_CACHE_CONTROL: 'no-store', clampSize: (n: number) => n, toPngBuffer: vi.fn() }));
 vi.mock('../../revenue', () => ({
   quote: vi.fn(async () => ({

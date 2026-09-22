@@ -3,7 +3,7 @@ import type { z } from 'zod';
 import { ApiError } from '../../shared/errors';
 import { money, type Money } from '../../shared/money';
 import { assertNotSuspended, getAdvertiserForUser, payForPackage } from '../advertisers';
-import { findAgentProfile } from '../agents';
+import { findWorkingAgentProfile } from '../agents';
 import {
   autoRenewSchema,
   cancelSchema,
@@ -62,7 +62,7 @@ async function resolveActor(req: Request): Promise<SaleActor> {
   const userId = req.user!.sub;
   const [advertiser, agent] = await Promise.all([
     getAdvertiserForUser(userId),
-    findAgentProfile(userId),
+    findWorkingAgentProfile(userId),
   ]);
   return {
     userId,

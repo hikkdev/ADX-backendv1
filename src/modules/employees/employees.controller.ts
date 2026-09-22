@@ -13,6 +13,7 @@ import {
   updateEmployee,
   employeesOverview,
 } from './employees.service';
+import { appointmentFollowUp, appointmentStanding, appointmentView, requestAppointmentSignature } from './appointment-signing';
 
 /** The fields an audit diff on an HR record reports; the document URLs are not among them. */
 const AUDITED_FIELDS = ['department', 'departmentId', 'designation', 'isActive', 'externalHrmsId', 'region', 'workMode', 'employmentType'] as const;
@@ -26,13 +27,15 @@ export async function createEmployeeHandler(req: Request, res: Response): Promis
   // The console invitation, when asked for, is sent after the record exists:
   // an invitation without an employee row behind it is the worse half-state
   // of the two, because it is a live credential.
+  if (inviteToConsole && !employee.user.email) {
+    throw new ApiError(409, 'CONFLICT', 'That person has no email address, so they cannot be invited to the console.');
+  }
+  // DS-2: the appointment letter is e-signed when the policy asks; the
+  // invitation then waits on the signature and goes out from the hook.
+  const signing = await requestAppointmentSignature(employee, req.user!.sub, inviteToConsole);
   let invite = null;
-  if (inviteToConsole) {
-    const email = employee.user.email;
-    if (!email) {
-      throw new ApiError(409, 'CONFLICT', 'That person has no email address, so they cannot be invited to the console.');
-    }
-    invite = await inviteEmployeeToConsole(email, inviteToConsole, req.user!.sub);
+  if (inviteToConsole && !signing.requestId) {
+    invite = await inviteEmployeeToConsole(employee.user.email!, inviteToConsole, req.user!.sub);
   }
 
   await logActivity(req.user!.sub, 'EMPLOYEE_CREATED', {
@@ -44,10 +47,20 @@ export async function createEmployeeHandler(req: Request, res: Response): Promis
       userId: employee.userId,
       displayId: employee.displayId,
       ...(invite ? { inviteId: invite.id } : {}),
+      ...(signing.requestId ? { signingRequestId: signing.requestId, inviteDeferred: signing.inviteDeferred } : {}),
     },
   });
 
-  res.status(201).json({ success: true, data: { ...employee, ...(invite ? { invite } : {}) } });
+  res.status(201).json({
+    success: true,
+    data: {
+      ...employee,
+      ...(invite ? { invite } : {}),
+      appointment: signing.requestId
+        ? { requestId: signing.requestId, inviteDeferred: signing.inviteDeferred, reason: null }
+        : { requestId: null, inviteDeferred: false, reason: signing.reason ?? null },
+    },
+  });
 }
 
 export async function getAllEmployeesHandler(req: Request, res: Response): Promise<void> {
@@ -77,7 +90,9 @@ export async function getAllEmployeesHandler(req: Request, res: Response): Promi
 
 export async function getEmployeeByUserIdHandler(req: Request, res: Response): Promise<void> {
   const employee = await getEmployeeByUserId(req.params['userId'] as string, req.user);
-  res.json({ success: true, data: employee });
+  // DS-2: where the appointment letter stands, beside the KYC.
+  const standing = await appointmentStanding(employee.id).catch(() => null);
+  res.json({ success: true, data: { ...employee, appointment: appointmentView(standing, standing?.request ? await appointmentFollowUp(standing.request.id) : null) } });
 }
 
 export async function updateEmployeeHandler(req: Request, res: Response): Promise<void> {

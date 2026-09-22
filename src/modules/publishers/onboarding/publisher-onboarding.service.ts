@@ -4,22 +4,16 @@ import { dateOfBirthToDate, dateOfBirthToString } from '../../../shared/validati
 import { money, type Money } from '../../../shared/money';
 import type { PublisherType } from '../../../shared/database';
 import { allocateIdentifier } from '../../identifiers';
-import {
-  ONBOARDING_QR_TTL_SECONDS,
-  deactivateQrsFor,
-  decideOnboardingScan,
-  findActiveQrFor,
-  findPendingScan,
-  generateQr,
-} from '../../qr';
-import { findAgentProfile, findAgentTier, requireAgentProfile } from '../../agents';
+import { askOf, decideOnboardingScan, findActiveQrFor, findPendingScan, getOrCreateIdentityQr } from '../../qr';
+import { findAgentProfile, findAgentTier, requireAgentProfile, requireWorkingAgent } from '../../agents';
+import { publisherLicenceFor } from '../../agreements';
 import { closeOnboardingGrants, openOnboardingGrant, accessLogFor } from '../../access-grants';
 import { recordIncentiveOnce } from '../../payouts';
 import { withCityKey } from '../../pricing';
 import { getDigioKycStatus, initiateDigioKyc } from '../kyc/digio.service';
 import { assertResubmissionCarriesDocuments, clearReviewsForResubmission, pinKycManifest, splitKycSubmission } from '../kyc/kyc-desk.service';
 import { prismaPublishersRepository as repository } from '../prisma-publishers.repository';
-import type { ClaimedPublisher } from '../../qr';
+import type { ClaimedPublisher, IdentitySummary } from '../../qr';
 import type { KycDocuments, PublisherPatch } from '../publishers.repository';
 
 /**
@@ -98,16 +92,23 @@ export async function getMyProfile(userId: string) {
     // last screen read this rather than asking twice.
     platformAgreementAcceptedAt: await repository.findPlatformAgreementAcceptedAt(publisher.id),
     verified: isVerifiedParty(publisher.kycStatus),
+    // DS-3: the licence to display — the door on the home's set-up card once it is asked for.
+    licence: await publisherLicenceFor(publisher.id),
   };
 }
 
 /**
- * The onboarding QR a publisher shows an agent at the door.
+ * The publisher's own code — "My QR code".
  *
- * Ninety seconds, one-time. A live code is reused so the one on screen is not
- * pulled from under them; a code that has died is replaced — "show my code
- * again" reissues rather than extends. The phone's fix at generation rides
- * on the code so the agent's fix at scan can be measured against it.
+ * QR-27 (the owner, 21 Sep 2026: "a QR is for a multitude of access, not
+ * just agent access"): one durable code per account, kept for good, what a
+ * scan of it means decided by who scans and by the owner's approval — an
+ * agent at the door claims the onboarding while it is open and asks for
+ * access once it is done, an advertiser opens the profile, a plain camera
+ * lands on the web. It used to be a ninety-second one-time token that
+ * refused a finished account; `getOrCreateIdentityQr` retires those. The
+ * phone's fix rides on the code and is refreshed each time it is shown, so
+ * a scan's distance is measured against where the owner is now.
  */
 export async function getOrCreateOnboardingQr(
   userId: string,
@@ -115,28 +116,30 @@ export async function getOrCreateOnboardingQr(
 ) {
   const publisher = await repository.findByUserId(userId);
   if (!publisher) throw new ApiError(404, 'NOT_FOUND', 'Publisher profile not found');
+  return getOrCreateIdentityQr('PUBLISHER', publisher.id, position);
+}
 
-  if (publisher.onboardingStatus === 'IN_ONBOARDING') {
-    throw new ApiError(409, 'CONFLICT', 'Your onboarding is already in progress with an agent.');
-  }
-  if (publisher.onboardingStatus === 'ONBOARDING_COMPLETE') {
-    throw new ApiError(409, 'CONFLICT', 'Onboarding is already complete.');
-  }
+/** QR-27: the account behind the code, for the QR module's port. */
+export async function describeForQr(publisherId: string): Promise<IdentitySummary | null> {
+  const publisher = await repository.findSummaryById(publisherId);
+  if (!publisher) return null;
+  const full = await repository.findByUserId(publisher.userId ?? '').catch(() => null);
+  return {
+    id: publisher.id,
+    displayId: full?.displayId ?? null,
+    name: publisher.name,
+    mobile: publisher.mobile,
+    type: publisher.type,
+    city: full?.city ?? null,
+    verified: isVerifiedParty(full?.kycStatus),
+    onboarded: publisher.onboardingStatus === 'ONBOARDING_COMPLETE',
+  };
+}
 
-  const existing = await findActiveQrFor('PUBLISHER', publisher.id);
-  if (existing && (existing.expiresAt === null || existing.expiresAt.getTime() > Date.now())) {
-    return { qrId: existing.id, token: existing.token, expiresAt: existing.expiresAt, created: false };
-  }
-  if (existing) await deactivateQrsFor('PUBLISHER', publisher.id);
-
-  const { qrId, token, expiresAt } = await generateQr(
-    'PUBLISHER',
-    publisher.id,
-    ['AGENT_PUBLISHER'],
-    undefined,
-    { expiresInSeconds: ONBOARDING_QR_TTL_SECONDS, position },
-  );
-  return { qrId, token, expiresAt, created: true };
+/** QR-27: the working agent behind a session, for the QR module's port. */
+export async function workingAgentIdForQr(scannedByUserId: string): Promise<string | null> {
+  const agent = await requireWorkingAgent(scannedByUserId).catch(() => null);
+  return agent?.id ?? null;
 }
 
 /**
@@ -161,6 +164,9 @@ export async function getOnboardingQrStatus(userId: string) {
       scanId: pendingScan.id,
       scannedAt: pendingScan.createdAt,
       distanceM: pendingScan.distanceM,
+      // QR-27: what the approval opens — the onboarding, or the access the agent asked for.
+      kind: pendingScan.action === 'REQUEST_ACCESS' ? ('ACCESS' as const) : ('ONBOARDING' as const),
+      ask: askOf(pendingScan.ask),
       agent: agent
         ? {
             id: agent.id,
@@ -177,6 +183,8 @@ export async function getOnboardingQrStatus(userId: string) {
     onboardingStatus: publisher.onboardingStatus,
     qr: qr ? { qrId: qr.id, expiresAt: qr.expiresAt, live } : null,
     pending,
+    // QR-27: the id the code carries and the link a plain camera lands on.
+    displayId: publisher.displayId,
   };
 }
 
@@ -214,12 +222,12 @@ export async function cancelOnboarding(publisherId: string) {
 }
 
 /**
- * Expires the publisher's live QR codes, then clears the claim. Order matters:
- * clearing the claim first would leave a scannable code pointing at a publisher
- * that is momentarily claimable again.
+ * Closes the agent's authority, then clears the claim. The publisher's own
+ * code stays: since QR-27 it is durable and a scan of it claims nothing
+ * until the owner approves, so a cancelled onboarding leaves nothing
+ * dangerous on the phone or the shop window.
  */
 async function resetOnboarding(publisherId: string): Promise<void> {
-  await deactivateQrsFor('PUBLISHER', publisherId);
   await closeOnboardingGrants({ publisherId });
   await repository.resetOnboardingState(publisherId);
 }
@@ -272,7 +280,8 @@ export async function completeOnboarding(
   // Only the claiming agent may complete an onboarding — or an admin, who
   // bypasses the check entirely.
   if (!isAdmin) {
-    const agent = await requireAgentProfile(userId).catch(() => null);
+    // AG-1: only an activated agent completes an onboarding.
+    const agent = await requireWorkingAgent(userId).catch(() => null);
     if (!agent || publisher.agentId !== agent.id) {
       throw new ApiError(
         403,
@@ -308,7 +317,8 @@ export async function prepareClaim(
   if (publisher.onboardingStatus === 'IN_ONBOARDING') throw new Error('QR_ALREADY_CLAIMED');
   if (publisher.onboardingStatus === 'ONBOARDING_COMPLETE') throw new Error('QR_ALREADY_COMPLETE');
 
-  const agent = await requireAgentProfile(scannedByUserId).catch(() => null);
+  // AG-1: an applicant, a held or an exited agent cannot claim a publisher.
+  const agent = await requireWorkingAgent(scannedByUserId).catch(() => null);
   if (!agent) throw new Error('QR_ACCESS_DENIED');
 
   return {

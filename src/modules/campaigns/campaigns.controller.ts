@@ -4,7 +4,7 @@ import { ApiError } from '../../shared/errors';
 import { auditDiff, logActivity } from '../../shared/audit';
 import { Decimal } from '../../shared/money';
 import { getAdvertiserForUser } from '../advertisers';
-import { findAgentProfile } from '../agents';
+import { findWorkingAgentProfile } from '../agents';
 import { listContentCategories } from '../listings';
 import { IMAGE_CACHE_CONTROL, clampSize } from '../qr';
 import { withSpotReviews } from './spot-review.port';
@@ -102,7 +102,7 @@ async function resolveActor(req: Request): Promise<Actor> {
   const userId = req.user!.sub;
   const [advertiser, agent] = await Promise.all([
     getAdvertiserForUser(userId),
-    findAgentProfile(userId),
+    findWorkingAgentProfile(userId),
   ]);
   return {
     userId,

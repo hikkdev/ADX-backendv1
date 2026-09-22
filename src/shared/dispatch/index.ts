@@ -15,4 +15,19 @@ export {
   rankCandidates,
   underCap,
 } from './offer-priority';
-export type { DispatchCandidate, OfferLane, OfferPriority } from './offer-priority';
+export type { DispatchAsk, DispatchCandidate, OfferLane, OfferPriority } from './offer-priority';
+// AG-5: the grade-band routing rule — bands to grades, ranks, distance.
+export {
+  AGENT_GRADE_CODES,
+  DEFAULT_ROUTING_SETTINGS,
+  GRADE_RANK,
+  ROUTING_CONFIG_KEY,
+  distanceKm,
+  gradeRank,
+  meetsGrade,
+  requiredGradeForBand,
+  requiredGradeForLead,
+  routingSettingsFrom,
+  tierRank,
+} from './grade-bands';
+export type { AgentGradeCode, LeadBand, PartyBand, RoutingSettings } from './grade-bands';

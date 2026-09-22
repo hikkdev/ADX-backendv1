@@ -40,6 +40,13 @@ export const DEFAULT_INCENTIVE_RATES: {
   // Lot B (Q101): the advertiser-side twin of PUBLISHER_ONBOARDED, at the
   // same figure.
   { event: 'ADVERTISER_ONBOARDED', tier: '*', amount: '2000.00' },
+  // LH2/LH8 (the Lead Hunt, D1): the hunt's own events, stacked on the
+  // onboarding incentives. A rate may be qualified by the lead's side as
+  // `TIER:SIDE` — `*:ADVERTISER` is every tier's advertiser figure.
+  { event: 'LEAD_CONVERTED', tier: '*', amount: '100.00' },
+  { event: 'LEAD_ACTIVATED', tier: '*', amount: '500.00' },
+  { event: 'LEAD_ACTIVATED', tier: '*:ADVERTISER', amount: '750.00' },
+  { event: 'LEAD_RETAINED', tier: '*', amount: '100.00' },
 ];
 
 let seeded: Promise<void> | null = null;
@@ -47,8 +54,11 @@ let seeded: Promise<void> | null = null;
 export async function ensureIncentiveRates(): Promise<void> {
   seeded ??= (async () => {
     const existing = await repository.listIncentiveRates();
-    if (existing.length > 0) return;
+    // Every default whose event has no row at all is seeded — a platform
+    // that priced the seven old events keeps them and gains the lead ones.
+    const priced = new Set(existing.map((rate) => rate.event));
     for (const rate of DEFAULT_INCENTIVE_RATES) {
+      if (priced.has(rate.event)) continue;
       await repository.upsertIncentiveRate({
         event: rate.event,
         tier: rate.tier,
@@ -104,10 +114,11 @@ export async function setIncentiveRate(input: {
 export async function rateFor(
   event: IncentiveEvent,
   tier = '*',
-  now = new Date()
+  now = new Date(),
+  side?: 'PUBLISHER' | 'ADVERTISER'
 ): Promise<string | null> {
   await ensureIncentiveRates();
-  const rate = await repository.findIncentiveRate(event, tier, now);
+  const rate = await repository.findIncentiveRate(event, tier, now, side);
   return rate ? money(rate.amount) : null;
 }
 
@@ -155,6 +166,8 @@ export type IncentiveInput = {
   note?: string | null;
   amount?: Money | null;
   notice?: IncentiveNotice;
+  /** LH2: the lead's side, for a rate qualified `TIER:SIDE`. */
+  side?: 'PUBLISHER' | 'ADVERTISER' | null;
 };
 
 /**
@@ -199,11 +212,12 @@ export async function recordIncentive(
      */
     amount?: Money | null;
     notice?: IncentiveNotice;
+    side?: 'PUBLISHER' | 'ADVERTISER' | null;
   },
   now = new Date()
 ) {
   await ensureIncentiveRates();
-  const rate = await repository.findIncentiveRate(input.event, input.tier, now);
+  const rate = await repository.findIncentiveRate(input.event, input.tier, now, input.side ?? undefined);
   if (!rate && !input.amount) {
     throw new ApiError(
       500,
@@ -368,6 +382,80 @@ export async function rejectIncentive(
     verifiedAt: now,
     verifiedByUserId: input.byUserId,
     rejectionReason: input.reason.trim(),
+  });
+}
+
+/**
+ * LH10 (the Lead Hunt): the clawback.
+ *
+ * An incentive that was earned on something that did not last — the catch
+ * paid on an account that closed, or a listing that came down inside the
+ * watch window — comes back. Money that never moved is simply refused with
+ * the reason (the same REJECTED the desk writes by hand); money that moved
+ * is **reversed**: an equal and opposite movement out of the agent's wallet
+ * under `REVERSAL`, so the ledger holds both legs and nothing is edited in
+ * place. Idempotent on the incentive, so a watch that runs twice claws back
+ * once.
+ *
+ * The agent is told (the caller notifies) and the write is audited by the
+ * caller; this door only moves the money and stamps the row.
+ */
+export async function clawbackIncentive(
+  incentiveId: string,
+  input: { reason: string; byUserId?: string | null },
+  now = new Date()
+) {
+  if (!input.reason.trim()) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Say why the incentive is being clawed back.');
+  }
+  const incentive = await repository.findIncentive(incentiveId);
+  if (!incentive) throw new ApiError(404, 'NOT_FOUND', 'Incentive not found');
+  if (incentive.status === 'REVERSED') return incentive;
+  if (incentive.status === 'REJECTED') {
+    throw new ApiError(409, 'CONFLICT', 'That incentive was already refused; there is nothing to claw back.');
+  }
+
+  // Nothing moved yet: the row is refused with the reason, and the money
+  // never leaves the platform.
+  if (incentive.status === 'PENDING_VERIFICATION') {
+    return repository.updateIncentive(incentiveId, {
+      status: 'REVERSED',
+      reversedAt: now,
+      reversalReason: input.reason.trim(),
+      ...(input.byUserId ? { verifiedByUserId: input.byUserId } : {}),
+    });
+  }
+
+  const wallet = await ensureWallet({ kind: 'AGENT', id: incentive.agentId }, 'Agent wallet');
+  const gross = money(incentive.amount);
+  const tax = money(incentive.taxWithheld);
+  const net = money(incentive.netAmount);
+  const result = await move({
+    walletId: wallet.id,
+    walletLabel: 'Agent wallet',
+    amount: money(new Decimal(net).negated()),
+    entryType: 'ADJUSTMENT',
+    ledgerKind: 'REVERSAL',
+    idempotencyKey: `incentive-clawback:${incentive.id}`,
+    counterLegs: [
+      { accountCode: 'platform:payables', amount: gross },
+      ...(new Decimal(tax).isZero() ? [] : [{ accountCode: 'platform:tax-withheld', amount: money(new Decimal(tax).negated()), note: 'TDS reversed with the incentive' }]),
+    ],
+    reference: incentive.id,
+    orderId: incentive.orderId,
+    note: `${incentive.event.replace(/_/g, ' ').toLowerCase()} clawed back: ${input.reason.trim()}`,
+    createdByUserId: input.byUserId ?? null,
+    occurredAt: now,
+    // The wallet may be frozen for other reasons; money coming BACK to the
+    // platform is never what a freeze is protecting against.
+    allowFrozen: true,
+  });
+
+  return repository.updateIncentive(incentiveId, {
+    status: 'REVERSED',
+    reversedAt: now,
+    reversalReason: input.reason.trim(),
+    reversalLedgerTransactionId: result.ledgerTransactionId,
   });
 }
 

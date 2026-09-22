@@ -38,8 +38,12 @@ export {
   REQUIRED_EMPLOYEE_INTAKE_PROOFS,
   agentJobLadderSchema,
   employeeIntakeLadderSchema,
+  LEAD_LANDING_FLOW_KEY,
+  LEAD_LANDING_BLOCKS,
+  CODE_LEAD_LANDING_LADDER,
+  leadLandingLadderSchema,
 } from './step-ladder';
-export type { AgentJobProof, EmployeeIntakeProof, StepLadder, LadderStep, LadderProof, AgentJobLadder, EmployeeIntakeLadder } from './step-ladder';
+export type { AgentJobProof, EmployeeIntakeProof, StepLadder, LadderStep, LadderProof, AgentJobLadder, EmployeeIntakeLadder, LeadLandingBlock, LeadLandingLadder } from './step-ladder';
 /** Lot F: `scripts/seedConfig` writes the shipped flows through this — byte-equal keeps the version, a change bumps it and keeps the `flows.<key>:v<N>` snapshot. */
 export { seedAppConfig } from './app-config.service';
 /** The wizard vocabulary, for `scripts/seedConfig` to check the listing flow against before writing it; `canonicalJson` is how it tells "unchanged" from a jsonb column that reorders keys. */

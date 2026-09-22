@@ -342,6 +342,7 @@ const leads: Format = {
     col('bestTimeTo', false, 'text', 'HH:MM, when to call until.', '17:00'),
     col('estimatedCommission', false, 'money', 'Omit it and the platform quotes what it actually pays.', '1450'),
     col('assignedAgentId', false, 'text', 'An agent id to assign the lead to.', '', { maxLength: 64 }),
+    col('importance', false, 'enum', 'AG-5: STANDARD unless the account matters more — KEY goes to a senior agent, ENTERPRISE to the top grade.', 'STANDARD', { enumValues: ['STANDARD', 'KEY', 'ENTERPRISE'] }),
   ],
   rules: [
     'side and businessName are required; the batch carries one source.',
@@ -350,8 +351,8 @@ const leads: Format = {
     'dryRun answers the same report and writes nothing.',
   ],
   sampleRows: [
-    { side: 'PUBLISHER', businessName: 'Sunrise Gym', category: 'Fitness', contactName: 'Kiran Desai', phone: '9876543210', email: 'kiran@sunrisegym.in', address: '3, Baner Road, Pune', locality: 'Baner', city: 'Pune', latitude: '18.5590', longitude: '73.7868', interest: 'Gym mirror decals', bestTimeFrom: '11:00', bestTimeTo: '17:00', estimatedCommission: '1450', assignedAgentId: '' },
-    { side: 'ADVERTISER', businessName: 'Bake House', category: 'Food', contactName: '', phone: '9822098220', email: '', address: '', locality: 'Kothrud', city: 'Pune', latitude: '', longitude: '', interest: '', bestTimeFrom: '', bestTimeTo: '', estimatedCommission: '', assignedAgentId: '' },
+    { side: 'PUBLISHER', businessName: 'Sunrise Gym', category: 'Fitness', contactName: 'Kiran Desai', phone: '9876543210', email: 'kiran@sunrisegym.in', address: '3, Baner Road, Pune', locality: 'Baner', city: 'Pune', latitude: '18.5590', longitude: '73.7868', interest: 'Gym mirror decals', bestTimeFrom: '11:00', bestTimeTo: '17:00', estimatedCommission: '1450', assignedAgentId: '', importance: 'STANDARD' },
+    { side: 'ADVERTISER', businessName: 'Bake House', category: 'Food', contactName: '', phone: '9822098220', email: '', address: '', locality: 'Kothrud', city: 'Pune', latitude: '', longitude: '', interest: '', bestTimeFrom: '', bestTimeTo: '', estimatedCommission: '', assignedAgentId: '', importance: 'KEY' },
   ],
   schemaKeys: () => keysOf(leadRowSchema),
   validate: (row) => jsonValidator(leadRowSchema, leads.columns)(row),

@@ -1,3 +1,4 @@
+import type { TrainingAudience } from '../../shared/database';
 import { prisma } from '../../shared/database';
 import type { ModulePatch, NewModule, NewQuestion, NewTrainingResource, TrainingRepository } from './training.repository';
 
@@ -5,8 +6,17 @@ import type { ModulePatch, NewModule, NewQuestion, NewTrainingResource, Training
 const certificationAgentInclude = { agent: { select: { id: true, displayId: true, user: { select: { name: true } } } } } as const;
 
 export const prismaTrainingRepository: TrainingRepository = {
-  findActiveModules() {
-    return prisma.trainingModule.findMany({ where: { isActive: true }, orderBy: [{ ordinal: 'asc' }, { createdAt: 'asc' }] });
+  findActiveModules(sides) {
+    const audiences: TrainingAudience[] = ['ALL'];
+    if (!sides || sides.publisher) audiences.push('PUBLISHER_AGENT');
+    if (!sides || sides.advertiser) audiences.push('ADVERTISER_AGENT');
+    return prisma.trainingModule.findMany({ where: { isActive: true, audience: { in: audiences } }, orderBy: [{ ordinal: 'asc' }, { createdAt: 'asc' }] });
+  },
+
+  async agentSides(agentId) {
+    const row = await prisma.agentProfile.findUnique({ where: { id: agentId }, select: { user: { select: { roles: { select: { role: true } } } } } });
+    const roles = row?.user.roles.map((r) => r.role) ?? [];
+    return { publisher: roles.includes('AGENT_PUBLISHER'), advertiser: roles.includes('AGENT_ADVERTISER') };
   },
 
   findModules() {

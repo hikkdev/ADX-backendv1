@@ -4,6 +4,7 @@ import { authenticate } from '../../shared/auth';
 import { redis } from '../../shared/cache';
 import { ApiError } from '../../shared/errors';
 import { logger } from '../../shared/logging';
+import { SSE_HEARTBEAT_MS, SSE_RETRY_MS } from '../../shared/http';
 import { findUserSummaries } from '../users';
 import type { Actor } from './support.types';
 
@@ -38,8 +39,8 @@ import type { Actor } from './support.types';
 
 const TOKEN_KEY = (token: string) => `support:stream:${token}`;
 export const STREAM_TOKEN_TTL_SECONDS = 5 * 60;
-export const HEARTBEAT_MS = 25 * 1000;
-export const RETRY_MS = 3000;
+export const HEARTBEAT_MS = SSE_HEARTBEAT_MS;
+export const RETRY_MS = SSE_RETRY_MS;
 
 type StreamGrant = { ticketId: string; sub: string; roles: string[] };
 
@@ -112,69 +113,9 @@ export function authenticateStream(req: Request, res: Response, next: NextFuncti
 /** The inbox stream has no ticket; its token is minted against this marker. */
 export const INBOX_TOKEN_TICKET = '@inbox';
 
-export type SseWriter = {
-  send(event: string, data: unknown, id?: string): void;
-  comment(text: string): void;
-  close(): void;
-  readonly closed: boolean;
-};
+// LT-1: the writer moved to `shared/http/sse.ts` so the ops live map can push the same way; re-exported here for the callers and the test.
+export { openSse, type SseWriter } from '../../shared/http';
 
-/** Opens the response as an event stream: headers, `retry`, and the heartbeat until the socket closes. */
-export function openSse(req: Request, res: Response, onClose: () => void): SseWriter {
-  res.status(200);
-  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
-  res.setHeader('Cache-Control', 'no-cache, no-transform');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no');
-  res.flushHeaders();
-  res.write(`retry: ${RETRY_MS}\n\n`);
-
-  let closed = false;
-  const heartbeat = setInterval(() => {
-    if (closed) return;
-    res.write(`: ping ${Date.now()}\n\n`);
-  }, HEARTBEAT_MS);
-
-  const finish = () => {
-    if (closed) return;
-    closed = true;
-    clearInterval(heartbeat);
-    try {
-      onClose();
-    } catch (err) {
-      logger.warn('Live-chat stream close hook failed', { reason: err instanceof Error ? err.message : String(err) });
-    }
-    res.end();
-  };
-  req.on('close', finish);
-  res.on('close', finish);
-
-  return {
-    get closed() {
-      return closed;
-    },
-    send(event, data, id) {
-      if (closed) return;
-      const lines = [`event: ${event}`];
-      if (id) lines.push(`id: ${id}`);
-      lines.push(`data: ${JSON.stringify(data)}`);
-      res.write(`${lines.join('\n')}\n\n`);
-    },
-    comment(text) {
-      if (closed) return;
-      res.write(`: ${text}\n\n`);
-    },
-    close: finish,
-  };
-}
-
-/**
- * The instant to resume from — the `Last-Event-ID` header first (what the
- * browser's own retry and the phones send), else `?lastEventId=<ms>` (what
- * the console sends, because its reconnect mints a fresh single-use token
- * and opens a fresh `EventSource`, which cannot carry the header). Null
- * when neither names a time.
- */
 export function lastEventInstant(req: Request): Date | null {
   const raw = req.headers['last-event-id'];
   const header = Array.isArray(raw) ? raw[0] : raw;

@@ -28,6 +28,7 @@ import {
   setRateCard,
   setRateCardOnBehalf,
   updateMe,
+  completeApplication,
   updatePartner,
   withLastLogin,
 } from './print-partners.service';
@@ -57,6 +58,7 @@ import {
 } from './print-floor.service';
 import { tellJobAssigned } from './print-partners.notify';
 import { prismaPrintPartnersRepository as repository } from './prisma-print-partners.repository';
+import { serviceAgreementFor } from './service-agreement';
 import type {
   JobRow,
   JobWithPartner,
@@ -307,8 +309,9 @@ export async function createPartnerHandler(req: Request, res: Response): Promise
 }
 
 export async function getPartnerHandler(req: Request, res: Response): Promise<void> {
-  const [row] = await withKycSummary(await withLastLogin([await getPartner(partnerId(req))]));
-  res.json({ success: true, data: shapePartner(row!) });
+  const [[row], agreement] = await Promise.all([withKycSummary(await withLastLogin([await getPartner(partnerId(req))])), serviceAgreementFor(partnerId(req))]);
+  // DS-2: the desk sees where the service agreement stands, beside the KYC.
+  res.json({ success: true, data: { ...shapePartner(row!), agreement } });
 }
 
 /* ── G13-B: the desk on the partner's behalf — for a partner who never activates ── */
@@ -463,8 +466,23 @@ export async function partnerQuotesHandler(req: Request, res: Response): Promise
 export async function myProfileHandler(req: Request, res: Response): Promise<void> {
   const view = await partnerProfile(await me(req));
   // N2-B: the partner's own read carries the KYC summary the desk's read and the roster do.
-  const [partner] = await withKycSummary([view.partner]);
-  res.json({ success: true, data: { ...shapePartner(partner!), walletId: view.walletId, balances: view.balances, rateCard: view.rateCard } });
+  const [[partner], agreement] = await Promise.all([withKycSummary([view.partner]), serviceAgreementFor(view.partner.id)]);
+  // DS-2: and the service agreement — the door on the partner's profile.
+  res.json({ success: true, data: { ...shapePartner(partner!), walletId: view.walletId, balances: view.balances, rateCard: view.rateCard, agreement } });
+}
+
+/** PP-1: `POST /print-partners/me/application` — the shop's own details while the application is open. */
+export async function completeMyApplicationHandler(req: Request, res: Response): Promise<void> {
+  const body = parse<schema.ApplicationDetailsInput>(schema.applicationDetailsSchema, req.body);
+  const { before, after } = await completeApplication(await me(req), body);
+  await logActivity(userId(req), 'PRINT_PARTNER_APPLICATION_UPDATED', {
+    req,
+    module: 'print-partners',
+    targetType: 'PrintPartner',
+    targetId: after.id,
+    diff: auditDiff(before, after),
+  });
+  res.json({ success: true, data: shapePartner(after) });
 }
 
 export async function updateMyProfileHandler(req: Request, res: Response): Promise<void> {

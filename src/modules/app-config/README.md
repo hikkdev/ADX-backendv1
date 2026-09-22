@@ -270,3 +270,15 @@ npx vitest run src/modules/app-config
 ## Suggested ownership
 
 Platform team, alongside `integrations`.
+
+## The invite landing's copy (LH7)
+
+`lead-landing` is the fifth known flow — a step ladder with one step per side
+(`publisher`, `advertiser`): `title` the headline, `subtitle` the line under
+it, `hint` the bullets one per line, `cta` the button, and the "proofs" the
+hook blocks the page shows (`LEAD_LANDING_BLOCKS`: RATE_ESTIMATE,
+NEARBY_CAMPAIGNS, NEARBY_SPOTS, SAMPLE_ESTIMATE, PACKAGES, PROPOSALS), with a
+caption each. Its vocabulary is `repeatable` — a block may sit on both sides
+(once each) — and requires nothing. `leads` reads it through `getFlow` and
+falls back to `CODE_LEAD_LANDING_LADDER`; `GET /leads/landing-copy` answers
+the ladder in force for the editor's fallback.

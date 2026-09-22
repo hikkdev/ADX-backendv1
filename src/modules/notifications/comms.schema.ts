@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { listQuerySchema } from '../../shared/pagination';
 import { SMS_KINDS } from '../../shared/sms';
 import { DELIVERY_SORTS, DELIVERY_STATUSES, TEMPLATE_SORTS, TEMPLATE_STATUSES } from './comms.repository';
-import { NOTIFICATION_CHANNELS } from './notifications.types';
+import { NOTIFICATION_CHANNELS, TEMPLATE_CHANNELS } from './notifications.types';
 
 const key = z
   .string()
@@ -26,7 +26,7 @@ export const listTemplatesQuerySchema = listQuerySchema(TEMPLATE_STATUSES, TEMPL
 export const createTemplateSchema = z.object({
   key,
   event,
-  channels: z.array(z.enum(NOTIFICATION_CHANNELS)).min(1),
+  channels: z.array(z.enum(TEMPLATE_CHANNELS)).min(1),
   subject: text(200).nullable().optional(),
   emailBody: text(20_000).nullable().optional(),
   smsKind: z.enum(SMS_KINDS).nullable().optional(),
@@ -56,7 +56,7 @@ export const updateTemplateSchema = createTemplateSchema.omit({ key: true }).par
 });
 
 const deliveryFilterFields = {
-  channel: z.enum(NOTIFICATION_CHANNELS).optional(),
+  channel: z.enum(TEMPLATE_CHANNELS).optional(),
   templateKey: key.optional(),
   userId: z.string().trim().min(1).max(64).optional(),
   from: instant.optional(),

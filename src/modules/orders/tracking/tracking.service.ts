@@ -1,4 +1,5 @@
 import { ApiError } from '../../../shared/errors';
+import { getPlatformSettings } from '../../app-config';
 import { isSignedCodeFor } from '../../qr';
 import { prismaOrdersRepository as repository } from '../prisma-orders.repository';
 
@@ -115,9 +116,28 @@ export async function updateAgentLocation(
 export async function getAgentLocation(orderId: string) {
   const order = await repository.findAgentLocation(orderId);
   if (!order) throw new ApiError(404, 'NOT_FOUND', 'Order not found');
+  // LT-1: an ETA beside the position when the platform settings allow the
+  // parties to see one — straight-line metres at a city drive, the same
+  // floor the ops live map uses; null without a fix, a site, or the switch.
+  const settings = await getPlatformSettings();
+  const eta =
+    settings.tracking.partiesSeeEta && order.agentLatitude !== null && order.agentLongitude !== null && order.listing.latitude !== null && order.listing.longitude !== null
+      ? etaFrom({ latitude: order.agentLatitude, longitude: order.agentLongitude }, { latitude: order.listing.latitude, longitude: order.listing.longitude })
+      : null;
   return {
     latitude: order.agentLatitude,
     longitude: order.agentLongitude,
     updatedAt: order.agentLocationUpdatedAt,
+    eta,
   };
+}
+
+const ETA_FLOOR_MPS = 6;
+function etaFrom(from: { latitude: number; longitude: number }, to: { latitude: number; longitude: number }): { minutes: number; distanceM: number } {
+  const rad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = rad(to.latitude - from.latitude);
+  const dLng = rad(to.longitude - from.longitude);
+  const s = Math.sin(dLat / 2) ** 2 + Math.cos(rad(from.latitude)) * Math.cos(rad(to.latitude)) * Math.sin(dLng / 2) ** 2;
+  const metres = 2 * 6371000 * Math.asin(Math.min(1, Math.sqrt(s)));
+  return { minutes: Math.max(1, Math.round(metres / ETA_FLOOR_MPS / 60)), distanceM: Math.round(metres) };
 }

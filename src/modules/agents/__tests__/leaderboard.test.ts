@@ -10,7 +10,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  */
 
 const { repository, agents } = vi.hoisted(() => ({
-  repository: { cohort: vi.fn(), earningsByAgent: vi.fn() },
+  repository: { cohort: vi.fn(), earningsByAgent: vi.fn(), leadFiguresByAgent: vi.fn() },
   agents: { findByUserId: vi.fn() },
 }));
 
@@ -40,10 +40,15 @@ const cohort = (n: number) =>
 const earnings = (n: number, shift = 0) =>
   new Map(Array.from({ length: n }, (_, i) => [`agt_${i + 1}`, new Decimal((n - i + shift) * 1000)]));
 
+/** LH8: nothing from leads unless a test says so. */
+const noLeads = { fromLeads: new Decimal(0), conversions: 0 };
+const competitor = (over: Partial<{ agentId: string; name: string; locality: string | null; earnings: Decimal; fromLeads: Decimal; conversions: number }> & { agentId: string; name: string; earnings: Decimal }) => ({ locality: null, ...noLeads, ...over });
+
 beforeEach(() => {
   vi.clearAllMocks();
   agents.findByUserId.mockResolvedValue({ id: 'agt_12', city: 'Bengaluru' });
   repository.cohort.mockResolvedValue(cohort(13));
+  repository.leadFiguresByAgent.mockResolvedValue(new Map());
 });
 
 describe('the rules', () => {
@@ -56,22 +61,24 @@ describe('the rules', () => {
 
   it('ranks by earnings as Decimal, then name', () => {
     const ranked = rank([
-      { agentId: 'b', name: 'Bea', locality: null, earnings: new Decimal('1000.50') },
-      { agentId: 'a', name: 'Al', locality: null, earnings: new Decimal('1000.50') },
-      { agentId: 'c', name: 'Cy', locality: null, earnings: new Decimal('1000.49') },
+      competitor({ agentId: 'b', name: 'Bea', earnings: new Decimal('1000.50') }),
+      competitor({ agentId: 'a', name: 'Al', earnings: new Decimal('1000.50') }),
+      competitor({ agentId: 'c', name: 'Cy', earnings: new Decimal('1000.49') }),
     ]);
     expect(ranked.map((r) => `${r.rank}:${r.agentId}`)).toEqual(['1:a', '2:b', '3:c']);
   });
 
   it('shows the podium with figures, ranks 4–10 without, and the viewer\'s own gaps', () => {
-    const ranked = rank(cohort(13).map((m, i) => ({ ...m, earnings: new Decimal((13 - i) * 1000) })));
+    const ranked = rank(cohort(13).map((m, i) => ({ ...m, ...noLeads, earnings: new Decimal((13 - i) * 1000) })));
     const view = viewFor(ranked, 'agt_12', null);
     expect(view.top.map((r) => r.earnings)).toEqual(['13000.00', '12000.00', '11000.00']);
     expect(view.window.map((r) => r.rank)).toEqual([4, 5, 6, 7, 8, 9, 10]);
     expect(view.window[0]).not.toHaveProperty('earnings');
+    expect(view.window[0]).not.toHaveProperty('fromLeads');
     expect(view.me).toEqual({
       rank: 12,
       earnings: '2000.00',
+      fromLeads: '0.00',
       delta: null,
       behind: { rank: 11, gap: '1000.00' },
       ahead: { rank: 13, gap: '1000.00' },
@@ -80,7 +87,7 @@ describe('the rules', () => {
   });
 
   it('draws no rows around a viewer already on the first page', () => {
-    const ranked = rank(cohort(13).map((m, i) => ({ ...m, earnings: new Decimal((13 - i) * 1000) })));
+    const ranked = rank(cohort(13).map((m, i) => ({ ...m, ...noLeads, earnings: new Decimal((13 - i) * 1000) })));
     const view = viewFor(ranked, 'agt_2', null);
     expect(view.around).toEqual([]);
     expect(view.top[1]?.you).toBe(true);
@@ -133,6 +140,34 @@ describe('the board', () => {
     // The desk sees the whole cohort ranked, not only 4–10.
     expect(board.window).toHaveLength(10);
     expect(board.window[board.window.length - 1]?.rank).toBe(13);
+  });
+});
+
+describe('the "from leads" column (LH8)', () => {
+  it('prints the hunt\'s share on the podium and the viewer\'s own row, and only a count of conversions on everyone else', async () => {
+    repository.earningsByAgent.mockResolvedValue(earnings(13));
+    repository.leadFiguresByAgent.mockResolvedValue(new Map([
+      ['agt_1', { fromLeads: new Decimal('1200.00'), conversions: 4 }],
+      ['agt_5', { fromLeads: new Decimal('300.00'), conversions: 2 }],
+      ['agt_12', { fromLeads: new Decimal('100.00'), conversions: 1 }],
+    ]));
+    const board = await getMyLeaderboard('usr_12', 'MONTH', NOW);
+    // Read once, for the current window only — the delta ranks on earnings alone.
+    expect(repository.leadFiguresByAgent).toHaveBeenCalledTimes(1);
+    expect(repository.leadFiguresByAgent.mock.calls[0]?.[1]).toEqual({ from: new Date('2026-08-12T06:00:00.000Z'), to: NOW });
+    expect(board.top[0]).toMatchObject({ agentId: 'agt_1', earnings: '13000.00', fromLeads: '1200.00', conversions: 4 });
+    expect(board.top[1]).toMatchObject({ fromLeads: '0.00', conversions: 0 });
+    const fifth = board.window.find((row) => row.agentId === 'agt_5');
+    expect(fifth).toMatchObject({ conversions: 2 });
+    expect(fifth).not.toHaveProperty('fromLeads');
+    expect(board.me).toMatchObject({ rank: 12, earnings: '2000.00', fromLeads: '100.00' });
+  });
+
+  it('the desk\'s board carries the count on every row too', async () => {
+    repository.earningsByAgent.mockResolvedValue(earnings(13));
+    repository.leadFiguresByAgent.mockResolvedValue(new Map([['agt_13', { fromLeads: new Decimal('100.00'), conversions: 1 }]]));
+    const board = await getLeaderboardForCity('Bengaluru', 'WEEK', NOW);
+    expect(board.window[board.window.length - 1]).toMatchObject({ rank: 13, conversions: 1 });
   });
 });
 

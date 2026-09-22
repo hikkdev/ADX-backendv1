@@ -8,16 +8,19 @@ import { createAgent, updateAgent } from '../agents';
 import { createPartner, updatePartner } from '../print-partners';
 import { createEmployee, updateEmployee } from '../employees';
 import { createUser } from '../users';
+import { createLead, patchLead } from '../leads';
 import { prismaPartyImportsRepository as repository } from './prisma-party-imports.repository';
 import type { MatchSet, MatchedParty } from './party-imports.repository';
 import {
   ADVERTISER_COLUMNS,
   AGENT_COLUMNS,
   EMPLOYEE_COLUMNS,
+  LEAD_COLUMNS,
   PRINT_PARTNER_COLUMNS,
   advertiserRowSchema,
   agentRowSchema,
   employeeRowSchema,
+  leadRowSchema,
   printPartnerRowSchema,
   type ParsedRow,
   type PartyKey,
@@ -328,4 +331,51 @@ const employees: PartyAdapter = {
   },
 };
 
-export const ADAPTERS: Record<PartyKey, PartyAdapter> = { advertisers, agents, 'print-partners': printPartners, employees };
+/* ── Leads (LH3) ───────────────────────────────────────────────────────── */
+
+const leads: PartyAdapter = {
+  key: 'leads',
+  party: 'LEAD',
+  columns: LEAD_COLUMNS,
+  rowSchema: leadRowSchema,
+  mergeable: ['category', 'contactName', 'email', 'address', 'locality', 'city', 'interest'],
+  unwritten: [],
+  noun: 'lead',
+  uniqueEmail: false,
+  match: (rows) => repository.matchLeads({ mobiles: unique(rows.map((row) => row.mobile)) }),
+  async create(row, ctx) {
+    // `createLead` does what the console's Create does: the identifier, the
+    // quoted estimate, the source row, the city key, the score — and refuses
+    // a number on an account, which the match already blocked.
+    const lead = await createLead(
+      {
+        side: row['side'] as 'PUBLISHER' | 'ADVERTISER',
+        businessName: row['businessName'] ?? row.mobile,
+        phone: row.mobile,
+        ...(row['category'] ? { category: row['category'] } : {}),
+        ...(row['contactName'] ? { contactName: row['contactName'] } : {}),
+        ...(row['email'] ? { email: row['email'] } : {}),
+        ...(row['address'] ? { address: row['address'] } : {}),
+        ...(row['locality'] ? { locality: row['locality'] } : {}),
+        ...(row['city'] ? { city: row['city'] } : {}),
+        ...(row['latitude'] ? { latitude: Number(row['latitude']) } : {}),
+        ...(row['longitude'] ? { longitude: Number(row['longitude']) } : {}),
+        ...(row['interest'] ? { interest: row['interest'] } : {}),
+        source: row['source'] || 'import',
+        ...(row['bestTimeFrom'] ? { bestTimeFrom: row['bestTimeFrom'] } : {}),
+        ...(row['bestTimeTo'] ? { bestTimeTo: row['bestTimeTo'] } : {}),
+        ...(row['estimatedCommission'] ? { estimatedCommission: row['estimatedCommission'] } : {}),
+        ...(row['importance'] ? { importance: row['importance'] as 'STANDARD' | 'KEY' | 'ENTERPRISE' } : {}),
+      },
+      ctx.byUserId,
+    );
+    await logActivity(ctx.byUserId, 'LEAD_CREATED', { req: ctx.req, module: 'party-imports', targetType: 'Lead', targetId: lead.id, metadata: meta(ctx, { displayId: lead.displayId, businessName: lead.businessName, source: 'import' }) });
+    return { id: lead.id, displayId: lead.displayId };
+  },
+  async merge(target, fill, ctx) {
+    const after = await patchLead(target.id, ctx.byUserId, fill);
+    await logActivity(ctx.byUserId, 'LEAD_UPDATED', { req: ctx.req, module: 'party-imports', targetType: 'Lead', targetId: after.id, diff: auditDiff(target.fields, { ...target.fields, ...fill }), metadata: meta(ctx, { source: 'import', fields: Object.keys(fill) }) });
+  },
+};
+
+export const ADAPTERS: Record<PartyKey, PartyAdapter> = { advertisers, agents, 'print-partners': printPartners, employees, leads };

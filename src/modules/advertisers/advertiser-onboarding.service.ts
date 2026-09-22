@@ -1,14 +1,8 @@
 import { ApiError } from '../../shared/errors';
-import {
-  ONBOARDING_QR_TTL_SECONDS,
-  deactivateQrsFor,
-  decideOnboardingScan,
-  findActiveQrFor,
-  findPendingScan,
-  generateQr,
-} from '../qr';
-import type { ClaimedAdvertiser } from '../qr';
-import { findAgentProfile } from '../agents';
+import { askOf, decideOnboardingScan, findActiveQrFor, findPendingScan, getOrCreateIdentityQr } from '../qr';
+import type { ClaimedAdvertiser, IdentitySummary } from '../qr';
+import { isVerifiedParty } from '../../shared/kyc-state';
+import { findWorkingAgentProfile } from '../agents';
 import { accessLogFor, closeOnboardingGrants, hasLiveOnboardingGrant, openOnboardingGrant } from '../access-grants';
 import { getAdvertiserForUser } from './advertisers.service';
 import { prismaAdvertisersRepository as repository } from './prisma-advertisers.repository';
@@ -32,29 +26,41 @@ async function mine(userId: string) {
   return advertiser;
 }
 
+/** QR-27: the advertiser's own durable code — see the publisher's twin for the why. */
 export async function getOrCreateOnboardingQr(
   userId: string,
   position?: { latitude: number; longitude: number },
 ) {
   const advertiser = await mine(userId);
-  if (await hasLiveOnboardingGrant({ advertiserId: advertiser.id })) {
-    throw new ApiError(409, 'CONFLICT', 'An agent is already onboarding you.');
-  }
+  return getOrCreateIdentityQr('ADVERTISER', advertiser.id, position);
+}
 
-  const existing = await findActiveQrFor('ADVERTISER', advertiser.id);
-  if (existing && (existing.expiresAt === null || existing.expiresAt.getTime() > Date.now())) {
-    return { qrId: existing.id, token: existing.token, expiresAt: existing.expiresAt, created: false };
-  }
-  if (existing) await deactivateQrsFor('ADVERTISER', advertiser.id);
+/**
+ * QR-27: the account behind the code. An advertiser has no onboarding
+ * status column; the basics being in is what "onboarded" means on this
+ * side — the same measure the app's set-up card reads.
+ */
+export async function describeForQr(advertiserId: string): Promise<IdentitySummary | null> {
+  const advertiser = await repository.findAdvertiserById(advertiserId);
+  if (!advertiser) return null;
+  const has = (value: string | null | undefined) => typeof value === 'string' && value.trim().length > 0;
+  const onboarded = has(advertiser.name) && advertiser.name.trim() !== advertiser.mobile.trim() && has(advertiser.email) && has(advertiser.billingAddress);
+  return {
+    id: advertiser.id,
+    displayId: advertiser.displayId ?? null,
+    name: advertiser.name,
+    mobile: advertiser.mobile,
+    type: advertiser.type,
+    city: advertiser.city ?? null,
+    verified: isVerifiedParty(advertiser.kycStatus),
+    onboarded,
+  };
+}
 
-  const { qrId, token, expiresAt } = await generateQr(
-    'ADVERTISER',
-    advertiser.id,
-    ['AGENT_ADVERTISER'],
-    undefined,
-    { expiresInSeconds: ONBOARDING_QR_TTL_SECONDS, position },
-  );
-  return { qrId, token, expiresAt, created: true };
+/** QR-27: the working agent behind a session, for the QR module's port. */
+export async function workingAgentIdForQr(scannedByUserId: string): Promise<string | null> {
+  const agent = await findWorkingAgentProfile(scannedByUserId);
+  return agent?.id ?? null;
 }
 
 export async function getOnboardingQrStatus(userId: string) {
@@ -65,12 +71,15 @@ export async function getOnboardingQrStatus(userId: string) {
 
   let pending = null;
   if (pendingScan) {
-    const agent = await findAgentProfile(pendingScan.scannedById);
+    const agent = await findWorkingAgentProfile(pendingScan.scannedById);
     const person = agent ? await repository.findUserSummary(pendingScan.scannedById) : null;
     pending = {
       scanId: pendingScan.id,
       scannedAt: pendingScan.createdAt,
       distanceM: pendingScan.distanceM,
+      // QR-27: what the approval opens — the onboarding, or the access the agent asked for.
+      kind: pendingScan.action === 'REQUEST_ACCESS' ? ('ACCESS' as const) : ('ONBOARDING' as const),
+      ask: askOf(pendingScan.ask),
       agent: agent
         ? {
             id: agent.id,
@@ -87,6 +96,7 @@ export async function getOnboardingQrStatus(userId: string) {
     onboarding: (await hasLiveOnboardingGrant({ advertiserId: advertiser.id })) ? 'WITH_AGENT' : 'SELF',
     qr: qr ? { qrId: qr.id, expiresAt: qr.expiresAt, live } : null,
     pending,
+    displayId: advertiser.displayId ?? null,
   };
 }
 
@@ -109,7 +119,8 @@ export async function prepareClaim(
   const advertiser = await repository.findAdvertiserById(advertiserId);
   if (!advertiser) throw new Error('QR_NOT_FOUND');
   if (await hasLiveOnboardingGrant({ advertiserId })) throw new Error('QR_ALREADY_CLAIMED');
-  const agent = await findAgentProfile(scannedByUserId);
+  // AG-1: an applicant, a held or an exited agent cannot claim an advertiser.
+  const agent = await findWorkingAgentProfile(scannedByUserId);
   if (!agent) throw new Error('QR_ACCESS_DENIED');
   return {
     advertiser: { id: advertiser.id, name: advertiser.name, mobile: advertiser.mobile, type: advertiser.type },

@@ -16,7 +16,7 @@ const { repository, agents } = vi.hoisted(() => ({
     record: vi.fn(),
     review: vi.fn(),
   },
-  agents: { agentExists: vi.fn(), findAgentProfile: vi.fn() },
+  agents: { agentExists: vi.fn(), findAgentProfile: vi.fn(), upsertDocumentsFromKyc: vi.fn(async () => undefined) },
 }));
 
 vi.mock('../prisma-agent-kyc.repository', () => ({ prismaAgentKycRepository: repository }));

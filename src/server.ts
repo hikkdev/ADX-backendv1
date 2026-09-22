@@ -6,6 +6,7 @@ import { redis } from './shared/cache';
 import { registerGracefulShutdown } from './bootstrap/graceful-shutdown';
 import { startPublisherTimerJob, publisherTimerInterval } from './jobs/publisher-timer.job';
 import { startRightsRenewalJob, rightsRenewalInterval } from './jobs/rights-renewal.job';
+import { startAgentDocumentExpiryJob, agentDocumentExpiryInterval } from './jobs/agent-document-expiry.job';
 import { startAgentTimerJob, agentTimerInterval } from './jobs/agent-timer.job';
 import { startEventScraperJob, eventScraperInterval } from './jobs/event-scraper.job';
 import {
@@ -34,6 +35,13 @@ import { startHealthSampleJob, healthSampleInterval } from './jobs/health-sample
 import { startReportScheduleJob, reportScheduleInterval } from './jobs/report-schedule.job';
 import { startPayoutBatchDraftJob, payoutBatchDraftInterval } from './jobs/payout-batch-draft.job';
 import { startPrintQuoteExpiryJob, printQuoteExpiryInterval } from './jobs/print-quote-expiry.job';
+import { esignExpiryInterval, startEsignExpiryJob } from './jobs/esign-expiry.job';
+import { agentTrailRetentionInterval, startAgentTrailRetentionJob } from './jobs/agent-trail-retention.job';
+import { leadScoringInterval, startLeadScoringJob } from './jobs/lead-scoring.job';
+import { leadPipelineInterval, startLeadPipelineJob } from './jobs/lead-pipeline.job';
+import { leadClaimSweepInterval, startLeadClaimSweepJob } from './jobs/lead-claim-sweep.job';
+import { leadOutreachTickInterval, startLeadOutreachTickJob } from './jobs/lead-outreach-tick.job';
+import { leadIntegrityInterval, startLeadIntegrityJob } from './jobs/lead-integrity.job';
 import { startLiveChatSlaJob, liveChatSlaInterval } from './jobs/live-chat-sla.job';
 import { startPublisherSubscriptionJob, publisherSubscriptionInterval } from './jobs/publisher-subscription.job';
 import { startPackageRenewalJob, packageRenewalInterval } from './jobs/package-renewal.job';
@@ -78,6 +86,7 @@ const server = app.listen(env.PORT, () => {
   warmConnections();
   startPublisherTimerJob();
   startRightsRenewalJob();
+  startAgentDocumentExpiryJob();
   startAgentTimerJob();
   startEventScraperJob();
   startCampaignLifecycleJob();
@@ -113,6 +122,16 @@ const server = app.listen(env.PORT, () => {
   startPayoutBatchDraftJob();
   // Lot H (Q147): OPEN print quote requests past their deadline — re-invited once, then expired.
   startPrintQuoteExpiryJob();
+  startEsignExpiryJob();
+  startAgentTrailRetentionJob();
+  startLeadScoringJob();
+  startLeadPipelineJob();
+  // LH5 (D3): the hourly claim sweep.
+  startLeadClaimSweepJob();
+  // LH6 (D5): the outreach tick — queued sends, sequence steps, the recording purge.
+  startLeadOutreachTickJob();
+  // LH10: the integrity scan, the clawback watch and the daily QA draw.
+  startLeadIntegrityJob();
   // Lot I: live chats past the first-response target, and idle ones nobody picked up.
   startLiveChatSlaJob();
   // Lot J (B1): the daily publisher-subscription sweep.
@@ -145,6 +164,7 @@ server.on('error', (err: NodeJS.ErrnoException) => {
 registerGracefulShutdown(server, () => {
   if (publisherTimerInterval) clearInterval(publisherTimerInterval);
   if (rightsRenewalInterval) clearInterval(rightsRenewalInterval);
+  if (agentDocumentExpiryInterval) clearInterval(agentDocumentExpiryInterval);
   if (agentTimerInterval) clearInterval(agentTimerInterval);
   if (eventScraperInterval) clearInterval(eventScraperInterval);
   if (campaignLifecycleInterval) clearInterval(campaignLifecycleInterval);
@@ -164,6 +184,13 @@ registerGracefulShutdown(server, () => {
   if (reportScheduleInterval) clearInterval(reportScheduleInterval);
   if (payoutBatchDraftInterval) clearInterval(payoutBatchDraftInterval);
   if (printQuoteExpiryInterval) clearInterval(printQuoteExpiryInterval);
+  if (esignExpiryInterval) clearInterval(esignExpiryInterval);
+  if (agentTrailRetentionInterval) clearInterval(agentTrailRetentionInterval);
+  if (leadScoringInterval) clearInterval(leadScoringInterval);
+  if (leadPipelineInterval) clearInterval(leadPipelineInterval);
+  if (leadClaimSweepInterval) clearInterval(leadClaimSweepInterval);
+  if (leadOutreachTickInterval) clearInterval(leadOutreachTickInterval);
+  if (leadIntegrityInterval) clearInterval(leadIntegrityInterval);
   if (liveChatSlaInterval) clearInterval(liveChatSlaInterval);
   if (publisherSubscriptionInterval) clearInterval(publisherSubscriptionInterval);
   if (packageRenewalInterval) clearInterval(packageRenewalInterval);

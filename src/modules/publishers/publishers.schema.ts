@@ -285,3 +285,6 @@ export const reviewKycSchema = z
     (d) => d.status !== 'REJECTED' || (d.rejectionReason && d.rejectionReason.trim().length > 0),
     { message: 'rejectionReason is required when status is REJECTED', path: ['rejectionReason'] },
   );
+
+/** AG-5: `PATCH /publishers/:publisherId/band` — the importance band, ADX's own judgement about who it is dealing with. */
+export const partyBandSchema = z.object({ sizeBand: upperEnum(['INDIVIDUAL', 'SMALL_AGENCY', 'LARGE_AGENCY']) });

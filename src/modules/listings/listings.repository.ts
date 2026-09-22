@@ -7,8 +7,7 @@ import type {
   ListingDocumentStatus,
   ListingPhoto,
   ListingStatus,
-  PricingUnit,
-} from '../../shared/database';
+  PricingUnit, Prisma } from '../../shared/database';
 import type { AdminListingsQuery, ReviewQueueQuery } from './listings.schema';
 import type { SlotHoldOptions, SlotWindow } from './slot-holds';
 
@@ -64,6 +63,8 @@ export type SpotAttributes = {
   availableHoursTo: string;
   peakPeriodNote: string;
   rateCardUrl: string;
+  /** AG-4: a vehicle put up as a spot, by its registration. */
+  vehicleNumber: string;
 };
 
 export type NewListing = Partial<SpotAttributes> & {
@@ -112,6 +113,9 @@ export type NewListing = Partial<SpotAttributes> & {
 };
 
 export type ListingPatch = Partial<SpotAttributes> & Partial<{
+  /** AG-4: Cashfree's RC lookup, when the desk ran it. */
+  vehicleRcVerifiedAt: Date | null;
+  vehicleRcPayload: Prisma.InputJsonValue;
   title: string;
   /** Lot X-B: a corrected city; the service stamps `cityId` beside it. */
   city: string;
@@ -147,6 +151,10 @@ export type ListingWithPublisher = Listing & {
     address: string | null;
     city: string | null;
     state: string | null;
+    /** AG-4: the name the RC's owner is matched against. */
+    name: string | null;
+    /** AG-5: the band that decides which grade of agent the spot's work is routed to. */
+    sizeBand: string;
   } | null;
 };
 
@@ -174,6 +182,8 @@ export type BrowseFilter = {
   category?: 'INDOOR' | 'OUTDOOR' | 'TRANSIT' | 'MEDIA';
   /** QR-20: the sub-category — one `VenueType`. */
   venueTypeId?: string;
+  /** QR-27: one publisher's spaces — an advertiser who scanned their code, or a shared profile. */
+  publisherId?: string;
   /** DIGITAL matches a sub-type naming a screen; STATIC is everything else. */
   display?: 'DIGITAL' | 'STATIC';
   minRate?: string;

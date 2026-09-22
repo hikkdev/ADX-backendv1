@@ -1,6 +1,7 @@
 import QRCode from 'qrcode';
 import type { QrType } from '../../shared/database';
 import { renderPrinted, type QrRenderResult } from '../../shared/qr-engine';
+import { identityContent, isIdentityType } from './qr.service';
 
 /** House style for every rendered code — dark teal on white, 2-module quiet zone. */
 const STYLE = { margin: 2, color: { dark: '#213333', light: '#FFFFFF' } } as const;
@@ -32,7 +33,9 @@ export async function renderQrImage(
   if (isPrintedType(qr.type)) {
     return renderPrinted({ content: qr.token, format, size, ...(caption ? { style: { frameCaption: caption } } : {}) });
   }
-  const body = format === 'png' ? await toPngBuffer(qr.token, size) : Buffer.from(await toSvg(qr.token), 'utf8');
+  // QR-27: an identity code carries the `/q/<token>` link so a plain camera can open it.
+  const content = isIdentityType(qr.type) ? identityContent(qr.token) : qr.token;
+  const body = format === 'png' ? await toPngBuffer(content, size) : Buffer.from(await toSvg(content), 'utf8');
   return { engine: 'LOCAL', format, contentType: format === 'png' ? 'image/png' : 'image/svg+xml', body, styled: false };
 }
 

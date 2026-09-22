@@ -105,7 +105,18 @@ export type CreateVisitInput = z.infer<typeof createVisitSchema>;
 
 export const scheduleVisitSchema = z.object({ scheduledFor: z.string().datetime() });
 export const rejectVisitSchema = z.object({ reason: z.string().trim().min(3).max(300) });
-export const completeVisitSchema = z.object({ notes: z.string().trim().max(1000).optional() });
+/**
+ * LH10: a completion may carry its proof — a photo the agent uploaded as a
+ * private file, and the fix their phone had at the moment. Both optional: a
+ * visit completed without them is still a visit, and the QA sample is what
+ * says the evidence was missing.
+ */
+export const completeVisitSchema = z.object({
+  notes: z.string().trim().max(1000).optional(),
+  proofFileId: z.string().trim().min(1).max(64).optional(),
+  latitude: z.coerce.number().min(-90).max(90).optional(),
+  longitude: z.coerce.number().min(-180).max(180).optional(),
+});
 /** G12-B: the position ping — the order lane's body (`orders.schema#locationSchema`), so the app sends one shape everywhere. */
 export const visitLocationSchema = z.object({ latitude: z.number(), longitude: z.number() });
 

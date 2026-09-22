@@ -27,6 +27,8 @@ export type { AgentLabelRow } from './agents.repository';
 
 /** Directory lookups `orders` needs for assignment and notification. */
 export { getAgentWithUser, findAssignableAgent, agentExists, getAgentZone } from './agents.service';
+// AG-5: routing by grade — the ask a dispatcher makes, the desk's override check, the settings.
+export { dispatchAskFor, isBelowRequiredGrade, agentMeetsGrade, getRoutingSettings, saveRoutingSettings } from './agents.service';
 
 /**
  * Lot B: the tier an incentive is recorded at. `orders` (installation),
@@ -41,6 +43,16 @@ export { findAgentTier } from './agents.service';
  * so a suspension cannot be honoured in four different ways.
  */
 export { agentAcceptsWork, assertAgentAcceptsWork } from './agents.service';
+// AG-1: the activation gate for agent-initiated writes, and the application's port for bootstrap.
+export { requireWorkingAgent, assertAgentMayWork, findWorkingAgentProfile } from './agents.service';
+export { registerApplicationPort } from './application/application.port';
+export type { ApplicationPort } from './application/application.port';
+export { GRADE_META, requiredDocuments, agentMayWork } from './application/application.rules';
+export type { ApplicationView } from './application/application.service';
+// AG-4: the paper-expiry sweep, for the job.
+export { runDocumentExpirySweep, purgeExitedDocuments } from './application/application.service';
+// AG-1: the desk's KYC record mirrors its slots into the document table through this.
+export { upsertDocumentsFromKyc } from './application/kyc-bridge';
 /** DR 07 wave 6: the rating, derived from orders, assignments and check-ins. */
 export { ratingFor } from './rating/rating.service';
 
@@ -57,6 +69,8 @@ export type { AgentZone } from './agents.repository';
 
 /** DR 05: the board, derived on read; the dashboard hero reads the active one. */
 export type { MilestoneBoard, MilestoneCard, TemplateView } from './milestones/agent-milestones.service';
+// LH8: the two lead milestone templates, seeded at boot when their type has none.
+export { ensureLeadMilestoneTemplates, LEAD_MILESTONE_TEMPLATES } from './milestones/agent-milestones.service';
 export { MILESTONE_STATES, MILESTONE_CHIPS } from './milestones/milestone.rules';
 export type { MilestoneState, MilestoneChip } from './milestones/milestone.rules';
 

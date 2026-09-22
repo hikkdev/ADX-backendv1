@@ -27,7 +27,7 @@ const { repository, integrations, vendors, agents, grants } = vi.hoisted(() => (
   },
   integrations: { getEffectiveAudienceConfig: vi.fn() },
   vendors: { geoiq: vi.fn(), azira: vi.fn() },
-  agents: { findAgentProfile: vi.fn() },
+  agents: (() => { const o = { findAgentProfile: vi.fn() }; return { ...o, findWorkingAgentProfile: o.findAgentProfile }; })(),
   grants: { holdsLiveGrant: vi.fn() },
 }));
 

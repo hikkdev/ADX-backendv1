@@ -31,7 +31,7 @@ const { repository } = vi.hoisted(() => ({
 vi.mock('../prisma-rate-cards.repository', () => ({ prismaRateCardsRepository: repository }));
 
 const { findAgentProfile, holdsLiveGrant } = vi.hoisted(() => ({ findAgentProfile: vi.fn(), holdsLiveGrant: vi.fn() }));
-vi.mock('../../agents', () => ({ findAgentProfile }));
+vi.mock('../../agents', () => ({ findAgentProfile, findWorkingAgentProfile: findAgentProfile }));
 vi.mock('../../access-grants', () => ({ holdsLiveGrant }));
 
 import { approveCard, assertMayAskGate, assertPublishable, checkGate, floorFor, gateView, quoteFromCard } from '../rate-cards.service';

@@ -90,8 +90,10 @@ export async function savePreferences(
 export async function mayDeliver(
   userId: string,
   type: NotificationType,
-  channel: NotificationChannel,
+  requested: NotificationChannel,
 ): Promise<boolean> {
+  // LH6: WhatsApp follows the SMS preference — one switch for the two doors to the same number.
+  const channel: NotificationChannel = requested === 'WHATSAPP' ? 'SMS' : requested;
   if (isMandatory(type, channel)) return true;
   const saved = await repository.findPreferences(userId);
   const preference = saved.find((p) => p.type === type && p.channel === channel);

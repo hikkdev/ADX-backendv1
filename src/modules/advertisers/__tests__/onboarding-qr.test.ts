@@ -18,14 +18,13 @@ const { repository, qr, agents, grants } = vi.hoisted(() => ({
     attachAgent: vi.fn(),
   },
   qr: {
-    ONBOARDING_QR_TTL_SECONDS: 90,
     findActiveQrFor: vi.fn(),
-    deactivateQrsFor: vi.fn(),
-    generateQr: vi.fn(),
+    getOrCreateIdentityQr: vi.fn(),
     findPendingScan: vi.fn(),
     decideOnboardingScan: vi.fn(),
+    askOf: (raw: unknown) => (raw && typeof raw === 'object' ? raw : null),
   },
-  agents: { findAgentProfile: vi.fn() },
+  agents: (() => { const o = { findAgentProfile: vi.fn() }; return { ...o, findWorkingAgentProfile: o.findAgentProfile }; })(),
   grants: { openOnboardingGrant: vi.fn(), closeOnboardingGrants: vi.fn(), hasLiveOnboardingGrant: vi.fn() },
 }));
 
@@ -50,7 +49,7 @@ beforeEach(() => {
   repository.findUserSummary.mockResolvedValue({ name: 'Rahul Kumar', avatarUrl: null });
   repository.attachAgent.mockResolvedValue(undefined);
   qr.findActiveQrFor.mockResolvedValue(null);
-  qr.generateQr.mockResolvedValue({ qrId: 'qr_new', token: 'tok', expiresAt: new Date(Date.now() + 90_000) });
+  qr.getOrCreateIdentityQr.mockResolvedValue({ qrId: 'qr_new', token: 'tok', expiresAt: null, created: true });
   qr.findPendingScan.mockResolvedValue(null);
   agents.findAgentProfile.mockResolvedValue({ id: 'agt_adv', displayId: 'AGT-1009-2602', city: 'Pune' });
   grants.hasLiveOnboardingGrant.mockResolvedValue(false);
@@ -58,18 +57,12 @@ beforeEach(() => {
 });
 
 describe('the code they show', () => {
-  it('is minted for advertiser agents, ninety seconds, with the fix', async () => {
+  it("QR-27: is the account's own durable code, with the phone's fix, even while an agent is mid-way", async () => {
     await getOrCreateOnboardingQr('usr_1', { latitude: 18.52, longitude: 73.85 });
-    expect(qr.generateQr).toHaveBeenCalledWith('ADVERTISER', 'adv_1', ['AGENT_ADVERTISER'], undefined, {
-      expiresInSeconds: 90,
-      position: { latitude: 18.52, longitude: 73.85 },
-    });
-  });
-
-  it('is refused while an agent is mid-way, read off the live grant', async () => {
+    expect(qr.getOrCreateIdentityQr).toHaveBeenCalledWith('ADVERTISER', 'adv_1', { latitude: 18.52, longitude: 73.85 });
+    // The live grant no longer hides the code: a second scan is refused at the scan, by the claim, not here.
     grants.hasLiveOnboardingGrant.mockResolvedValue(true);
-    await expect(getOrCreateOnboardingQr('usr_1')).rejects.toMatchObject({ statusCode: 409 });
-    expect(grants.hasLiveOnboardingGrant).toHaveBeenCalledWith({ advertiserId: 'adv_1' });
+    await expect(getOrCreateOnboardingQr('usr_1')).resolves.toMatchObject({ qrId: 'qr_new', expiresAt: null });
   });
 
   it('names the scanning agent for the owner to approve', async () => {

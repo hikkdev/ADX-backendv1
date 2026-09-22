@@ -109,6 +109,8 @@ export interface PartyImportsRepository {
   matchAgents(keys: { mobiles: string[]; emails: string[] }): Promise<MatchSet>;
   matchPrintPartners(keys: { mobiles: string[]; pans: string[]; gstins: string[]; emails: string[] }): Promise<MatchSet>;
   matchEmployees(keys: { mobiles: string[]; emails: string[] }): Promise<MatchSet>;
+  /** LH3: leads by normalised mobile; a mobile on a publisher or advertiser account blocks the create (an account is not a prospect). */
+  matchLeads(keys: { mobiles: string[] }): Promise<MatchSet>;
   /** The user behind a mobile and whether it already has an employee row — the employee create's first step. */
   findUserByMobile(mobile: string): Promise<{ id: string; employeeId: string | null } | null>;
 

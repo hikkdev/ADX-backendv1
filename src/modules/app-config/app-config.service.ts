@@ -10,7 +10,7 @@ import {
 import { prismaAppConfigRepository as repository } from './prisma-app-config.repository';
 import { canonicalJson, enumGroupSchema, summariseChanges, wizardFlowSchema, wizardScreens, type ChangeSummary } from './flow-schema';
 import { onboardingTemplateSchema, templateDiff } from './onboarding-template';
-import { AGENT_JOB_FLOW_KEY, EMPLOYEE_INTAKE_FLOW_KEY, agentJobLadderSchema, employeeIntakeLadderSchema, ladderDiff } from './step-ladder';
+import { AGENT_JOB_FLOW_KEY, EMPLOYEE_INTAKE_FLOW_KEY, LEAD_LANDING_FLOW_KEY, agentJobLadderSchema, employeeIntakeLadderSchema, leadLandingLadderSchema, ladderDiff } from './step-ladder';
 
 /**
  * Served when no config row has been written yet, so a fresh install still
@@ -63,6 +63,13 @@ export const KNOWN_FLOWS: readonly { key: string; shape: FlowShape; label: strin
     label: 'Employee intake',
     description: "The intake ladder HR climbs on an employee's behalf at the KYC desk — which documents, in what order.",
     audience: 'Employees',
+  },
+  {
+    key: LEAD_LANDING_FLOW_KEY,
+    shape: 'steps',
+    label: 'Invite landing',
+    description: 'LH7: the copy behind adx.in/j/<code> per side — headline, line, bullets, button, and which hook blocks the page shows.',
+    audience: 'Prospects',
   },
 ];
 
@@ -186,7 +193,9 @@ export function parseFlow(key: string, body: unknown): Record<string, unknown> {
         ? agentJobLadderSchema
         : key === EMPLOYEE_INTAKE_FLOW_KEY
           ? employeeIntakeLadderSchema
-          : wizardFlowSchema;
+          : key === LEAD_LANDING_FLOW_KEY
+            ? leadLandingLadderSchema
+            : wizardFlowSchema;
   const parsed = schema.safeParse(body);
   if (!parsed.success) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'The flow does not fit the vocabulary', { ...parsed.error.flatten(), issues: flowIssuesOf(parsed.error) });

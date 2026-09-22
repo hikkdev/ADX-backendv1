@@ -220,6 +220,7 @@ export type UpdateAdvertiserInput = Partial<
     | 'agentId'
     | 'kycStatus'
     | 'activatedAt'
+    | 'sizeBand'
   >
 >;
 

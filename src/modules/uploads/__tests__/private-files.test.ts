@@ -44,7 +44,7 @@ beforeEach(() => {
 describe('which purposes are private', () => {
   it('is the identity documents, the money proofs, the dispute evidence and the invoice', () => {
     expect([...PRIVATE_PURPOSES].sort()).toEqual(
-      ['ADVERTISER_KYC', 'AGENT_KYC', 'BOOKING_REPORT', 'DATA_EXPORT', 'DISPUTE_EVIDENCE', 'EMPLOYEE_KYC', 'INVOICE', 'KYC', 'PARTNER_INVOICE', 'PARTNER_RATE_CARD', 'PRINT_PARTNER_KYC', 'REPORT', 'SUPPORT_ATTACHMENT', 'TOPUP_PROOF', 'USER_KYC'].sort(),
+      ['ADVERTISER_KYC', 'AGENT_KYC', 'BOOKING_REPORT', 'CALL_RECORDING', 'DATA_EXPORT', 'DISPUTE_EVIDENCE', 'EMPLOYEE_KYC', 'INVOICE', 'KYC', 'LEAD_CAPTURE', 'PARTNER_INVOICE', 'PARTNER_RATE_CARD', 'PRINT_PARTNER_KYC', 'REPORT', 'SIGNED_AGREEMENT', 'SUPPORT_ATTACHMENT', 'TOPUP_PROOF', 'USER_KYC', 'VISIT_PROOF'].sort(),
     );
     expect(isPrivatePurpose('LISTING_PHOTO')).toBe(false);
     expect(isPrivatePurpose('AVATAR')).toBe(false);

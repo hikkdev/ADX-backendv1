@@ -25,6 +25,7 @@ vi.mock('../../advertisers', () => advertisers);
 vi.mock('../../auth', () => ({ normalizeMobile: (m: string) => m, registerConsoleStandingResolver: () => undefined }));
 
 import { chooseParty } from '../users.service';
+import { registerPartnerApplicationPort } from '../users.ports';
 
 const user = (over: Record<string, unknown> = {}) => ({
   id: 'usr_1',
@@ -150,5 +151,25 @@ it('is a 404 for an account that does not exist', async () => {
   repository.findProfile.mockResolvedValue(null);
   await expect(chooseParty('usr_none', { party: 'PUBLISHER', accountType: 'INDIVIDUAL' })).rejects.toMatchObject({
     statusCode: 404,
+  });
+});
+
+describe('opening a print-partner application (PP-1)', () => {
+  it('goes through the port the partner module fills, with the shop named after the number until the form names it', async () => {
+    const apply = vi.fn().mockResolvedValue({ partner: { id: 'prt_1', displayId: 'PRT-2109-2601' }, created: true });
+    registerPartnerApplicationPort({ apply });
+    const choice = await chooseParty('usr_1', { party: 'PRINT_PARTNER', accountType: 'BUSINESS' });
+    expect(apply).toHaveBeenCalledWith('usr_1', { name: '+919876543210', legalName: null, mobile: '+919876543210', email: null });
+    // The role is the partner module's to grant with the row; this side grants nothing.
+    expect(repository.grantRole).not.toHaveBeenCalled();
+    expect(choice).toEqual({ party: 'PRINT_PARTNER', accountType: 'BUSINESS', profileId: 'prt_1', displayId: 'PRT-2109-2601', created: true });
+  });
+
+  it('is a 503 while nothing fills the port', async () => {
+    registerPartnerApplicationPort(null);
+    await expect(chooseParty('usr_1', { party: 'PRINT_PARTNER', accountType: 'INDIVIDUAL' })).rejects.toMatchObject({
+      statusCode: 503,
+      code: 'PARTY_UNAVAILABLE',
+    });
   });
 });

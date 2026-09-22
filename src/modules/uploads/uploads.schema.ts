@@ -41,6 +41,14 @@ export const purposeSchema = z.enum([
   'PARTNER_INVOICE',
   /// Lot I: an image or PDF on a support message — private; the ticket's other side opens it.
   'SUPPORT_ATTACHMENT',
+  /// DS-1 (Digio eSign): the rendered agreement, its signed copy and the audit certificate — private, the signer's own.
+  'SIGNED_AGREEMENT',
+  /// LH4 (the Lead Hunt): a wall or a shop front an agent photographed in the street — private, kept for the listing draft.
+  'LEAD_CAPTURE',
+  /// LH6 (D5): a consented call recording — private, the desk's and the agent's, purged after 90 days.
+  'CALL_RECORDING',
+  /// LH10: the photo an agent takes when they mark a field visit done — private, what the QA draw reads.
+  'VISIT_PROOF',
   'OTHER',
 ]);
 
@@ -68,6 +76,10 @@ export const PRIVATE_PURPOSES: ReadonlySet<UploadPurpose> = new Set<UploadPurpos
   'PARTNER_RATE_CARD',
   'PARTNER_INVOICE',
   'SUPPORT_ATTACHMENT',
+  'SIGNED_AGREEMENT',
+  'LEAD_CAPTURE',
+  'CALL_RECORDING',
+  'VISIT_PROOF',
 ]);
 
 export const isPrivatePurpose = (purpose: string): boolean => PRIVATE_PURPOSES.has(purpose as UploadPurpose);
@@ -100,6 +112,10 @@ export const PURPOSE_FOLDER: Record<string, string> = {
   PARTNER_RATE_CARD: 'partner-rate-cards',
   PARTNER_INVOICE: 'partner-invoices',
   SUPPORT_ATTACHMENT: 'support-attachments',
+  SIGNED_AGREEMENT: 'signed-agreements',
+  LEAD_CAPTURE: 'lead-captures',
+  CALL_RECORDING: 'call-recordings',
+  VISIT_PROOF: 'visit-proofs',
   OTHER: 'misc',
 };
 

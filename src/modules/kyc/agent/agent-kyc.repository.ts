@@ -60,6 +60,8 @@ export interface AgentKycRepository {
   findAgentContact(agentId: string): Promise<AgentContact | null>;
   /** Create or replace the documents; the record goes (back) to PENDING. */
   record(agentId: string, data: AgentKycDocuments, recordedById: string): Promise<AgentKycRow>;
+  /** AG-1: an applicant's own upload of one slot, marked via APP. */
+  recordFromApp(agentId: string, data: AgentKycDocuments, userId: string): Promise<AgentKycRow>;
   review(agentId: string, status: KycStatus, rejectionReason: string | null, reviewedById: string): Promise<AgentKycRow>;
   /** N3-B: the desk asked — an upsert on the agent's row; the status untouched (REQUESTED is derived). */
   requestKyc(agentId: string, stamp: AgentKycRequestStamp): Promise<AgentKycRow>;

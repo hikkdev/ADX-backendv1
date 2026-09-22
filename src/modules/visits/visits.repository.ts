@@ -36,6 +36,11 @@ export type VisitPatch = Partial<{
   earnedAmount: string | null;
   incentiveId: string | null;
   notes: string | null;
+  /** LH10: the proof a completion carries — a photo and the agent's own fix. */
+  proofFileId: string | null;
+  proofLatitude: number | null;
+  proofLongitude: number | null;
+  proofAt: Date | null;
 }>;
 
 export interface VisitsRepository {

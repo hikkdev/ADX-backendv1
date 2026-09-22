@@ -20,6 +20,7 @@ import {
   assignKycCasesHandler,
   recordKycAtDeskHandler,
   requestKycFromDeskHandler,
+  setPublisherBandHandler,
 } from './publishers.controller';
 import {
   registerPublisherProfileHandler,
@@ -121,6 +122,8 @@ publisherRouter.get('/:publisherId/activity', asyncHandler(listPublisherActivity
 publisherRouter.post('/:publisherId/activity', asyncHandler(recordPublisherActivityHandler));
 // QR-13: the desk edits a publisher the way the ladder fills one; the agent path is unchanged.
 publisherRouter.patch('/:publisherId', requireRole('AGENT_PUBLISHER', 'ADMIN'), asyncHandler(updatePublisherHandler));
+// AG-5: the importance band — the withdrawal ladder's and the agent grade's axis — set by the desk alone.
+publisherRouter.patch('/:publisherId/band', requireRole('ADMIN'), asyncHandler(setPublisherBandHandler));
 publisherRouter.post('/:publisherId/kyc', requireRole('AGENT_PUBLISHER'), asyncHandler(submitKycHandler));
 publisherRouter.post('/:publisherId/kyc/review', requireRole('ADMIN'), asyncHandler(reviewKycHandler));
 publisherRouter.post('/:publisherId/kyc/digio/initiate', requireRole('AGENT_PUBLISHER'), asyncHandler(initiateDigioKycHandler));

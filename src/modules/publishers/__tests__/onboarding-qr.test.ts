@@ -21,14 +21,14 @@ const { repository, qr, agents, grants } = vi.hoisted(() => ({
     resetOnboardingState: vi.fn(),
   },
   qr: {
-    ONBOARDING_QR_TTL_SECONDS: 90,
     findActiveQrFor: vi.fn(),
-    deactivateQrsFor: vi.fn(),
-    generateQr: vi.fn(),
+    getOrCreateIdentityQr: vi.fn(),
     findPendingScan: vi.fn(),
     decideOnboardingScan: vi.fn(),
+    // QR-27: the ask a scan row carries; none on an onboarding scan.
+    askOf: (raw: unknown) => (raw && typeof raw === 'object' ? raw : null),
   },
-  agents: { findAgentProfile: vi.fn(), requireAgentProfile: vi.fn(), findAgentTier: vi.fn() },
+  agents: (() => { const o = { findAgentProfile: vi.fn(), requireAgentProfile: vi.fn(), findAgentTier: vi.fn() }; return { ...o, findWorkingAgentProfile: o.findAgentProfile, requireWorkingAgent: o.requireAgentProfile }; })(),
   grants: { openOnboardingGrant: vi.fn(), closeOnboardingGrants: vi.fn() },
 }));
 
@@ -67,7 +67,7 @@ beforeEach(() => {
   repository.claim.mockResolvedValue({});
   repository.completeOnboarding.mockResolvedValue({ id: 'pub_1', onboardingStatus: 'ONBOARDING_COMPLETE' });
   qr.findActiveQrFor.mockResolvedValue(null);
-  qr.generateQr.mockResolvedValue({ qrId: 'qr_new', token: 'tok_new', expiresAt: new Date(Date.now() + 90_000) });
+  qr.getOrCreateIdentityQr.mockResolvedValue({ qrId: 'qr_new', token: 'tok_new', expiresAt: null, created: true });
   qr.findPendingScan.mockResolvedValue(null);
   agents.findAgentProfile.mockResolvedValue({ id: 'agt_1', displayId: 'AGT-1009-2601', city: 'Bengaluru' });
   agents.requireAgentProfile.mockResolvedValue({ id: 'agt_1' });
@@ -76,23 +76,14 @@ beforeEach(() => {
 });
 
 describe('the code they show', () => {
-  it('is minted for ninety seconds with the phone\'s fix', async () => {
+  it("QR-27: is the account's own durable code, with the phone's fix, whatever the onboarding state", async () => {
     const result = await getOrCreateOnboardingQr('usr_1', { latitude: 12.97, longitude: 77.59 });
-    expect(qr.generateQr).toHaveBeenCalledWith('PUBLISHER', 'pub_1', ['AGENT_PUBLISHER'], undefined, {
-      expiresInSeconds: 90,
-      position: { latitude: 12.97, longitude: 77.59 },
-    });
-    expect(result).toMatchObject({ qrId: 'qr_new', created: true });
-  });
+    expect(qr.getOrCreateIdentityQr).toHaveBeenCalledWith('PUBLISHER', 'pub_1', { latitude: 12.97, longitude: 77.59 });
+    expect(result).toMatchObject({ qrId: 'qr_new', expiresAt: null, created: true });
 
-  it('is reused while live, and reissued once dead', async () => {
-    qr.findActiveQrFor.mockResolvedValue({ id: 'qr_live', token: 'tok_live', expiresAt: new Date(Date.now() + 30_000) });
-    expect(await getOrCreateOnboardingQr('usr_1')).toMatchObject({ qrId: 'qr_live', created: false });
-    expect(qr.generateQr).not.toHaveBeenCalled();
-
-    qr.findActiveQrFor.mockResolvedValue({ id: 'qr_dead', token: 'tok_dead', expiresAt: new Date(Date.now() - 1) });
-    expect(await getOrCreateOnboardingQr('usr_1')).toMatchObject({ qrId: 'qr_new', created: true });
-    expect(qr.deactivateQrsFor).toHaveBeenCalledWith('PUBLISHER', 'pub_1');
+    // A finished account keeps its code: the scan of it becomes an access request, not a refusal.
+    repository.findByUserId.mockResolvedValue(publisher({ onboardingStatus: 'ONBOARDING_COMPLETE' }));
+    await expect(getOrCreateOnboardingQr('usr_1')).resolves.toMatchObject({ qrId: 'qr_new' });
   });
 });
 
@@ -112,8 +103,11 @@ describe('what the phone polls', () => {
         scanId: 'scan_1',
         scannedAt: expect.any(Date),
         distanceM: 42,
+        kind: 'ONBOARDING',
+        ask: null,
         agent: { id: 'agt_1', displayId: 'AGT-1009-2601', city: 'Bengaluru', name: 'Rahul Kumar', avatarUrl: 'https://cdn/r.jpg' },
       },
+      displayId: undefined,
     });
   });
 

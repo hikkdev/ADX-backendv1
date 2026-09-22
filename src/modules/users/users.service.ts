@@ -12,6 +12,7 @@ import { currentLegalDocument } from '../legal';
 import { prismaUsersRepository as repository } from './prisma-users.repository';
 import type { AdminListFilter, AdminUserDetail, WithRoles } from './users.repository';
 import { assertIdentityFree } from './users-identity';
+import { applyAsPrintPartner } from './users.ports';
 import type {
   AccountType,
   ChoosePartyInput,
@@ -78,6 +79,20 @@ export async function chooseParty(userId: string, input: ChoosePartyInput): Prom
     });
     await repository.grantRole(userId, 'PUBLISHER');
     return { party, accountType, profileId: publisher.id, displayId: publisher.displayId, created };
+  }
+
+  if (party === 'PRINT_PARTNER') {
+    // PP-1: a print shop applies; the desk reviews and activates (Print
+    // partners › Applications). The account keeps signing in meanwhile and
+    // sees its application on the partner floor. Through a port: see
+    // `users.ports.ts` for why `print-partners` is not imported here.
+    const { partner, created } = await applyAsPrintPartner(userId, {
+      name: name ?? user.mobile,
+      legalName: accountType === 'INDIVIDUAL' ? null : name ?? null,
+      mobile: user.mobile,
+      email: user.email ?? null,
+    });
+    return { party, accountType, profileId: partner.id, displayId: partner.displayId, created };
   }
 
   const existing = user.advertiserProfile as PartyProfile | null;

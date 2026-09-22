@@ -3,7 +3,9 @@ import type {
   AgentTrainingProgress,
   Prisma,
   TrainingAttempt,
+  TrainingAudience,
   TrainingModule,
+  TrainingModuleKind,
   TrainingOption,
   TrainingQuestion,
   TrainingResource,
@@ -24,8 +26,15 @@ export type NewModule = {
   unlockAfterOrdinal: number | null;
   passPercent: number;
   isActive: boolean;
+  /** AG-4: whom it is for, what it is, and an assessment's clock. */
+  audience: TrainingAudience;
+  kind: TrainingModuleKind;
+  timeLimitMins: number | null;
 };
 export type ModulePatch = Partial<NewModule>;
+
+/** AG-4: the sides an agent works — the audiences whose modules they see beside ALL. */
+export type AgentSides = { publisher: boolean; advertiser: boolean };
 
 export type NewQuestion = { prompt: string; options: { label: string; isCorrect: boolean }[] };
 
@@ -46,7 +55,10 @@ export type CertificationWithAgent = AgentCertification & { agent: { id: string;
 
 export interface TrainingRepository {
   /* The curriculum. */
-  findActiveModules(): Promise<TrainingModule[]>;
+  /** AG-4: the active modules for these sides — audience ALL always, a side's own when they work it; every side when none is given. */
+  findActiveModules(sides?: AgentSides): Promise<TrainingModule[]>;
+  /** AG-4: which sides the agent holds a role for. */
+  agentSides(agentId: string): Promise<AgentSides>;
   findModules(): Promise<ModuleWithCounts[]>;
   findModule(id: string): Promise<TrainingModule | null>;
   createModule(data: NewModule): Promise<TrainingModule>;

@@ -1,5 +1,5 @@
 import type { OnboardingStepDef, OnboardingTemplate, OnboardingTile } from '../app-config';
-import type { AccountType, Party } from './users.schema';
+import type { AccountType, LadderParty as Party } from './users.schema';
 
 /**
  * The onboarding ladder, as data.

@@ -80,6 +80,45 @@ export const agentsSeed = (): Seed => ({
   groups: { city: [{ key: 'Bengaluru', count: 6 }, { key: 'Mumbai', count: 3 }] },
 });
 
+/**
+ * LH9: the leads. Four created in the window (one on the seam), three
+ * before; two first contacts this window; three conversions this window
+ * (led_a after 2 days, led_b after 5, led_r after 10 — recycled on the 4th
+ * and back as a customer on the 9th), one the window before; two catches
+ * this window, one before; one loss each side; the hunt's money: ₹100 +
+ * ₹500 + ₹500 recorded, one ₹200 top-up; last window ₹100 and no top-up.
+ */
+export const leadsSeed = (): Seed => ({
+  lead: [
+    blr('2026-09-01T00:15', { key: 'led_a' }),
+    blr('2026-09-03T10:00', { key: 'led_b' }),
+    mum('2026-09-06T10:00', { key: 'led_c' }),
+    blr('2026-09-10T23:59', { key: 'led_d' }),
+    blr('2026-08-31T23:30', { key: 'led_e' }),
+    mum('2026-08-25T09:00', { key: 'led_f' }),
+    blr('2026-08-23T09:00', { key: 'led_r' }),
+  ],
+  leadContact: [blr('2026-09-02T10:00', { key: 'led_a' }), mum('2026-09-07T10:00', { key: 'led_c' }), blr('2026-08-26T10:00', { key: 'led_e' })],
+  leadConversion: [
+    blr('2026-09-03T10:00', { key: 'led_a', amount: '2' }),
+    blr('2026-09-08T10:00', { key: 'led_b', amount: '5' }),
+    blr('2026-09-09T10:00', { key: 'led_r', amount: '10' }),
+    mum('2026-08-30T10:00', { key: 'led_f', amount: '4' }),
+  ],
+  leadActivation: [blr('2026-09-05T10:00', { key: 'led_a' }), blr('2026-09-10T10:00', { key: 'led_b' }), mum('2026-08-31T10:00', { key: 'led_f' })],
+  leadLoss: [mum('2026-09-08T10:00', { key: 'led_c' }), blr('2026-08-28T10:00', { key: 'led_e' })],
+  leadIncentive: [
+    blr('2026-09-03T10:00', { key: 'agt_1', amount: '100.00' }),
+    blr('2026-09-05T10:00', { key: 'agt_1', amount: '500.00' }),
+    blr('2026-09-10T10:00', { key: 'agt_2', amount: '500.00' }),
+    mum('2026-08-30T10:00', { key: 'agt_3', amount: '100.00' }),
+  ],
+  leadTopUp: [blr('2026-09-05T10:00', { key: 'agt_1', amount: '200.00' })],
+  leadRecycle: [blr('2026-09-04T10:00', { key: 'led_r' }), blr('2026-09-06T10:00', { key: 'led_d' }), blr('2026-08-24T10:00', { key: 'led_x' })],
+  states: { leadsOpen: 12 },
+  groups: { city: [{ key: 'Bengaluru', count: 9 }, { key: 'Mumbai', count: 3 }], temperature: [{ key: 'HOT', count: 3 }, { key: 'WARM', count: 5 }, { key: 'COLD', count: 4 }] },
+});
+
 export const printPartnersSeed = (): Seed => ({
   printPartner: partyCreations(),
   quoteRequest: [blr('2026-09-02T10:00'), blr('2026-09-02T11:00'), mum('2026-09-05T10:00'), blr('2026-08-30T10:00')],

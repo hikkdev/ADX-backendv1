@@ -79,7 +79,8 @@ export const bootstrapAdminSchema = z.object({ userId: z.string().min(1) });
  * side keeps in its own legal-form column. The name is optional because the
  * frames ask for it two steps later.
  */
-export const PARTIES = ['PUBLISHER', 'ADVERTISER'] as const;
+/** PP-1: PRINT_PARTNER is an application — the desk activates it. */
+export const PARTIES = ['PUBLISHER', 'ADVERTISER', 'PRINT_PARTNER'] as const;
 export const ACCOUNT_TYPES = ['INDIVIDUAL', 'BUSINESS', 'ORGANISATION'] as const;
 
 export const choosePartySchema = z.object({
@@ -89,6 +90,8 @@ export const choosePartySchema = z.object({
 });
 
 export type Party = (typeof PARTIES)[number];
+/** The two sides with an onboarding ladder — PP-1's print-partner application has none. */
+export type LadderParty = 'PUBLISHER' | 'ADVERTISER';
 export type AccountType = (typeof ACCOUNT_TYPES)[number];
 export type ChoosePartyInput = z.infer<typeof choosePartySchema>;
 

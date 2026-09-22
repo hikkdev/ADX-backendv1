@@ -53,6 +53,17 @@ out rather than relying on a sweep to mark them `EXPIRED`. A late sweep would
 mean access outliving its window, which is precisely the failure this design is
 built to avoid.
 
+## Requested grants (QR-27)
+
+The third way a grant opens, beside a ticket and an onboarding scan: an
+agent scans an onboarded account's own code, says what for and for how
+long, and the owner allows it on their phone. `openRequestedGrant` writes
+it — purpose SUPPORT, `supportTicketId` null, the scanning agent as
+`assignedAgentId`, the ask's scope, the duration clamped to 15 minutes–1
+day, ACTIVE from the approval — and audits `ACCESS_GRANT_ISSUED` with
+`requested: true` under the agent's login. The QR module reaches it through
+`AccessGrantPort.openRequested`. Revocable and listed like every grant.
+
 ## Wiring
 
 `qr` cannot import this module — this module imports `qr` to mint the code — so

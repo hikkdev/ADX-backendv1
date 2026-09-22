@@ -1,7 +1,7 @@
 import { logger } from '../../../shared/logging';
 import { priorityOf, priorityWindowStart, type OfferPriority } from '../../../shared/dispatch';
 import { Decimal } from '../../../shared/money';
-import { agentAcceptsWork, assertAgentAcceptsWork, findAgentTier, findAssignableAgent, getAgentWithUser, getAgentZone, type AgentZone } from '../../agents';
+import { agentAcceptsWork, assertAgentAcceptsWork, dispatchAskFor, findAgentTier, findAssignableAgent, getAgentWithUser, getAgentZone, isBelowRequiredGrade, type AgentZone } from '../../agents';
 import { recordAcceptance } from '../../agreements';
 import { getListingWithPublisher } from '../../listings';
 import { installationFeeFor } from '../../payouts';
@@ -98,7 +98,10 @@ export async function autoAssignAgent(orderId: string) {
   if (publisherAgentId && publisherAgentAccepts) {
     candidateId = publisherAgentId;
   } else {
-    const candidate = await findAssignableAgent(rejectedAgentIds);
+    // AG-5: the grade the publisher's band asks for, and where the spot is —
+    // the sweep offers to the closest fit at or above it, the nearer first.
+    const ask = await dispatchAskFor(listing?.publisher?.sizeBand ?? null, listing ? { latitude: listing.latitude ?? null, longitude: listing.longitude ?? null } : null);
+    const candidate = await findAssignableAgent(rejectedAgentIds, ask);
     candidateId = candidate?.id ?? null;
   }
 
@@ -351,6 +354,12 @@ export async function adminAssignAgent(
 
   if (options.agentFee !== undefined && options.agentFee !== null) {
     order = await repository.update(orderId, { agentFeeAmount: new Decimal(options.agentFee) });
+  }
+
+  // AG-5: the desk may assign over the band — allowed, and said so in the log.
+  const listing = await getListingWithPublisher(order.listingId);
+  if (listing?.publisher && (await isBelowRequiredGrade(agentProfileId, listing.publisher.sizeBand))) {
+    logger.info('Agent assigned below the grade the band asks for (desk override)', { orderId, agentId: agentProfileId, band: listing.publisher.sizeBand });
   }
 
   await repository.createAssignment(orderId, agentProfileId, await quoteFeeFor(order, agentProfileId));

@@ -464,9 +464,12 @@ describe('the test send (Q117)', () => {
 /* ── the transactional flag ──────────────────────────────────────── */
 
 describe('the transactional flag', () => {
-  it('seeds the announcement and the statement as non-transactional and everything else as transactional', () => {
+  it('seeds the announcement, the statement, the three hunting-map pushes and the five sequence copies as non-transactional and everything else as transactional', () => {
     const nonTransactional = DEFAULT_TEMPLATES.filter((seed) => seed.transactional === false).map((seed) => seed.key);
-    expect(nonTransactional.sort()).toEqual(['announcement', 'statement-ready']);
+    // LH5: the map's three pushes are offers and nudges, not service notices — quiet hours and the weekly cap hold.
+    // LH6: the sequence step copies are outreach; `lead-outreach` itself is transactional because the hub rules before the dispatcher.
+    expect(nonTransactional.sort()).toEqual(['announcement', 'lead-claim-lapsing', 'lead-link-opened', 'lead-nearby-hot', 'lead-seq-advertiser-intro', 'lead-seq-advertiser-nudge', 'lead-seq-last-call', 'lead-seq-publisher-intro', 'lead-seq-publisher-nudge', 'statement-ready']);
+    expect(DEFAULT_TEMPLATES.find((seed) => seed.key === 'lead-outreach')?.transactional).not.toBe(false);
     for (const key of ['login-otp', 'two-factor-sms', 'two-factor-email', 'package-link', 'kyc-decision', 'payout-paid']) {
       expect(DEFAULT_TEMPLATES.find((seed) => seed.key === key)?.transactional).not.toBe(false);
     }
@@ -477,6 +480,14 @@ describe('the transactional flag', () => {
     expect(comms.ensureTransactionalFlags).toHaveBeenCalledWith([
       { key: 'statement-ready', transactional: false },
       { key: 'announcement', transactional: false },
+      { key: 'lead-nearby-hot', transactional: false },
+      { key: 'lead-claim-lapsing', transactional: false },
+      { key: 'lead-link-opened', transactional: false },
+      { key: 'lead-seq-publisher-intro', transactional: false },
+      { key: 'lead-seq-publisher-nudge', transactional: false },
+      { key: 'lead-seq-advertiser-intro', transactional: false },
+      { key: 'lead-seq-advertiser-nudge', transactional: false },
+      { key: 'lead-seq-last-call', transactional: false },
     ]);
   });
 });

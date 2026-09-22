@@ -99,6 +99,17 @@ export const prismaAgentKycRepository: AgentKycRepository = {
     });
   },
 
+  // AG-1: an applicant's own upload — the slot only, PENDING, via APP; a VERIFIED set is not reopened by a re-upload of one slot.
+  recordFromApp(agentId: string, data: AgentKycDocuments, userId: string) {
+    const now = new Date();
+    return prisma.agentKyc.upsert({
+      where: { agentId },
+      create: { agentId, ...data, recordedById: userId, recordedVia: 'APP', method: 'MANUAL', status: 'PENDING', submittedAt: now },
+      update: { ...data, recordedVia: 'APP', submittedAt: now },
+      include: withAgent,
+    });
+  },
+
   review(agentId: string, status: KycStatus, rejectionReason: string | null, reviewedById: string) {
     return prisma.agentKyc.update({
       where: { agentId },

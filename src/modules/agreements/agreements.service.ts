@@ -23,9 +23,16 @@ import type {
  * Which party a kind binds, and whether it is the platform terms that gate
  * activation or a per-transaction agreement that gates one deal.
  */
+/**
+ * DS-1: who a kind binds — the three acceptance parties, and the two that
+ * only ever e-sign (an employee, a print partner) and so have no acceptance
+ * row: their SigningRequest is the record.
+ */
+export type AgreementParty = PartyType | 'employee' | 'print-partner';
+
 export const KIND_META: Record<
   AgreementKind,
-  { party: PartyType; scope: 'PLATFORM' | 'TRANSACTION'; label: string }
+  { party: AgreementParty; scope: 'PLATFORM' | 'TRANSACTION'; label: string }
 > = {
   PLATFORM: { party: 'publisher', scope: 'PLATFORM', label: 'Publisher platform terms' },
   LISTING: { party: 'publisher', scope: 'TRANSACTION', label: 'Listing agreement' },
@@ -39,6 +46,15 @@ export const KIND_META: Record<
   PACKAGE_SALE: { party: 'advertiser', scope: 'TRANSACTION', label: 'Package order terms' },
   /// Lot D (Q123): the agent's job terms, accepted on the agent's own tap.
   JOB_TERMS: { party: 'agent', scope: 'TRANSACTION', label: 'Agent job terms' },
+  /// AG-1: the engagement terms an applicant accepts before review, one text per side.
+  AGENT_PUBLISHER_PLATFORM: { party: 'agent', scope: 'PLATFORM', label: 'Field agent engagement terms' },
+  AGENT_ADVERTISER_PLATFORM: { party: 'agent', scope: 'PLATFORM', label: 'Sales agent engagement terms' },
+  /// DS-2: the employee's appointment letter and NDA — e-signed through a hosted link; gates the console invitation.
+  EMPLOYEE_APPOINTMENT: { party: 'employee', scope: 'PLATFORM', label: 'Employee appointment and NDA' },
+  /// DS-2: the print partner's service agreement — e-signed once KYC verifies; gates quotes and jobs.
+  PRINT_PARTNER_SERVICE: { party: 'print-partner', scope: 'PLATFORM', label: 'Print partner service agreement' },
+  /// DS-3: the publisher's master licence to display — one signed document per publisher, listings as its schedule.
+  PUBLISHER_LICENCE: { party: 'publisher', scope: 'PLATFORM', label: 'Publisher licence to display' },
 };
 
 /** The platform terms each party type is stuck behind until a version is live. */
@@ -193,12 +209,43 @@ export const SEEDED_KINDS: readonly AgreementKind[] = [
   'INSERTION_ORDER',
   'PACKAGE_SALE',
   'JOB_TERMS',
+  'AGENT_PUBLISHER_PLATFORM',
+  'AGENT_ADVERTISER_PLATFORM',
+  // DS-1: the three signed-only kinds, so the Signatures desk has a template to publish.
+  'EMPLOYEE_APPOINTMENT',
+  'PRINT_PARTNER_SERVICE',
+  'PUBLISHER_LICENCE',
 ];
 
 const PLACEHOLDER_VARIABLES: Partial<Record<AgreementKind, { token: string; what: string }>> = {
   INSERTION_ORDER: { token: '{{spots}}', what: 'the campaign, its flight and the table of sites booked' },
   PACKAGE_SALE: { token: '{{sale}}', what: 'the package, its add-ons and the price' },
+  PUBLISHER_LICENCE: { token: '{{listings}}', what: "Schedule A — the publisher's listings on the platform when the licence is signed" },
 };
+
+/**
+ * DS-1: the merge fields an e-signed document may name. Every signed kind
+ * takes the party block and the date; the rest depend on who signs.
+ */
+const SIGNING_FIELD_HINTS: Partial<Record<AgreementKind, string[]>> = {
+  AGENT_PUBLISHER_PLATFORM: ['{{agent.side}}', '{{agent.grade}}', '{{agent.engagement}}', '{{agent.startDate}}'],
+  AGENT_ADVERTISER_PLATFORM: ['{{agent.side}}', '{{agent.grade}}', '{{agent.engagement}}', '{{agent.startDate}}'],
+  EMPLOYEE_APPOINTMENT: ['{{employee.designation}}', '{{employee.department}}', '{{employee.employmentType}}'],
+  PRINT_PARTNER_SERVICE: ['{{party.tradeName}}', '{{party.gstin}}', '{{party.pan}}'],
+  PUBLISHER_LICENCE: ['{{party.type}}', '{{party.gstin}}', '{{party.band}}'],
+  INSERTION_ORDER: ['{{party.company}}', '{{party.gstin}}', '{{party.band}}'],
+};
+
+/**
+ * LT-1: the location-sharing clause the two agent engagement drafts carry,
+ * so the consent the app prints under Account is also in the terms the
+ * agent signs. A lawyer's wording replaces it with the rest of the text.
+ */
+const TRACKING_CONSENT_CLAUSE = [
+  '## Location sharing',
+  '',
+  'While the ADX Agent app is open and you are on a job, it shares your position with ADX every minute or so — so the desk can see where you are, tell the customer when you will arrive, and help if something goes wrong. Nothing is shared when the app is closed or you are not on a job. Positions are kept for the period set by ADX (30 days by default) and then deleted.',
+];
 
 export function placeholderDraft(kind: AgreementKind): { title: string; body: string; changeNote: string } {
   const variable = PLACEHOLDER_VARIABLES[kind];
@@ -212,6 +259,15 @@ export function placeholderDraft(kind: AgreementKind): { title: string; body: st
     ...(variable
       ? ['', `The platform renders ${variable.what} where \`${variable.token}\` appears; without the token it is appended at the end.`, '', variable.token]
       : []),
+    ...(SIGNING_FIELD_HINTS[kind]
+      ? [
+          '',
+          'When this document is e-signed (Settings › Platform › E-signing), these fields are filled in from the record before the PDF is rendered:',
+          '`{{party.name}}`, `{{party.displayId}}`, `{{party.signer}}`, `{{party.email}}`, `{{party.mobile}}`, `{{party.city}}`, `{{party.state}}`, `{{date}}`, `{{reference}}`,',
+          `${SIGNING_FIELD_HINTS[kind]!.map((field) => '`' + field + '`').join(', ')}.`,
+        ]
+      : []),
+    ...(KIND_META[kind].party === 'agent' && KIND_META[kind].scope === 'PLATFORM' ? ['', ...TRACKING_CONSENT_CLAUSE] : []),
   ].join('\n');
   return { title: `${KIND_META[kind].label} (draft)`, body, changeNote: 'Placeholder draft seeded at boot (E6)' };
 }
@@ -368,7 +424,12 @@ export function isCurrentAcceptance(
 }
 
 function partyFor(kind: AgreementKind, party: AcceptanceParty): AcceptanceParty {
-  const field = PARTY_FIELD[KIND_META[kind].party];
+  const partyType = KIND_META[kind].party;
+  if (!(partyType in PARTY_FIELD)) {
+    // DS-1: an employee or a print partner has no acceptance row; their signature is the record.
+    throw new ApiError(400, 'VALIDATION_ERROR', `${KIND_META[kind].label} is signed, not clicked`);
+  }
+  const field = PARTY_FIELD[partyType as PartyType];
   const id = party[field];
   const others = (Object.keys(PARTY_FIELD) as PartyType[])
     .map((type) => PARTY_FIELD[type])

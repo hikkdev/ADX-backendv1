@@ -21,11 +21,19 @@ export const generateQrSchema = z.object({
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
+/** QR-27: what an agent asks for when they scan an onboarded account's code. */
+export const accessAskSchema = z.object({
+  scope: z.enum(['PROFILE', 'LISTINGS']),
+  reason: z.string().trim().max(200).default(''),
+  durationMinutes: z.number().int().min(15).max(24 * 60).default(4 * 60),
+});
+
 export const resolveQrSchema = z.object({
   token: z.string().min(1),
   role: upperEnum(SCANNING_ROLES).optional(),
   latitude: z.number().optional(),
   longitude: z.number().optional(),
+  ask: accessAskSchema.optional(),
 });
 
 /* ── K-B1: the QR desk ─────────────────────────────────────────── */

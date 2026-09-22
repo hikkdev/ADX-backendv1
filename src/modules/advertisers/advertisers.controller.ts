@@ -43,6 +43,7 @@ import {
   updateProfile,
   walletStatement,
   withdrawRefund,
+  setAdvertiserBand,
 } from './advertisers.service';
 import {
   createBrandSchema,
@@ -63,6 +64,7 @@ import {
   topUpSchema,
   updateBrandSchema,
   updateProfileSchema,
+  partyBandSchema,
 } from './advertisers.schema';
 
 function parse<T>(schema: ZodType<T>, body: unknown): T {
@@ -419,4 +421,10 @@ export async function goodwillHandler(req: Request, res: Response): Promise<void
     metadata: { amount, campaignId: campaignId ?? null, note: note ?? null },
   });
   res.json({ success: true, data: after });
+}
+
+/** AG-5: the desk sets the advertiser's band. */
+export async function setAdvertiserBandHandler(req: Request, res: Response): Promise<void> {
+  const { sizeBand } = parse(partyBandSchema, req.body);
+  res.json({ success: true, data: await setAdvertiserBand(id(req), req.user!.sub, sizeBand, req) });
 }

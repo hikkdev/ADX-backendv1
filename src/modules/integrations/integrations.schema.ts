@@ -8,6 +8,8 @@ import {
   HRMS_PROVIDERS,
   MAPS_PROVIDERS,
   QR_ENGINE_PROVIDERS,
+  TELEPHONY_PROVIDERS,
+  WHATSAPP_BSPS,
   WORK_TOOL_PROVIDERS,
   type HrmsProvider,
   type IntegrationsConfig,
@@ -28,7 +30,7 @@ export const audienceTestSchema = z.object({ vendor: z.enum(AUDIENCE_VENDORS) })
 /** AE-B: `POST /integrations/email/test { to }` — where the one test message goes; strict, so nothing else rides along. */
 export const emailTestSchema = z.strictObject({ to: z.string().trim().email().max(200) });
 
-export const sectionSchema = z.enum(['sms', 'email', 'storage', 'kyc', 'twilio', 'resend', 'googleMaps', 'razorpay', 'cashfree', 'ccavenue', 'stripe', 'branding', 'ai', 'hrms', 'workTool', 'maps', 'audience', 'qrEngine']);
+export const sectionSchema = z.enum(['sms', 'email', 'storage', 'kyc', 'esign', 'twilio', 'resend', 'googleMaps', 'razorpay', 'cashfree', 'ccavenue', 'stripe', 'branding', 'ai', 'hrms', 'workTool', 'maps', 'audience', 'qrEngine', 'leadFeeds', 'leadForms', 'leadChannels']);
 
 /** QR-1: a hex colour as GenQR validates it. */
 const HEX_COLOR = z.string().trim().regex(/^#[0-9a-fA-F]{6}$/, 'Must be a #rrggbb colour');
@@ -109,6 +111,71 @@ export const patchSchemas = {
     baseUrl: z.string().url().optional(),
     /** Lot D (Q129): DIGIO, DEGRADED (the probe's verdict) or MANUAL (ops' switch). */
     kycProvider: z.enum(['DIGIO', 'DEGRADED', 'MANUAL']).optional(),
+  }),
+  /** LH3 (D4): the directory feeds' partner credentials, one card each; Google Places rides the maps key. */
+  leadFeeds: z.object({
+    justdial: z.object({ endpoint: z.string().url().optional().or(z.literal('')), apiKey: z.string().optional(), headerName: z.string().max(60).optional() }).optional(),
+    indiamart: z.object({ endpoint: z.string().url().optional().or(z.literal('')), apiKey: z.string().optional(), headerName: z.string().max(60).optional() }).optional(),
+    mca: z.object({ endpoint: z.string().url().optional().or(z.literal('')), apiKey: z.string().optional(), headerName: z.string().max(60).optional() }).optional(),
+    gst: z.object({ endpoint: z.string().url().optional().or(z.literal('')), apiKey: z.string().optional(), headerName: z.string().max(60).optional() }).optional(),
+    rera: z.object({ endpoint: z.string().url().optional().or(z.literal('')), apiKey: z.string().optional(), headerName: z.string().max(60).optional() }).optional(),
+  }),
+  /** LH3: the lead-form ad webhooks' secrets. */
+  leadForms: z.object({
+    meta: z.object({ appSecret: z.string().optional(), verifyToken: z.string().optional(), pageAccessToken: z.string().optional() }).optional(),
+    google: z.object({ key: z.string().optional() }).optional(),
+    linkedin: z.object({ clientSecret: z.string().optional() }).optional(),
+  }),
+  /** LH6 (D5): the outreach channels — one card per provider; a blank keeps, null clears, arrays replace whole. */
+  leadChannels: z.object({
+    whatsapp: z
+      .object({
+        bsp: z.enum(WHATSAPP_BSPS).optional(),
+        apiKey: z.string().optional(),
+        appName: z.string().trim().max(80).optional(),
+        sourceNumber: z.string().trim().max(20).optional(),
+        phoneNumberId: z.string().trim().max(40).optional(),
+        accessToken: z.string().optional(),
+        appSecret: z.string().optional(),
+        verifyToken: z.string().optional(),
+        templates: z
+          .record(
+            z.string().trim().min(1).max(80),
+            z.object({ name: z.string().trim().min(1).max(120), language: z.string().trim().max(10).optional(), body: z.string().max(1024).optional(), params: z.array(z.string().trim().min(1).max(40)).max(20).optional() }),
+          )
+          .optional(),
+      })
+      .optional(),
+    instagram: z.object({ pageId: z.string().trim().max(40).optional(), accessToken: z.string().optional(), appSecret: z.string().optional(), verifyToken: z.string().optional() }).optional(),
+    messenger: z.object({ pageId: z.string().trim().max(40).optional(), accessToken: z.string().optional(), appSecret: z.string().optional(), verifyToken: z.string().optional() }).optional(),
+    googleBusiness: z.object({ agentId: z.string().trim().max(200).optional(), serviceAccountJson: z.string().max(10_000).optional(), partnerKey: z.string().optional() }).optional(),
+    telephony: z
+      .object({
+        provider: z.enum(TELEPHONY_PROVIDERS).optional(),
+        accountSid: z.string().trim().max(80).optional(),
+        apiKey: z.string().optional(),
+        apiToken: z.string().optional(),
+        subdomain: z.string().trim().max(120).optional(),
+        callerIds: z.array(z.string().trim().min(6).max(20)).max(20).optional(),
+        missedCallNumber: z.string().trim().max(20).optional(),
+        ivrNumber: z.string().trim().max(20).optional(),
+        recordCalls: z.boolean().optional(),
+        consentLine: z.string().trim().max(200).optional(),
+        ivrGreeting: z.string().trim().max(300).optional(),
+        ivrPublisherPrompt: z.string().trim().max(300).optional(),
+        ivrAdvertiserPrompt: z.string().trim().max(300).optional(),
+        webhookSecret: z.string().optional(),
+      })
+      .optional(),
+  }),
+  /** DS-1 (Digio eSign): the signing rail's own keys and hosts; empty falls back to the KYC section's Digio account and env. */
+  esign: z.object({
+    clientId: z.string().optional(),
+    clientSecret: z.string().optional(),
+    apiUrl: z.string().url().optional(),
+    gatewayUrl: z.string().url().optional(),
+    adxSignerName: z.string().trim().max(120).optional(),
+    adxSignerIdentifier: z.string().trim().max(200).optional(),
   }),
   twilio: z.object({
     accountSid: z.string().optional(),

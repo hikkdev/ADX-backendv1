@@ -16,7 +16,7 @@ import { LISTING_CATEGORIES } from '../listings';
  */
 
 /** The URL segment → the enum the rows are stored under. */
-export const PARTY_KEYS = ['advertisers', 'agents', 'print-partners', 'employees'] as const;
+export const PARTY_KEYS = ['advertisers', 'agents', 'print-partners', 'employees', 'leads'] as const;
 export type PartyKey = (typeof PARTY_KEYS)[number];
 export const partyKeySchema = z.enum(PARTY_KEYS);
 
@@ -25,6 +25,8 @@ export const PARTY_OF: Record<PartyKey, ImportParty> = {
   agents: 'AGENT',
   'print-partners': 'PRINT_PARTNER',
   employees: 'EMPLOYEE',
+  /** LH3: leads on the same two steps — a lead is created through `leads.createLead`, merged through `leads.patchLead`. */
+  leads: 'LEAD',
 };
 
 /**
@@ -61,6 +63,8 @@ export const ADVERTISER_COLUMNS = ['name', 'mobile', 'email', 'type', 'companyNa
 export const AGENT_COLUMNS = ['name', 'mobile', 'email', 'side', 'city', 'state'] as const;
 export const PRINT_PARTNER_COLUMNS = ['name', 'mobile', 'legalName', 'gstin', 'panNumber', 'contactName', 'email', 'address', 'city', 'capabilities', 'maxWidthFt', 'turnaroundDays'] as const;
 export const EMPLOYEE_COLUMNS = ['name', 'mobile', 'email', 'department', 'designation', 'region', 'workMode', 'employmentType'] as const;
+/** LH3: the lead sheet — `side` and `businessName` beside the mobile; the rest the format guide's lead row lists. */
+export const LEAD_COLUMNS = ['businessName', 'mobile', 'side', 'category', 'contactName', 'email', 'address', 'locality', 'city', 'latitude', 'longitude', 'interest', 'source', 'bestTimeFrom', 'bestTimeTo', 'estimatedCommission', 'importance'] as const;
 
 export const advertiserRowSchema = z.object({
   name: optionalText(120),
@@ -87,6 +91,28 @@ export const advertiserRowSchema = z.object({
   lastName: optionalText(60),
   dateOfBirth: z.preprocess(blankToUndefined, dateOfBirthSchema.optional()),
   gender: z.preprocess(blankToUndefined, genderSchema.optional()),
+});
+
+const optionalNumber = (min: number, max: number) => z.preprocess(blankToUndefined, z.coerce.number().min(min).max(max).optional());
+
+export const leadRowSchema = z.object({
+  businessName: z.preprocess(blankToUndefined, z.string().trim().min(1, 'businessName is required').max(160)),
+  mobile: requiredMobile,
+  side: z.preprocess(blankToUndefined, upperEnum(['PUBLISHER', 'ADVERTISER'] as const)),
+  category: optionalText(60),
+  contactName: optionalText(120),
+  email: optionalEmail,
+  address: optionalText(300),
+  locality: optionalText(120),
+  city: optionalText(80),
+  latitude: optionalNumber(-90, 90),
+  longitude: optionalNumber(-180, 180),
+  interest: optionalText(200),
+  source: optionalText(120),
+  bestTimeFrom: z.preprocess(blankToUndefined, z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Expected a time like "11:00"').optional()),
+  bestTimeTo: z.preprocess(blankToUndefined, z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Expected a time like "11:00"').optional()),
+  estimatedCommission: z.preprocess(blankToUndefined, z.string().regex(/^\d{1,12}(\.\d{1,2})?$/, 'Expected an amount like "1450"').optional()),
+  importance: z.preprocess(blankToUndefined, upperEnum(['STANDARD', 'KEY', 'ENTERPRISE'] as const).optional()),
 });
 
 export const agentRowSchema = z.object({

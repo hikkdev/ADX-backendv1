@@ -8,16 +8,16 @@ import { registerServerErrorAlertPort } from '../shared/errors';
 import { logger } from '../shared/logging';
 import { env } from '../config/env';
 
-import { authRouter, registerPermissionResolver, registerMobileTombstonePort } from '../modules/auth';
-import { userRouter, listAdminUserIds, findUserLabels, ensureSystemUser } from '../modules/users';
+import { authRouter, registerPermissionResolver, registerMobileTombstonePort, revokeSessions } from '../modules/auth';
+import { userRouter, listAdminUserIds, findUserLabels, ensureSystemUser, registerPartnerApplicationPort, chooseParty } from '../modules/users';
 import { accountLifecycleRouter, wasMobileErased } from '../modules/account-lifecycle';
 import { rolesConfigRouter, ensureSystemRoles, permissionsFor } from '../modules/access-control';
-import { accessGrantRouter, registerAccessGrantsModule, liveGrantFor, findAccessGrantLabels } from '../modules/access-grants';
-import { employeeRouter, findEmployeeByUserId, employeeExists } from '../modules/employees';
+import { accessGrantRouter, registerAccessGrantsModule, liveGrantFor, findAccessGrantLabels, revokeLiveGrantsForAgent } from '../modules/access-grants';
+import { employeeRouter, findEmployeeByUserId, employeeExists, registerAppointmentSigningHooks } from '../modules/employees';
 import { hrRouter, ensureHolidays, ensureDepartments } from '../modules/hr';
 import { scheduleRouter } from '../modules/schedule';
 import { workRouter } from '../modules/work';
-import { qrRouter, registerQrRefLabelPort } from '../modules/qr';
+import { qrRouter, registerQrRefLabelPort, deactivateQrsFor } from '../modules/qr';
 import { geoRouter, appGeoRouter } from '../modules/geo';
 import {
   orderRouter,
@@ -27,6 +27,7 @@ import {
   findOpenOrdersForListings,
   getAgentOrderIdsAwaitingWork,
   findOrderLabels,
+  updateAgentLocation,
 } from '../modules/orders';
 import {
   milestoneTemplateRouter,
@@ -55,7 +56,7 @@ import {
   findAdvertiserLabels,
 } from '../modules/advertisers';
 import { campaignRouter, campaignRefundRouter, creativeGateForOrder, registerSpotReviewPort } from '../modules/campaigns';
-import { packageRouter } from '../modules/packages';
+import { packageRouter, quotePackage, listCatalogue } from '../modules/packages';
 import { pricingRouter, registerListingRepricePort } from '../modules/pricing';
 import { revenueRouter, commissionForListing, runningSubscriptionForPublisher } from '../modules/revenue';
 import {
@@ -68,14 +69,15 @@ import {
   findPublisherLabelsForUsers,
   findPublisherLabels,
 } from '../modules/publishers';
-import { agentRouter, milestoneRouter, findAgentProfile, findAgentLabelsForUsers, findAgentLabels } from '../modules/agents';
-import { trainingRouter } from '../modules/training';
-import { agreementRouter, ensureAgreementDrafts } from '../modules/agreements';
+import { agentRouter, milestoneRouter, findAgentProfile, findAgentLabelsForUsers, findAgentLabels, ensureLeadMilestoneTemplates } from '../modules/agents';
+import { trainingRouter, getCertification as getAgentCertification, getAssessmentStanding } from '../modules/training';
+import { agreementRouter, ensureAgreementDrafts, esignWebhookHandler, registerEsignNotifyPort, registerEsignPolicyPort, type EsignMessage } from '../modules/agreements';
+import { agentLocationRouter, registerOrderPositionPort, readLastFix } from '../modules/agent-locations';
 import { earningsRouter } from '../modules/earnings';
 import { aiRouter } from '../modules/ai';
 import { rateCardRouter, raisePriceCase, registerListingEnforcementPort } from '../modules/rate-cards';
 import { priceModelRouter } from '../modules/price-model';
-import { payoutRouter, financeRouter, registerCommissionResolverPort, registerPayoutUserLabelPort } from '../modules/payouts';
+import { payoutRouter, financeRouter, registerCommissionResolverPort, registerPayoutUserLabelPort, listMethods as listPayoutMethods, requestClosingWithdrawal } from '../modules/payouts';
 import { reconciliationRouter } from '../modules/reconciliation';
 import {
   printPartnerRouter,
@@ -84,6 +86,7 @@ import {
   printPartnerKycRouter,
   handlePrintPartnerDigioWebhook,
   registerPrintPartnersModule,
+  applyAsPartner,
 } from '../modules/print-partners';
 import {
   notificationRouter,
@@ -93,6 +96,7 @@ import {
   createNotification,
   ensureTemplates,
   broadcastFlagsChanged,
+  notify,
 } from '../modules/notifications';
 import { announcementRouter } from '../modules/announcements';
 import { supportRouter, registerRequesterPort, supportAttachmentViewer, type RequesterParty } from '../modules/support';
@@ -100,8 +104,8 @@ import { disputeRouter, disputePartiesForEvidenceFile, registerPartyLookupPort }
 import { findWalletFor } from '../modules/wallets';
 import { money } from '../shared/money';
 import { fraudRouter, installThumbnailDecoder } from '../modules/fraud';
-import { leadRouter, leadClusters } from '../modules/leads';
-import { registerLeadLayerPort, registerAgentReviewPort } from '../modules/agents';
+import { ensureDefaultSequences, leadRouter, leadClusters, leadLandingRouter, leadOutreachWebhookRouter, leadWebhookRouter, registerAgentPositionPort, registerMapPositionPort, registerPartyOpenerPort, registerPackagePorts, registerRecycleSequencing } from '../modules/leads';
+import { registerLeadLayerPort, registerAgentReviewPort, registerApplicationPort } from '../modules/agents';
 import { reviewPartyRouter, reviewRouter, recentAgentReviews, reviewIdsForCampaignSpots } from '../modules/reviews';
 import { visitRouter, agentDayRouter, visitsForPublisher } from '../modules/visits';
 import { legalRouter } from '../modules/legal';
@@ -117,11 +121,12 @@ import {
   handleEmployeeDigioWebhook,
   registerEmployeeLookupPort,
   registerKycUserLabelPort,
+  mirrorAgentIdentityDocument,
 } from '../modules/kyc';
-import { uploadRouter, filesRouter, registerFileAccessPort } from '../modules/uploads';
+import { uploadRouter, filesRouter, registerFileAccessPort, purgeStoredFile, fileIdFromUrl } from '../modules/uploads';
 import { integrationsRouter } from '../modules/integrations';
 import { brandingRouter } from '../modules/branding';
-import { appStatusRouter, configRouter, platformSettingsRouter } from '../modules/app-config';
+import { appStatusRouter, configRouter, getPlatformSettings, platformSettingsRouter } from '../modules/app-config';
 import { opsRouter, registerPostgresProbe } from '../modules/ops';
 import { reportsRouter } from '../modules/reports';
 import { auditRouter } from '../modules/audit';
@@ -172,6 +177,42 @@ registerLeadLayerPort({ clusters: (scope) => leadClusters(scope) });
 // `agents` to write the review snapshot. Unregistered, the ledger carries no
 // review rows; the score still does, from the snapshot columns.
 registerAgentReviewPort({ recentReviews: (agentId, from) => recentAgentReviews(agentId, from) });
+// AG-1: what the agent application asks of payouts, training, kyc and users — composed here so `agents` imports none of them.
+registerApplicationPort({
+  hasPayoutMethod: async (userId) => (await listPayoutMethods(userId)).length > 0,
+  certificationState: async (userId) => {
+    const certification = await getAgentCertification(userId).catch(() => null);
+    return { state: certification?.state ?? 'LOCKED', available: (certification?.progress.total ?? 0) > 0 };
+  },
+  assessmentState: (agentId) => getAssessmentStanding(agentId).catch(() => ({ required: false, passed: false, modules: [] })),
+  mirrorIdentityDocument: (agentId, userId, kind, url, number) => mirrorAgentIdentityDocument(agentId, userId, kind, url, number),
+  adminUserIds: () => listAdminUserIds(),
+  // AG-5: the exit's settlement, through the modules that own each part.
+  settleExit: async (agentId, userId) => {
+    const notes: string[] = [];
+    await revokeSessions(userId, 'AGENT_EXITED');
+    const grantsRevoked = await revokeLiveGrantsForAgent(agentId, userId).catch((error: unknown) => {
+      notes.push(`Access grants could not be closed: ${error instanceof Error ? error.message : String(error)}`);
+      return 0;
+    });
+    await deactivateQrsFor('AGENT', agentId).catch(() => notes.push('The agent QR code could not be deactivated.'));
+    let payout: { amount: string; reference: string | null; outcome: string } | null = null;
+    const wallet = await findWalletFor({ kind: 'AGENT', id: agentId }).catch(() => null);
+    if (wallet) {
+      const result = await requestClosingWithdrawal(wallet.id, { userId, note: 'Agent exit — the closing payout' }).catch((error: unknown) => {
+        notes.push(`The closing payout could not be raised: ${error instanceof Error ? error.message : String(error)}`);
+        return null;
+      });
+      if (result && result.reason !== 'NOTHING_WITHDRAWABLE') payout = { amount: String(result.amount), reference: result.withdrawal?.reference ?? null, outcome: result.reason };
+      if (result?.reason === 'NO_VERIFIED_METHOD') notes.push('The wallet holds a balance but no verified payout method: pay it by hand from Finance.');
+    }
+    return { sessionsEnded: true, grantsRevoked, qrDeactivated: true, payout, notes };
+  },
+  purgeFile: async (url) => {
+    const id = fileIdFromUrl(url);
+    return id ? purgeStoredFile(id) : false;
+  },
+});
 
 // Supplies the campaigns module's SpotReviewPort (E7-2) — `reviewed` and
 // `reviewId` on each spot of GET /campaigns/:id. Inverted for the same
@@ -215,6 +256,53 @@ registerInvoicesModule();
 // gate a job on the order's status. Unregistered, an order has no print job
 // and reads and moves exactly as it did before the lot.
 registerPrintPartnersModule();
+// DS-1 (Digio eSign, 22 Sep 2026): the signing rail's three ports. The
+// policy is a platform-settings section (`app-config` reaches `users`, which
+// reaches `agreements`); the messages go through `notify` (`notifications`
+// reaches `app-config`); the completion hooks are registered by the modules
+// whose documents they are, in their own blocks below.
+registerEsignPolicyPort({ current: async () => (await getPlatformSettings()).esign });
+registerEsignNotifyPort({
+  send: async (message: EsignMessage) => {
+    const request = message.request;
+    const document = request.template.title;
+    const partyName = request.signerName;
+    const recipient = request.signerUserId ? undefined : { email: request.signerIdentifier.includes('@') ? request.signerIdentifier : null, mobile: request.signerIdentifier.includes('@') ? null : `+91${request.signerIdentifier}` };
+    if (message.event === 'AGREEMENT_SIGNATURE_REQUESTED') {
+      const expires = request.expiresAt.toISOString().slice(0, 10);
+      await notify(
+        'AGREEMENT_SIGNATURE_REQUESTED',
+        request.signerUserId,
+        { partyName, document, url: request.signingUrl ?? '', expires, deepLink: message.deepLink },
+        {
+          ...(recipient ? { recipient } : {}),
+          inApp: { type: 'SYSTEM', title: 'A document to sign', message: `ADX has sent you the ${document} to sign. It takes a minute with Aadhaar OTP.`, suggestedAction: 'Sign it', relatedId: request.id },
+        },
+      );
+      return;
+    }
+    if (message.event === 'AGREEMENT_SIGNED') {
+      await notify('AGREEMENT_SIGNED', request.signerUserId, { partyName, document }, { ...(recipient ? { recipient } : {}), inApp: { type: 'SYSTEM', title: 'Signed', message: `The ${document} is signed by every party. Your copy is under Agreements.`, suggestedAction: 'Open it', relatedId: request.id } });
+      return;
+    }
+    await notify('AGREEMENT_SIGNATURE_EXPIRED', request.signerUserId, { partyName, document }, { ...(recipient ? { recipient } : {}), inApp: { type: 'SYSTEM', title: 'Signing link expired', message: `The link to sign the ${document} has expired. Ask for a fresh one.`, suggestedAction: 'Open Agreements', relatedId: request.id } });
+  },
+});
+
+// DS-2: an employee's console invitation that waited on the signed appointment letter goes out from this hook.
+registerAppointmentSigningHooks();
+
+// LT-1: a ping on an order's trip also keeps the order's own agent position
+// (`Order.agentLatitude/Longitude`), which the parties' tracking screens read
+// through `orders`. A port because `agent-locations` sits above `orders`
+// and the write is the orders module's.
+registerOrderPositionPort({ update: (orderId, coords) => updateAgentLocation(orderId, coords) });
+
+// PP-1: the sign-up's "I print and install" opens a print-partner application
+// through `users.chooseParty`. `print-partners` reaches `orders`, which
+// notifies through `users`, so `users` declares the door as a port and the
+// partner module fills it here. Unregistered, choosing the party is a 503.
+registerPartnerApplicationPort({ apply: (userId, input) => applyAsPartner(userId, input) });
 
 // Supplies the advertisers module's OriginalMethodRefundPort (Lot C, Q110):
 // whether a refund request may go back to the card or UPI it came from —
@@ -384,6 +472,24 @@ if (env.NODE_ENV !== 'test') {
   // goes silent the day the dispatcher boots and nothing ops edited is undone.
   void ensureTemplates().catch((err: unknown) => {
     logger.warn('Could not ensure the notification templates', {
+      cause: err instanceof Error ? err.message : String(err),
+    });
+  });
+  // LH11: a lead that comes back to the cold pool after sixty days starts a
+  // fresh run of its side's sequence — the port LH2 declared, filled here so
+  // the pipeline job needs no import of the outreach half.
+  registerRecycleSequencing();
+  // LH6 (D5): the six default sequences — one per side and temperature —
+  // seeded once when the table is empty; the desk edits them after.
+  void ensureDefaultSequences().catch((err: unknown) => {
+    logger.warn('Could not ensure the default lead sequences', {
+      cause: err instanceof Error ? err.message : String(err),
+    });
+  });
+  // LH8: the two lead milestone templates ("5 lead conversions this month",
+  // "10 first contacts this week"), seeded once per type; the desk edits them.
+  void ensureLeadMilestoneTemplates().catch((err: unknown) => {
+    logger.warn('Could not ensure the lead milestone templates', {
       cause: err instanceof Error ? err.message : String(err),
     });
   });
@@ -754,6 +860,38 @@ apiRouter.use('/agents', agentRouter);
 // The text each party accepts, versioned; `supply` and `advertisers` record
 // the click, this owns the words. See modules/agreements/README.md.
 apiRouter.use('/agreements', agreementRouter);
+// LT-1: the agent's position on a job, the ops live map, the order timeline. See modules/agent-locations/README.md.
+apiRouter.use('/agent-locations', agentLocationRouter);
+// LH3: the lead-form ad webhooks (Meta / Google / LinkedIn), signed by their providers.
+apiRouter.use('/webhooks/leads', leadWebhookRouter);
+// LH6: the outreach providers' webhooks — Meta, the WhatsApp BSPs, Business Messages, telephony.
+apiRouter.use('/webhooks/outreach', leadOutreachWebhookRouter);
+// LH7 (D6): the invite landing behind adx.in/j/<code> — public, the code is the key.
+apiRouter.use('/j', leadLandingRouter);
+// LH7: the landing opens the account's side through the app's own door; a package quote and the catalogue come from `packages`.
+registerPartyOpenerPort((userId, input) => chooseParty(userId, input));
+registerPackagePorts({
+  quote: async (input) => {
+    const quoted = await quotePackage(input);
+    return { plan: { tier: quoted.plan.tier, name: quoted.plan.name, pricePerMonth: String(quoted.plan.pricePerMonth) }, priced: { months: quoted.priced.months, perMonth: String(quoted.priced.perMonth), total: String(quoted.priced.total) }, addOns: quoted.addOns.map((a) => ({ code: a.code, name: a.name, pricePerMonth: String(a.pricePerMonth) })) };
+  },
+  catalogue: async () => {
+    const catalogue = await listCatalogue();
+    return { packages: catalogue.packages.map((p) => ({ tier: p.tier, name: p.name, pricePerMonth: String(p.pricePerMonth), description: p.description, isPopular: p.isPopular })) };
+  },
+});
+// LH3: "nearest agent" reads LT-1's last live fix — the port keeps `leads` below `agent-locations`.
+registerAgentPositionPort({
+  lastFix: async (agentId) => {
+    const fix = await readLastFix(agentId);
+    return fix ? { latitude: fix.latitude, longitude: fix.longitude, at: new Date(fix.at) } : null;
+  },
+});
+// LH5: the nearby-hot alert reads the same fix.
+registerMapPositionPort(async (agentId) => {
+  const fix = await readLastFix(agentId);
+  return fix ? { latitude: fix.latitude, longitude: fix.longitude, at: new Date(fix.at) } : null;
+});
 // Lot D (Q104): the reviews desk — every review by subject, hide and unhide.
 // ADMIN at the router; the party-facing routes are mounted above.
 apiRouter.use('/reviews', reviewRouter);
@@ -767,6 +905,8 @@ onUnmatchedDigioWebhook(handlePrintPartnerDigioWebhook);
 onUnmatchedDigioWebhook(handleAgentDigioWebhook);
 onUnmatchedDigioWebhook(handleEmployeeDigioWebhook);
 apiRouter.post('/webhooks/digio', asyncHandler(digioWebhookHandler));
+// DS-1 (Digio eSign): the signing rail's own callback, routed by Digio's document id onto the SigningRequest.
+apiRouter.post('/webhooks/digio/esign', asyncHandler(esignWebhookHandler));
 // Lot C (Q110): the three payment gateways' callbacks. Signature-checked in
 // each adapter over the raw body create-app keeps beside the parsed one
 // (the same arrangement the Digio hook relies on); CCAvenue's is a form post.

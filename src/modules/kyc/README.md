@@ -8,7 +8,7 @@ kyc/
   kyc.schema.ts     review decision + pagination shared by the subfeatures
   advertiser/       AdvertiserKyc — documents, by entity type; N3-B: keyed by the Advertiser PROFILE
   user/             UserKyc — a single self-recorded video
-  agent/            AgentKyc — recorded at ADX's desk on the agent's behalf (D4)
+  agent/            AgentKyc — recorded at ADX's desk on the agent's behalf (D4); KYC-D: Digio from the agent's own phone
   employee/         EmployeeKyc — the agent record's twin for staff (Lot D, Q131)
   document-review/  KycDocumentReview — one decision per tile, both party types (Lot D, Q42)
   purge.rules.ts    what a purge keeps: the PAN's last four, a trimmed Digio payload (Lot D, Q127)
@@ -219,12 +219,29 @@ Liveness videos go thirty days after their own VERIFIED, keeping when they
 were recorded, by whom, and the reviewer's note. Attributed to the first admin
 (`ActivityLog.userId` is a foreign key and there is no system account).
 
-## Agent KYC (D4)
+## Agent KYC (D4, and KYC-D)
 
-Agents never self-serve — they are onboarded in person and only ever sign in —
-so their documents are recorded ON THEIR BEHALF by the admin who met them,
-and the row remembers who (`recordedById`; N3-B: `recordedVia` DESK, `method`
-MANUAL). `PUT /agent-kyc/:agentId` (ADMIN) is
+D4 had agents never self-serving — onboarded in person, their documents
+recorded ON THEIR BEHALF by the admin who met them, the row remembering who
+(`recordedById`; N3-B: `recordedVia` DESK, `method` MANUAL). **KYC-D (the
+owner, 21 Sep 2026: "KYC by Digio for agents too instead of submitting
+documents; submitting identification documents should be there but as last
+resort for everyone in the system")** opens the Digio path from the agent's
+own phone: `POST /agent-kyc/me/digio/initiate` (AGENT_*) opens a session
+through `initiateAgentDigioKyc(agent, { onBehalf: false })` — the same
+client, reference and webhook as the desk's request, but `submittedAt` is
+stamped at once since the agent started it — and `GET
+/agent-kyc/me/digio/status` is what the phone polls: `{ method, digioStatus,
+kycStatus, digioVerifiedAt }`, 404 before any record. An approval verifies
+the identity the AG-1 application ladder asks for (`AgentKyc.status`
+VERIFIED); the agent app leads with Digio on the papers step and on
+Account › Identity, and the paper uploads (AG-2's `PUT
+/agents/me/application/documents/:kind`) and the desk's recording remain
+the way through when Digio cannot be used — a 503 `KYC_PROVIDER_UNAVAILABLE`
+from the initiate is the branch switched off, and the app says so and
+offers the uploads. The publisher, advertiser and print-partner KYC screens
+were re-ordered the same day so Digio is the primary button and the uploads
+sit under it. `PUT /agent-kyc/:agentId` (ADMIN) is
 an upsert: ops record what they have and come back for the rest; a fresh
 recording after a rejection returns the row to PENDING with the reason
 cleared. `PATCH /agent-kyc/:agentId/review` (ADMIN) is the decision, and a

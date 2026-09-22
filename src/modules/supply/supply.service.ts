@@ -26,7 +26,7 @@ import type { PageQuery } from '../../shared/pagination';
 import { getPlatformSettings } from '../app-config';
 import { createNotification } from '../notifications';
 import { listAdminUserIds } from '../users';
-import { isCurrentAcceptance } from '../agreements';
+import { assertPublisherLicenceSigned, isCurrentAcceptance, requestPublisherLicence } from '../agreements';
 import { prismaSupplyRepository as repository } from './prisma-supply.repository';
 import type { AttemptListingInput, ResolvedAttemptListing } from './supply.repository';
 
@@ -203,6 +203,9 @@ export async function acceptListingAgreement(input: {
     throw new ApiError(409, 'NO_ACTIVE_TEMPLATE', 'No listing agreement is published');
   }
 
+  // DS-3: once the master licence has been asked for, the next attempt waits on its signature.
+  await assertPublisherLicenceSigned(attempt.publisherId);
+
   const acceptance = await repository.createAcceptance({
     templateId: template.id,
     templateKind: 'LISTING',
@@ -219,6 +222,10 @@ export async function acceptListingAgreement(input: {
   // Acceptance is attempt-level; publication stays per-listing, so every
   // listing simply moves on to its own document gate.
   await repository.advanceAttemptListings(attempt.id);
+
+  // DS-3: under the FIRST_SUBMISSION setting the master licence is asked for
+  // here, at the publisher's first submission — idempotent, never blocking.
+  await requestPublisherLicence(attempt.publisherId, 'FIRST_SUBMISSION', input.acceptedByUserId);
 
   return acceptance;
 }

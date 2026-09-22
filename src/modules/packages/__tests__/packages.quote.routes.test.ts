@@ -19,7 +19,7 @@ const { service, advertisers, agents, repository } = vi.hoisted(() => ({
     activePackageWithOptions: vi.fn(),
   },
   advertisers: { getAdvertiserForUser: vi.fn(), assertNotSuspended: vi.fn(), payForPackage: vi.fn() },
-  agents: { findAgentProfile: vi.fn() },
+  agents: (() => { const o = { findAgentProfile: vi.fn() }; return { ...o, findWorkingAgentProfile: o.findAgentProfile }; })(),
   repository: { advertiserContext: vi.fn() },
 }));
 

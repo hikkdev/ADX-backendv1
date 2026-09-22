@@ -435,7 +435,8 @@ export const prismaOrdersRepository: OrdersRepository = {
   findAgentLocation(orderId: string) {
     return prisma.order.findUnique({
       where: { id: orderId },
-      select: { agentLatitude: true, agentLongitude: true, agentLocationUpdatedAt: true },
+      // LT-1: the site too, so the parties' read can say how far the agent is.
+      select: { agentLatitude: true, agentLongitude: true, agentLocationUpdatedAt: true, listing: { select: { latitude: true, longitude: true } } },
     });
   },
 

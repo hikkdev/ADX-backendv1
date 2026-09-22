@@ -10,6 +10,7 @@ import {
   getQrHandler,
   qrImagePngHandler,
   qrImageSvgHandler,
+  describeIdentityHandler,
   scansByHandler,
   listQrHandler,
   regenerateQrHandler,
@@ -22,6 +23,8 @@ export const qrRouter = Router();
 // layer below. Moving them down turns every rendered QR into a broken image.
 qrRouter.get('/:qrId/image.png', asyncHandler(qrImagePngHandler));
 qrRouter.get('/:qrId/image.svg', asyncHandler(qrImageSvgHandler));
+// QR-27: the web landing behind an identity code's link — public, like the images.
+qrRouter.get('/public/:token', asyncHandler(describeIdentityHandler));
 
 qrRouter.use(authenticate);
 

@@ -112,6 +112,8 @@ export type PartnerListFilter = {
   cityId?: string | null;
   /** Undefined lists both. */
   active?: boolean;
+  /** PP-1: only the shops that applied from the app and are not yet activated. */
+  applied?: boolean;
   page: number;
   pageSize: number;
 };
@@ -246,6 +248,16 @@ export interface PrintPartnersRepository {
    * payee nobody can record a payout method for.
    */
   createPartner(data: NewPartner): Promise<PartnerRow>;
+  /**
+   * PP-1: the shop's own application — the person already has an account
+   * (they signed in by OTP to apply), so this grants the PARTNER role on it
+   * and writes the row with `appliedAt`; the account stays active so they can
+   * watch the review from the app.
+   */
+  createApplication(data: NewPartner & { userId: string; appliedAt: Date }): Promise<PartnerRow>;
+  /** PP-1: the roles the account holds, to refuse a publisher's or an agent's number. */
+  findUserRoles(userId: string): Promise<string[]>;
+  findPartnerByUserId(userId: string): Promise<PartnerRow | null>;
   findPartner(id: string): Promise<PartnerRow | null>;
   /** Lot H: the partner behind a signed-in user. */
   findPartnerByUser(userId: string): Promise<PartnerRow | null>;

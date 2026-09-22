@@ -219,37 +219,425 @@ model AgentProfile {
   orderTypes       ListingCategory[]  @default([])
   maxActiveOrders  Int?
   businessName     String?
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime           @updatedAt
 
-  user             User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  orders           Order[]
-  publishers       Publisher[]
-  advertisers      Advertiser[]
-  wallet           Wallet?
-  listings         Listing[]
-  transactions     Transaction[]
-  agentMilestones  AgentMilestone[]
-  orderMilestones  OrderMilestone[]
-  agentAssignments OrderAgentAssignment[]
-  accessGrants     DelegatedAccessGrant[]
-  supportTickets   SupportTicket[]
-  campaigns        Campaign[]
-  packageSales     PackageSale[]
-  incentives       AgentIncentive[]
+  /// AG-1 (20 Sep 2026): the application ladder. Every agent that existed
+  /// before the ladder is ACTIVE; a new one applies in the app (or at the
+  /// desk) and climbs APPLIED → … → UNDER_REVIEW → ACTIVE, or leaves it at
+  /// ON_HOLD / REJECTED / WITHDRAWN. EXITED is the end of an engagement.
+  /// `status` above stays the operational switch of an ACTIVE agent.
+  stage                    AgentStage           @default(APPLIED)
+  applicationSubmittedAt   DateTime?
+  activatedAt              DateTime?
+  activatedById            String?
+  holdReason               String?
+  rejectionReason          String?
+  rejectedAt               DateTime?
+  withdrawnAt              DateTime?
+  reviewNote               String?
+  /// The grade the desk sets at review from education, experience, assessment
+  /// and interview — the routing axis beside the earned tier.
+  grade                    AgentGrade?
+  gradeSetAt               DateTime?
+  gradeSetById             String?
+  gradeNote                String?
+  /// The engagement — "an employee, temporary style".
+  engagementType           AgentEngagementType?
+  engagementStartAt        DateTime?
+  engagementEndAt          DateTime?
+  probationEndsAt          DateTime?
+  reportingManagerId       String?
+  weeklyHours              Int?
+  /// What the applicant tells us about themselves.
+  languages                String[]             @default([])
+  vehicleType              AgentVehicleType?
+  vehicleNumber            String?
+  currentAddress           String?
+  currentLatitude          Float?
+  currentLongitude         Float?
+  permanentAddress         String?
+  emergencyContactName     String?
+  emergencyContactRelation String?
+  emergencyContactPhone    String?
+  /// Advertiser-side (sales) facts that are not a row of their own.
+  highestEducation         AgentEducationLevel?
+  salesExperienceYears     Int?
+  industries               String[]             @default([])
+  noticePeriodDays         Int?
+  /// Where they came from: the app, a fleet partner, an agent's referral, the desk, an import.
+  sourceKind               AgentSourceKind      @default(DESK)
+  sourceNote               String?
+  referredByAgentId        String?
+  /// The exit, and whether the door stays open.
+  exitedAt                 DateTime?
+  exitedById               String?
+  exitReason               AgentExitReason?
+  exitNote                 String?
+  rehireEligible           Boolean              @default(true)
+  blacklistedAt            DateTime?
+  /// AG-4: the desk's screening tick — the paper screen for a field agent,
+  /// or the assessment and interview judged by hand for a sales agent.
+  screenedAt               DateTime?
+  screenedById             String?
+  screeningNote            String?
+  /// AG-4: where a hold came from, so a resume goes back there — ACTIVE for
+  /// an agent held by the expiry sweep, null for a hold before submission.
+  heldFromStage            AgentStage?
+  /// AG-5: the fleet partner whose invite this agent applied through; the provenance the brief asked for.
+  fleetPartnerId           String?
+  /// AG-5: the papers' images and numbers were purged, ninety days after the exit.
+  documentsPurgedAt        DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user                User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reportingManager    Employee?                 @relation("AgentReportingManager", fields: [reportingManagerId], references: [id], onDelete: SetNull)
+  documents           AgentDocument[]
+  interviews          AgentInterview[]
+  fleetPartner        FleetPartner?             @relation("FleetAgents", fields: [fleetPartnerId], references: [id], onDelete: SetNull)
+  fleetInvites        FleetInvite[]
+  educations          AgentEducation[]
+  employments         AgentEmployment[]
+  references          AgentReference[]
+  platformExperiences AgentPlatformExperience[]
+  orders              Order[]
+  publishers          Publisher[]
+  advertisers         Advertiser[]
+  wallet              Wallet?
+  listings            Listing[]
+  transactions        Transaction[]
+  agentMilestones     AgentMilestone[]
+  /// LH10: the field work sampled for quality.
+  qaSamples           LeadQaSample[]
+  orderMilestones     OrderMilestone[]
+  agentAssignments    OrderAgentAssignment[]
+  accessGrants        DelegatedAccessGrant[]
+  supportTickets      SupportTicket[]
+  campaigns           Campaign[]
+  packageSales        PackageSale[]
+  incentives          AgentIncentive[]
   /// D4: the agent's own identity record, recorded at ADX's desk.
-  kyc              AgentKyc?
-  trainingProgress AgentTrainingProgress[]
-  trainingAttempts TrainingAttempt[]
-  certification    AgentCertification?
-  rating           AgentRating?
-  leads            Lead[]
-  fieldVisits      FieldVisit[]
-  tierEvents       AgentTierEvent[]
-  accountActivity  AccountActivity[]
-  cityRef          City?                   @relation("AgentCity", fields: [cityId], references: [id], onDelete: SetNull)
+  kyc                 AgentKyc?
+  trainingProgress    AgentTrainingProgress[]
+  trainingAttempts    TrainingAttempt[]
+  certification       AgentCertification?
+  rating              AgentRating?
+  leads               Lead[]
+  fieldVisits         FieldVisit[]
+  /// LT-1: the trips the live map draws.
+  trails              AgentTrail[]
+  tierEvents          AgentTierEvent[]
+  accountActivity     AccountActivity[]
+  cityRef             City?                     @relation("AgentCity", fields: [cityId], references: [id], onDelete: SetNull)
 
   @@index([cityId])
+  @@index([stage])
+  @@index([reportingManagerId])
+  @@index([fleetPartnerId])
+}
+
+/// AG-1: where an agent stands on the application ladder, then in the engagement.
+enum AgentStage {
+  APPLIED
+  PROFILE
+  DOCUMENTS
+  BANK
+  AGREEMENT
+  SCREENING
+  TRAINING
+  UNDER_REVIEW
+  ACTIVE
+  ON_HOLD
+  REJECTED
+  WITHDRAWN
+  EXITED
+}
+
+/// AG-1: the skill grade the desk sets — G1 Field, G2 Senior field, G3 Key accounts, G4 Enterprise.
+enum AgentGrade {
+  G1
+  G2
+  G3
+  G4
+}
+
+enum AgentEngagementType {
+  GIG
+  CONTRACT
+}
+
+enum AgentVehicleType {
+  NONE
+  BICYCLE
+  SCOOTER
+  MOTORBIKE
+  EV
+  CAR
+}
+
+enum AgentEducationLevel {
+  BELOW_10TH
+  CLASS_10
+  CLASS_12
+  DIPLOMA
+  GRADUATE
+  POST_GRADUATE
+}
+
+enum AgentSourceKind {
+  SELF
+  FLEET
+  REFERRAL
+  WALK_IN
+  JOB_PORTAL
+  DESK
+  IMPORT
+}
+
+enum AgentExitReason {
+  RESIGNED
+  CONTRACT_ENDED
+  NON_PERFORMANCE
+  MISCONDUCT
+  FRAUD
+  OTHER
+}
+
+/// AG-1: every paper an agent files, one row per kind, each with its own
+/// desk decision. The seven fixed AgentKyc slots were copied in here once
+/// (migration ag1) and the desk's KYC record keeps writing both.
+enum AgentDocumentKind {
+  AADHAAR_FRONT
+  AADHAAR_BACK
+  PASSPORT
+  PAN
+  SELFIE
+  DRIVING_LICENCE_FRONT
+  DRIVING_LICENCE_BACK
+  VEHICLE_RC
+  VEHICLE_INSURANCE
+  ADDRESS_PROOF
+  BANK_PROOF
+  POLICE_VERIFICATION
+  EDUCATION_CERTIFICATE
+  RESUME
+  EMPLOYER_PROOF
+  PHOTO
+  OTHER
+}
+
+enum AgentDocumentStatus {
+  SUBMITTED
+  APPROVED
+  FLAGGED
+  REUPLOAD_REQUESTED
+  /// AG-4: the paper's own date has passed; a fresh one is filed over it.
+  EXPIRED
+}
+
+/// AG-4: how a paper's facts were checked beyond the desk's eyes.
+enum DocumentVerificationVia {
+  MANUAL
+  CASHFREE_VRS
+  CASHFREE_BANK
+}
+
+model AgentDocument {
+  id                  String                   @id @default(cuid())
+  agentId             String
+  kind                AgentDocumentKind
+  url                 String
+  /// The number on the paper, masked for reading (Aadhaar keeps its last four).
+  numberMasked        String?
+  /// A one-way hash of the full number, for finding the same paper on two accounts.
+  numberHash          String?
+  expiresAt           DateTime?
+  status              AgentDocumentStatus      @default(SUBMITTED)
+  reviewNote          String?
+  reviewedById        String?
+  reviewedAt          DateTime?
+  /// APP when the applicant uploaded it, DESK when the desk recorded it for them.
+  uploadedVia         String                   @default("APP")
+  uploadedById        String?
+  version             Int                      @default(1)
+  /// AG-4: the last expiry reminder sent and the window it was for (30 or 7), so each is sent once.
+  expiryRemindedAt    DateTime?
+  expiryReminderDays  Int?
+  expiredAt           DateTime?
+  /// AG-4: a check beyond the desk — Cashfree's vehicle-RC lookup, a bank penny drop — with what came back.
+  verifiedVia         DocumentVerificationVia?
+  verifiedAt          DateTime?
+  verificationPayload Json?
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
+
+  agent AgentProfile @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, kind])
+  @@index([status])
+  @@index([expiresAt])
+  @@index([numberHash])
+}
+
+/// AG-4: an interview the desk scheduled for a sales-agent applicant — round
+/// one for everyone, round two before a G3/G4 activation — with its outcome
+/// and the interviewer's marks out of five.
+model AgentInterview {
+  id            String                @id @default(cuid())
+  agentId       String
+  round         Int                   @default(1)
+  scheduledAt   DateTime
+  mode          AgentInterviewMode    @default(IN_PERSON)
+  location      String?
+  interviewerId String?
+  outcome       AgentInterviewOutcome @default(SCHEDULED)
+  marks         Int?
+  notes         String?
+  decidedAt     DateTime?
+  decidedById   String?
+  createdById   String?
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  agent       AgentProfile @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  interviewer Employee?    @relation("AgentInterviewer", fields: [interviewerId], references: [id], onDelete: SetNull)
+
+  @@index([agentId, round])
+  @@index([scheduledAt])
+}
+
+/// AG-5: a delivery or ride fleet whose riders ADX invites to apply as field
+/// agents — a partner ops records, then pastes a list of numbers against.
+model FleetPartner {
+  id          String   @id @default(cuid())
+  name        String
+  /// ZOMATO, SWIGGY, RAPIDO, … or OTHER — the platform the fleet rides for.
+  platform    String   @default("OTHER")
+  contactName String?
+  phone       String?
+  email       String?
+  city        String?
+  notes       String?
+  isActive    Boolean  @default(true)
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  invites FleetInvite[]
+  agents  AgentProfile[] @relation("FleetAgents")
+
+  @@index([isActive, name])
+}
+
+/// One rider invited by SMS from a fleet partner's list; the number is what
+/// ties a later application back to the partner.
+model FleetInvite {
+  id        String            @id @default(cuid())
+  partnerId String
+  /// E.164.
+  mobile    String
+  name      String?
+  status    FleetInviteStatus @default(SENT)
+  sentAt    DateTime          @default(now())
+  sentById  String?
+  /// Set when a person with this number applies, and again when they are activated.
+  agentId   String?
+  appliedAt DateTime?
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  partner FleetPartner  @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  agent   AgentProfile? @relation(fields: [agentId], references: [id], onDelete: SetNull)
+
+  @@unique([partnerId, mobile])
+  @@index([mobile])
+  @@index([status])
+}
+
+enum FleetInviteStatus {
+  SENT
+  APPLIED
+  ACTIVATED
+}
+
+enum AgentInterviewMode {
+  IN_PERSON
+  PHONE
+  VIDEO
+}
+
+enum AgentInterviewOutcome {
+  SCHEDULED
+  PASSED
+  FAILED
+  NO_SHOW
+  CANCELLED
+}
+
+/// AG-1: an advertiser-side applicant's education, one row per qualification.
+model AgentEducation {
+  id          String              @id @default(cuid())
+  agentId     String
+  level       AgentEducationLevel
+  degree      String?
+  institution String?
+  year        Int?
+  createdAt   DateTime            @default(now())
+
+  agent AgentProfile @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId])
+}
+
+/// AG-1: an advertiser-side applicant's work history.
+model AgentEmployment {
+  id               String   @id @default(cuid())
+  agentId          String
+  employer         String
+  role             String?
+  industry         String?
+  fromMonth        String?
+  toMonth          String?
+  current          Boolean  @default(false)
+  reasonForLeaving String?
+  createdAt        DateTime @default(now())
+
+  agent AgentProfile @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId])
+}
+
+/// AG-1: a reference the desk may call.
+model AgentReference {
+  id          String    @id @default(cuid())
+  agentId     String
+  name        String
+  relation    String?
+  phone       String
+  checkedAt   DateTime?
+  checkedById String?
+  checkNote   String?
+  createdAt   DateTime  @default(now())
+
+  agent AgentProfile @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId])
+}
+
+/// AG-1: a publisher-side applicant's time on a delivery or ride platform.
+model AgentPlatformExperience {
+  id         String   @id @default(cuid())
+  agentId    String
+  platform   String
+  partnerId  String?
+  years      Decimal? @db.Decimal(4, 1)
+  active     Boolean  @default(true)
+  ratingNote String?
+  createdAt  DateTime @default(now())
+
+  agent AgentProfile @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId])
 }
 
 enum AgentTier {
@@ -757,6 +1145,10 @@ model QrScan {
   decidedAt   DateTime?
   /// The authority the approval opened — a DelegatedAccessGrant id.
   grantId     String?
+  /// QR-27: what the scanner asked for on an identity code after onboarding
+  /// — `{ scope, reason, durationMinutes }` — shown to the owner before they
+  /// approve and copied onto the grant the approval opens.
+  ask         Json?
   createdAt   DateTime  @default(now())
 
   qr        QrCode @relation(fields: [qrId], references: [id])
@@ -915,10 +1307,10 @@ model Publisher {
   /// `onboardedByRole` their console role or kind at the time (a snapshot —
   /// roles move), `onboardedAt` when. Set once, at the door; a later claim or
   /// adoption never overwrites it.
-  onboardedVia    OnboardingSource?
-  onboardedById   String?
-  onboardedByRole String?
-  onboardedAt     DateTime?
+  onboardedVia       OnboardingSource?
+  onboardedById      String?
+  onboardedByRole    String?
+  onboardedAt        DateTime?
   createdAt          DateTime          @default(now())
   updatedAt          DateTime          @updatedAt
 
@@ -1240,6 +1632,10 @@ model Listing {
   rightsValidUntil       DateTime?
   rightsLapsedAt         DateTime?
   rightsRemindedAt       DateTime?
+  /// AG-4: a vehicle put up as a spot — the registration, and Cashfree's RC lookup when the desk ran it.
+  vehicleNumber          String?
+  vehicleRcVerifiedAt    DateTime?
+  vehicleRcPayload       Json?
   createdAt              DateTime            @default(now())
   updatedAt              DateTime            @updatedAt
 
@@ -1332,6 +1728,10 @@ enum MilestoneType {
   REVENUE
   ACTIVITY
   QUALITY
+  /// LH8 (the Lead Hunt): leads the agent held that converted in the window.
+  LEAD_CONVERSIONS
+  /// LH8: leads the agent held whose first contact was logged in the window.
+  LEAD_CONTACTS
 }
 
 /// A growth milestone as ops define it. `target` is a count — onboardings,
@@ -1391,6 +1791,8 @@ enum NotificationChannel {
   PUSH
   EMAIL
   SMS
+  /// LH6 (the Lead Hunt): WhatsApp, through the outreach hub's BSP adapter.
+  WHATSAPP
 }
 
 enum NotificationType {
@@ -1807,7 +2209,7 @@ model TrainingResource {
 // attempts, and the certificate.
 
 model TrainingModule {
-  id                 String   @id @default(cuid())
+  id                 String             @id @default(cuid())
   ordinal            Int
   title              String
   summary            String?
@@ -1818,20 +2220,38 @@ model TrainingModule {
   /// The Transcript tab.
   transcript         String?
   /// The KEY TAKEAWAYS card.
-  takeaways          String[] @default([])
+  takeaways          String[]           @default([])
   /// Locked until the module with this ordinal has a passed attempt; null is open.
   unlockAfterOrdinal Int?
   /// The quiz's pass mark, in percent.
-  passPercent        Int      @default(80)
-  isActive           Boolean  @default(true)
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @default(now()) @updatedAt
+  passPercent        Int                @default(80)
+  isActive           Boolean            @default(true)
+  /// AG-4: whom the module is for — every agent, or one side's curriculum.
+  audience           TrainingAudience   @default(ALL)
+  /// AG-4: a LESSON counts toward the certificate; an ASSESSMENT is the
+  /// screening test a sales applicant sits, scored but never certified.
+  kind               TrainingModuleKind @default(LESSON)
+  /// AG-4: an assessment's clock, in minutes; null is untimed.
+  timeLimitMins      Int?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @default(now()) @updatedAt
 
   questions TrainingQuestion[]
   progress  AgentTrainingProgress[]
   attempts  TrainingAttempt[]
 
   @@index([isActive, ordinal])
+}
+
+enum TrainingAudience {
+  ALL
+  PUBLISHER_AGENT
+  ADVERTISER_AGENT
+}
+
+enum TrainingModuleKind {
+  LESSON
+  ASSESSMENT
 }
 
 model TrainingQuestion {
@@ -2310,10 +2730,13 @@ model Employee {
   createdAt                    DateTime        @default(now())
   updatedAt                    DateTime        @updatedAt
 
-  user             User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   kyc              EmployeeKyc?
-  departmentRecord Department?  @relation("DepartmentMembers", fields: [departmentId], references: [id])
-  headOf           Department[] @relation("DepartmentHead")
+  departmentRecord Department?      @relation("DepartmentMembers", fields: [departmentId], references: [id])
+  headOf           Department[]     @relation("DepartmentHead")
+  /// AG-1: the agents this staff member manages.
+  managedAgents    AgentProfile[]   @relation("AgentReportingManager")
+  interviews       AgentInterview[] @relation("AgentInterviewer")
 
   @@index([departmentId])
 }
@@ -2461,6 +2884,8 @@ enum ImportParty {
   LISTING
   /// Lot U: a publisher's rate card — rates per spot, applied to their listings.
   RATE_CARD
+  /// LH3: leads on the same two-step importer (validate with a per-row report, then commit through `leads`).
+  LEAD
 }
 
 model PartyImport {
@@ -3009,11 +3434,123 @@ enum AgreementKind {
   /// Lot D (Q55/Q123): the agent's job terms, accepted when the agent taps
   /// Accept on an offer — never recorded on their behalf.
   JOB_TERMS
+  /// AG-1: the engagement terms an applicant accepts before review — the
+  /// publisher-side (gig) text and the advertiser-side (sales) text differ.
+  AGENT_PUBLISHER_PLATFORM
+  AGENT_ADVERTISER_PLATFORM
+  /// DS-2 (Digio eSign, 22 Sep 2026): the employee's appointment letter and
+  /// NDA — signed through a hosted link, gates the console invitation.
+  EMPLOYEE_APPOINTMENT
+  /// DS-2: the print partner's service agreement — signed once KYC verifies,
+  /// gates quotes and jobs.
+  PRINT_PARTNER_SERVICE
+  /// DS-3: the publisher's master licence to display — one signed document
+  /// per publisher; each LISTING click stays the per-attempt schedule.
+  PUBLISHER_LICENCE
 }
 
 enum SignatureProvider {
   NONE
   DIGIO
+}
+
+/// DS-1: who a signing request binds. Wider than the acceptance's three
+/// parties because employees and print partners sign too.
+enum SigningParty {
+  PUBLISHER
+  ADVERTISER
+  AGENT
+  EMPLOYEE
+  PRINT_PARTNER
+}
+
+enum SigningStatus {
+  /// Opened with the provider; the party's signature is awaited.
+  REQUESTED
+  /// At least one signer has signed; the sequence is not complete (ADX's countersign, typically).
+  PARTIALLY_SIGNED
+  /// Every signer has signed; the signed PDF (and certificate) are stored.
+  COMPLETED
+  EXPIRED
+  /// Voided by ops, with a reason.
+  CANCELLED
+  /// The provider refused or the party declined.
+  FAILED
+}
+
+enum SignMethod {
+  AADHAAR
+  DSC
+  ELECTRONIC
+}
+
+/// DS-1 (Digio eSign, 22 Sep 2026): one e-signature request on one document
+/// for one party. Beside the acceptance row, never instead of it: a completed
+/// request writes the AgreementAcceptance (signatureProvider DIGIO,
+/// signatureRef = this id) for the three acceptance parties, and is itself
+/// the record for employees and print partners. `signers` is the sequence
+/// as the provider reports it — the party first, ADX's countersign last.
+model SigningRequest {
+  id                String            @id @default(cuid())
+  kind              AgreementKind
+  templateId        String
+  templateVersion   Int
+  partyType         SigningParty
+  partyId           String
+  /// The person who signs for the party — null for an employee before the account exists.
+  signerUserId      String?
+  signerName        String
+  /// The email or mobile the provider addresses the signing link to.
+  signerIdentifier  String
+  signMethod        SignMethod        @default(AADHAAR)
+  /// The transaction the document is about, where the kind has one.
+  campaignId        String?
+  attemptId         String?
+  status            SigningStatus     @default(REQUESTED)
+  provider          SignatureProvider @default(DIGIO)
+  /// The provider's document id; null while the adapter is mocked.
+  providerRef       String?           @unique
+  /// Whether the provider was the mock (no credentials): the request can be signed from the dev door.
+  mock              Boolean           @default(false)
+  /// [{ role: 'PARTY' | 'ADX', name, identifier, status, signedAt }] as the provider reports it.
+  signers           Json
+  /// The party's signing URL — the gateway page the app or the emailed link opens.
+  signingUrl        String?
+  /// The document as rendered (Markdown) — what was signed, frozen.
+  renderedDocument  String
+  /// uploads: the rendered PDF, the signed PDF and the audit certificate, all SIGNED_AGREEMENT.
+  documentFileId    String?
+  signedFileId      String?
+  certificateFileId String?
+  /// DS-4: the e-stamp, when the settings table names a duty for the kind and state.
+  stampState        String?
+  stampAmount       Decimal?          @db.Decimal(12, 2)
+  stampRef          String?
+  /// DS-4: whether ADX countersigns with its Document Signer Certificate on this request.
+  countersign       Boolean           @default(false)
+  /// What the owning module asked to happen on completion (an employee's console invite, say).
+  followUp          Json?
+  /// The last provider payload seen — the webhook or a refresh.
+  providerPayload   Json?
+  acceptanceId      String?           @unique
+  requestedById     String?
+  requestedAt       DateTime          @default(now())
+  expiresAt         DateTime
+  lastReminderAt    DateTime?
+  completedAt       DateTime?
+  cancelledAt       DateTime?
+  cancelReason      String?
+  failureReason     String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  template   AgreementTemplate    @relation(fields: [templateId], references: [id])
+  acceptance AgreementAcceptance? @relation(fields: [acceptanceId], references: [id])
+
+  @@index([partyType, partyId, kind])
+  @@index([kind, status])
+  @@index([status, expiresAt])
+  @@index([campaignId])
 }
 
 enum ListingAttemptOrigin {
@@ -3052,6 +3589,8 @@ enum ListingDocumentKind {
   OWNER_NOC
   ADDRESS_PROOF
   MUNICIPAL_PERMIT
+  /// AG-4: the registration certificate of a vehicle put up as a spot.
+  VEHICLE_RC
   OTHER
 }
 
@@ -3134,7 +3673,9 @@ model AgreementTemplate {
   createdAt            DateTime      @default(now())
   updatedAt            DateTime      @updatedAt
 
-  acceptances AgreementAcceptance[]
+  acceptances     AgreementAcceptance[]
+  /// DS-1: the e-signature requests opened on this version.
+  signingRequests SigningRequest[]
 
   @@unique([kind, version])
   @@index([kind, isActive])
@@ -3168,11 +3709,13 @@ model AgreementAcceptance {
   signatureProvider SignatureProvider @default(NONE)
   signatureRef      String?
 
-  template   AgreementTemplate @relation(fields: [templateId], references: [id])
-  publisher  Publisher?        @relation(fields: [publisherId], references: [id])
-  advertiser Advertiser?       @relation(fields: [advertiserId], references: [id])
-  attempt    ListingAttempt?   @relation(fields: [attemptId], references: [id])
-  acceptedBy User              @relation(fields: [acceptedByUserId], references: [id])
+  template       AgreementTemplate @relation(fields: [templateId], references: [id])
+  publisher      Publisher?        @relation(fields: [publisherId], references: [id])
+  advertiser     Advertiser?       @relation(fields: [advertiserId], references: [id])
+  attempt        ListingAttempt?   @relation(fields: [attemptId], references: [id])
+  acceptedBy     User              @relation(fields: [acceptedByUserId], references: [id])
+  /// DS-1: the e-signature this acceptance came from, when it was signed rather than clicked.
+  signingRequest SigningRequest?
 
   // The uniqueness rules live in the migration as partial indexes: a party
   // accepts a PLATFORM-scope template version once; a transaction (attempt,
@@ -3526,6 +4069,8 @@ enum WalletHoldStatus {
 
 model Advertiser {
   id               String            @id @default(cuid())
+  /// AG-5: how important the account is — the band that decides which grade of agent handles it (routing), set by ops like the publisher's.
+  sizeBand         PartySizeBand     @default(INDIVIDUAL)
   /// Null while an AGENT_ADVERTISER holds the account open for someone who has
   /// not registered yet — the same arrangement Publisher.userId has.
   userId           String?           @unique
@@ -3559,10 +4104,10 @@ model Advertiser {
   /// `onboardedByRole` their console role or kind at the time (a snapshot —
   /// roles move), `onboardedAt` when. Set once, at the door; a later claim or
   /// adoption never overwrites it.
-  onboardedVia    OnboardingSource?
-  onboardedById   String?
-  onboardedByRole String?
-  onboardedAt     DateTime?
+  onboardedVia     OnboardingSource?
+  onboardedById    String?
+  onboardedByRole  String?
+  onboardedAt      DateTime?
   /// Lot A (Q40): modular suspension — BLOCK_NEW (no new campaigns or package
   /// purchases), STOP_OPEN_WORK (running campaigns halted), FREEZE_WALLET, BLOCK_SIGNIN.
   suspensionScopes SuspensionScope[] @default([])
@@ -6531,6 +7076,13 @@ enum PayoutVerificationMethod {
 ///
 /// The caps are a commercial judgement about who ADX is dealing with rather
 /// than anything derivable from the data, so ops set it.
+/// AG-5: a lead's importance band, mapped to a required agent grade by the routing settings.
+enum LeadImportance {
+  STANDARD
+  KEY
+  ENTERPRISE
+}
+
 enum PartySizeBand {
   /// An individual or a small publisher.
   INDIVIDUAL
@@ -6604,6 +7156,11 @@ model PrintPartner {
   /// the partner first in line, else quote requests reach them.
   activatedAt          DateTime?
   activatedById        String?
+  /// PP-1 (21 Sep 2026): stamped when the shop applied from the app itself
+  /// rather than being created at the desk. With `activatedAt` null it is an
+  /// application awaiting the desk's review; the desk's Activate is the same
+  /// door either way.
+  appliedAt            DateTime?
   rateCardFileId       String?
   rateCardUpdatedAt    DateTime?
   /// Structured rows the partner keys in: [{ material, sizeClass?, unit, ratePerUnit, minQty?, notes? }]
@@ -7092,6 +7649,12 @@ enum IncentiveEvent {
   /// Lot B (Q2): the advertiser-side twin of PUBLISHER_ONBOARDED, recorded when
   /// an attributed advertiser activates.
   ADVERTISER_ONBOARDED
+  /// LH2/LH8 (the Lead Hunt, D1): the account opened off a lead — small, once per account.
+  LEAD_CONVERTED
+  /// LH2/LH8 (D1): the catch — first listing live / first campaign paid — on top of the onboarding incentive.
+  LEAD_ACTIVATED
+  /// LH2/LH11 (D1): the trailing reward — second booking / second month live.
+  LEAD_RETAINED
 }
 
 /// Agent incentive rates, by event and tier, effective-dated like rate cards.
@@ -7117,6 +7680,10 @@ enum IncentiveStatus {
   PENDING_VERIFICATION
   CREDITED
   REJECTED
+  /// LH10: credited and then clawed back — the account closed or the listing
+  /// came down inside the watch window. The money moved twice and both moves
+  /// are in the ledger; the row keeps what it was paid and why it came back.
+  REVERSED
 }
 
 /// One incentive an agent has earned.
@@ -7146,6 +7713,11 @@ model AgentIncentive {
 
   walletEntryId       String?
   ledgerTransactionId String?
+  /// LH10: the clawback — when it was reversed, why, and the mirroring ledger
+  /// transaction (null on a reversal of money that had not yet moved).
+  reversedAt                  DateTime?
+  reversalReason              String?
+  reversalLedgerTransactionId String?
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
@@ -7594,6 +8166,97 @@ enum LeadActivityKind {
   VISIT_DONE
   STATUS_CHANGED
   FOLLOW_UP
+  /// LH1: the computed temperature moved (the note says why).
+  TEMPERATURE_CHANGED
+  /// LH2: the pipeline stage moved (the note says from → to and why).
+  STAGE_CHANGED
+  /// LH2: the lead answered — a reply, a callback asked for, a slot picked. Any inbound.
+  ENGAGED
+  /// LH2/LH7: a proposal (rate estimate, campaign estimate, package quote) went out.
+  PROPOSAL_SENT
+  /// LH2/LH7: the lead opened their invite link.
+  LINK_OPENED
+  /// LH2/LH6: a touch the agent logged by hand — a LinkedIn message, a DM they typed, a walk-in.
+  TOUCH_LOGGED
+}
+
+/// LH2 (the Lead Hunt, 22 Sep 2026): the twelve stages — decision D12.
+/// Beside `LeadStatus`, which stays for the pill; the stage is where the
+/// deal actually is. Forward only, except LOST (from anywhere open) and the
+/// recycle (LOST → SCORED after the wait).
+enum LeadStage {
+  SOURCED
+  SCORED
+  CLAIMED
+  CONTACTED
+  ENGAGED
+  VISIT_BOOKED
+  PROPOSED
+  CONVERTED
+  ONBOARDING
+  ACTIVATED
+  RETAINED
+  LOST
+}
+
+/// LH2: why a lead was lost — decision D11. PRICE and TIMING recycle after
+/// 60 days; WRONG_CONTACT goes back to sourcing; the rest stay lost.
+enum LeadLostReason {
+  NOT_INTERESTED
+  WRONG_CONTACT
+  COMPETITOR
+  PRICE
+  TIMING
+  OTHER
+}
+
+/// LH1 (the Lead Hunt, 22 Sep 2026): the computed temperature — hot >= 70,
+/// warm 40-69, cold < 40 on the score (`leads.scoring` in the platform
+/// settings). Recomputed on every touch and nightly.
+enum LeadTemperature {
+  HOT
+  WARM
+  COLD
+}
+
+/// LH1: where a lead came from, as a kind of door rather than a label.
+enum LeadSourceKind {
+  IMPORT
+  FEED
+  CAPTURE
+  QR
+  INBOUND
+  REFERRAL
+  ADS
+  MANUAL
+}
+
+/// LH1: a source of leads with its own learned quality — an import batch,
+/// a directory feed, the street capture, a QR poster, an inbound form, a
+/// referral, a lead-form ad, the console's one-at-a-time door. `key` is the
+/// label the lead's legacy `source` column carried (backfilled one per
+/// distinct label); `quality` (0-15) is the score's source signal, learned
+/// nightly from the source's own 90-day conversion rate.
+model LeadSource {
+  id              String         @id @default(cuid())
+  key             String         @unique
+  kind            LeadSourceKind @default(MANUAL)
+  label           String
+  quality         Decimal        @default(5) @db.Decimal(5, 2)
+  /// LH3: a feed's daily ceiling; null for no ceiling.
+  quotaPerDay     Int?
+  /// LH3: a feed whose terms ops confirmed before switching it on.
+  termsAcceptedAt DateTime?
+  /// LH3: the adapter's own settings (category map, polygon, credentials reference).
+  config          Json?
+  isActive        Boolean        @default(true)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  leads Lead[]
+  runs  LeadFeedRun[]
+
+  @@index([kind, isActive])
 }
 
 model Lead {
@@ -7633,6 +8296,61 @@ model Lead {
   /// priced has no estimate, which is not zero.
   estimatedCommission Decimal? @db.Decimal(14, 2)
 
+  /// LH1: the score (0-100 after clamping) and the temperature it lands in;
+  /// null until the first computation. `scoreReasons` is the breakdown the
+  /// lead page and the app's "why it is hot" print.
+  score             Int?
+  temperature       LeadTemperature?
+  scoreReasons      Json?
+  scoreComputedAt   DateTime?
+  /// LH1: what the business is worth to ADX — a publisher's wall at the
+  /// comparables' rate, an advertiser's likely campaign. Not the agent's fee.
+  estimatedValue    Decimal?         @db.Decimal(14, 2)
+  /// LH1: the agent's "this one is hot", worth +10 for 14 days; today's HOT
+  /// status was migrated into it.
+  agentFlaggedHotAt DateTime?
+  /// LH1: the last touch of any kind — a call, a message, a visit, a link
+  /// opened — the recency signal decays from here.
+  lastTouchedAt     DateTime?
+  /// LH1: the source door, beside the legacy `source` label.
+  sourceId          String?
+
+  /// LH2: where the deal is (D12). SOURCED at birth, SCORED after the first
+  /// computation, then forward through the stages; LOST from anywhere open.
+  stage             LeadStage       @default(SOURCED)
+  stageChangedAt    DateTime?
+  /// LH2: D11 — why it was lost, and the free note OTHER carries.
+  lostReason        LeadLostReason?
+  lostNote          String?
+  /// LH2: the catch (first listing live / first campaign paid) and the trailing reward (second booking / second month).
+  activatedAt       DateTime?
+  retainedAt        DateTime?
+  /// LH2: when a PRICE / TIMING loss returns to the cold pool (D11: 60 days).
+  recycleAt         DateTime?
+  /// LH9/LH11: when the lead last came back to the cold pool, and how many times — the board's
+  /// "recycled" flag and the overview's recycle yield read these.
+  recycledAt        DateTime?
+  recycleCount      Int             @default(0)
+  /// LH2/LH6 (D14): which channel produced the first contact, the engagement and the conversion —
+  /// `{ firstContact?: { channel, at }, engaged?: { channel, at }, converted?: { channel, at } }`.
+  attribution       Json?
+  /// LH3: the provider's own id for a lead that arrived by webhook (`meta:<leadgen_id>`), so a replay
+  /// creates nothing twice; a feed row's place id (`google-places:<place_id>`) for the same reason.
+  externalKey       String?         @unique
+  /// LH3: the run of a directory feed that produced this row.
+  feedRunId         String?
+  /// LH4: the agent who spotted it in the street, and when; the photos are
+  /// private files kept for the listing draft when it converts.
+  capturedByAgentId String?
+  capturedAt        DateTime?
+  photoFileIds      String[]        @default([])
+  /// LH5 (D3): the agent holding the claim and when it lapses; the `LeadClaim`
+  /// rows are the history. An ops assignment overrides a claim.
+  claimedByAgentId  String?
+  claimExpiresAt    DateTime?
+  /// LH5: the territory that routed it, when one did.
+  territoryId       String?
+
   /// What they said they wanted: "Wall panels".
   interest     String?
   /// Where the lead came from: "Referral", an import batch, a walk-in.
@@ -7641,6 +8359,8 @@ model Lead {
   bestTimeFrom String?
   bestTimeTo   String?
 
+  /// AG-5: how important the lead is — a KEY or ENTERPRISE lead is shown to, and assigned to, agents of the grade the routing settings ask for.
+  importance       LeadImportance @default(STANDARD)
   /// Null while the lead is in the open pool for whoever is nearest.
   assignedAgentId  String?
   firstContactedAt DateTime?
@@ -7655,9 +8375,23 @@ model Lead {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  assignedAgent AgentProfile?  @relation(fields: [assignedAgentId], references: [id], onDelete: SetNull)
+  assignedAgent AgentProfile?      @relation(fields: [assignedAgentId], references: [id], onDelete: SetNull)
   activity      LeadActivity[]
   visits        FieldVisit[]
+  sourceRef     LeadSource?        @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  feedRun       LeadFeedRun?       @relation(fields: [feedRunId], references: [id], onDelete: SetNull)
+  referral      LeadReferral?
+  claims        LeadClaim[]
+  territory     Territory?         @relation(fields: [territoryId], references: [id], onDelete: SetNull)
+  /// LH6: the outreach hub's threads, messages and sequence runs.
+  conversations LeadConversation[]
+  /// LH10: the integrity scan's findings on this lead.
+  flags         LeadFlag[]
+  messages      LeadMessage[]
+  sequenceRuns  LeadSequenceRun[]
+  /// LH7: the invite links and the proposals sent.
+  invites       LeadInvite[]
+  proposals     LeadProposal[]
 
   /// The desk filters by city and status; the agent's list rides the last one.
   cityRef City? @relation("LeadCity", fields: [cityId], references: [id], onDelete: SetNull)
@@ -7666,6 +8400,254 @@ model Lead {
   @@index([assignedAgentId, status])
   @@index([latitude, longitude])
   @@index([cityId])
+  @@index([temperature, status])
+  @@index([sourceId])
+  @@index([stage, side])
+  @@index([recycleAt])
+  @@index([convertedAt])
+  @@index([activatedAt])
+  @@index([recycledAt])
+  @@index([feedRunId])
+  @@index([capturedByAgentId, capturedAt])
+  @@index([claimedByAgentId, claimExpiresAt])
+  @@index([territoryId])
+}
+
+/// LH5 (D8): a drawn area whose new leads route to one agent. Route-only —
+/// the map stays open to every agent of the side; the territory only decides
+/// who a fresh lead lands on. No PostGIS: the ring is kept as GeoJSON and
+/// tested in code behind its bounding box.
+model Territory {
+  id          String   @id @default(cuid())
+  name        String
+  side        LeadSide
+  /// The outer ring, [longitude, latitude] pairs.
+  polygon     Json
+  south       Float
+  west        Float
+  north       Float
+  east        Float
+  agentId     String
+  city        String?
+  cityId      String?
+  isActive    Boolean  @default(true)
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  leads Lead[]
+
+  @@index([side, isActive])
+  @@index([agentId])
+}
+
+/// LH5 (D7): a locality or a category worth more for a while — an activation
+/// inside it pays the standard rate plus a fixed top-up, under the zone's own
+/// budget and the platform's monthly cap. Either a ring, a category, or both.
+model PriorityZone {
+  id          String    @id @default(cuid())
+  name        String
+  side        LeadSide?
+  polygon     Json?
+  south       Float?
+  west        Float?
+  north       Float?
+  east        Float?
+  category    String?
+  /// The top-up per activation; zero means "the platform's default top-up".
+  topUp       Decimal   @default(0) @db.Decimal(14, 2)
+  startsAt    DateTime
+  endsAt      DateTime
+  budgetCap   Decimal?  @db.Decimal(14, 2)
+  spent       Decimal   @default(0) @db.Decimal(14, 2)
+  isActive    Boolean   @default(true)
+  createdById String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([isActive, startsAt, endsAt])
+}
+
+/// LH5 (D3): one claim — who took the pin, when it lapses, and how it ended
+/// (released by hand, lapsed by the sweep, overridden by ops, closed by the
+/// lead's own conversion or loss).
+model LeadClaim {
+  id         String    @id @default(cuid())
+  leadId     String
+  agentId    String
+  claimedAt  DateTime  @default(now())
+  expiresAt  DateTime
+  releasedAt DateTime?
+  reason     String?
+
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([leadId, claimedAt])
+  @@index([agentId, releasedAt])
+  @@index([expiresAt])
+}
+
+/// LH3: one run of a directory feed — ops asked a source for candidates in
+/// a city or a polygon for a category, and this is what came of it: how
+/// many the adapter answered, how many the importer wrote, skipped or
+/// warned about, and the per-row report the desk reads.
+model LeadFeedRun {
+  id            String            @id @default(cuid())
+  sourceId      String
+  requestedById String?
+  side          LeadSide
+  category      String
+  city          String?
+  /// A GeoJSON polygon, when the run was drawn rather than named.
+  polygon       Json?
+  limit         Int
+  status        LeadFeedRunStatus @default(RUNNING)
+  candidates    Int               @default(0)
+  imported      Int               @default(0)
+  skipped       Int               @default(0)
+  warnings      Int               @default(0)
+  /// The importer's per-row report, as `POST /leads/import` answers it.
+  report        Json?
+  error         String?
+  startedAt     DateTime          @default(now())
+  finishedAt    DateTime?
+
+  source LeadSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  leads  Lead[]
+
+  @@index([sourceId, startedAt])
+}
+
+enum LeadFeedRunStatus {
+  RUNNING
+  DONE
+  FAILED
+  /// The source's daily quota was already spent.
+  QUOTA
+}
+
+/// LH3: who refers, and the code on their link. One per account, minted on
+/// first ask; the code is what `/j/r/:code` and the app's share sheet carry.
+model ReferralLink {
+  id           String       @id @default(cuid())
+  referrerKind ReferrerKind
+  referrerId   String
+  code         String       @unique
+  createdAt    DateTime     @default(now())
+
+  referrals LeadReferral[]
+
+  @@unique([referrerKind, referrerId])
+}
+
+enum ReferrerKind {
+  PUBLISHER
+  ADVERTISER
+  AGENT
+}
+
+/// LH3 (D9): a business somebody referred — the lead it became, and the
+/// wallet credit paid to the referrer once that lead ACTIVATED, once.
+model LeadReferral {
+  id            String       @id @default(cuid())
+  linkId        String
+  referrerKind  ReferrerKind
+  referrerId    String
+  leadId        String       @unique
+  /// The amount credited, or null until the activation.
+  creditAmount  Decimal?     @db.Decimal(14, 2)
+  creditedAt    DateTime?
+  walletEntryId String?
+  createdAt     DateTime     @default(now())
+
+  link ReferralLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  lead Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([referrerKind, referrerId])
+}
+
+/// LH10 (anti-gaming): what a lead's integrity scan found. Never acted on
+/// alone — a flag is opened by the scan, a person confirms or dismisses it,
+/// and a CONFIRMED flag is what the clawback and the fraud desk read.
+enum LeadFlagKind {
+  /// D9's referral pointed at the referrer's own number, or the same device.
+  SELF_REFERRAL
+  /// The same number on several leads — the cheapest way to farm conversions.
+  PHONE_REUSE
+  /// One agent capturing far more in an hour than a street walk can produce.
+  CAPTURE_BURST
+  /// A lead-form webhook delivered a payload the platform had already taken.
+  WEBHOOK_REPLAY
+}
+
+enum LeadFlagStatus {
+  OPEN
+  CONFIRMED
+  DISMISSED
+}
+
+model LeadFlag {
+  id        String         @id @default(cuid())
+  leadId    String
+  kind      LeadFlagKind
+  status    LeadFlagStatus @default(OPEN)
+  /// One line ops can read, and the facts behind it — the other leads, the
+  /// count in the hour, the provider key that repeated.
+  detail    String
+  evidence  Json?
+  /// The agent the flag is about, when the pattern names one (a burst, a self-referral).
+  agentId   String?
+  openedAt  DateTime       @default(now())
+  decidedByUserId String?
+  decidedAt       DateTime?
+  note            String?
+
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  /// One open flag of a kind per lead: the scan re-reads the same facts every hour.
+  @@unique([leadId, kind])
+  @@index([status, openedAt])
+  @@index([agentId, status])
+}
+
+/// LH10 (quality): one sampled piece of field work, and whether the evidence
+/// it should carry is there. The sample is drawn by the nightly job; the
+/// auto verdict is what the evidence says, and ops may overrule it with a
+/// reviewed verdict. The agent's quality score is derived from these.
+enum QaSampleKind {
+  VISIT
+  CALL
+}
+
+enum QaVerdict {
+  PASS
+  FAIL
+}
+
+model LeadQaSample {
+  id        String       @id @default(cuid())
+  kind      QaSampleKind
+  agentId   String
+  /// Exactly one of these says what was sampled.
+  visitId   String?      @unique
+  messageId String?      @unique
+  leadId    String?
+  /// What the evidence read said — `{ photo, gps, metres, consent, durationSec, recording }`.
+  evidence  Json
+  /// What the evidence alone says; the sample is drawn whatever the answer.
+  autoVerdict QaVerdict
+  /// What a person said, once they looked. Null until reviewed.
+  verdict     QaVerdict?
+  reviewedByUserId String?
+  reviewedAt       DateTime?
+  note             String?
+  sampledAt        DateTime @default(now())
+
+  agent AgentProfile @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId, sampledAt])
+  @@index([kind, sampledAt])
+  @@index([verdict, sampledAt])
 }
 
 /// Everything that has happened to a lead — the Activity section on the detail
@@ -7681,6 +8663,230 @@ model LeadActivity {
   lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
 
   @@index([leadId, createdAt])
+}
+
+/// ---------------------------------------------------------------------------
+/// LH6 (the Lead Hunt, 22 Sep 2026) — THE OUTREACH HUB (D5, D13, D14)
+///
+/// One port, many channels. A conversation is one lead on one channel; a
+/// message is one thing said on it, either way, with the provider's own id
+/// so a replayed webhook writes nothing twice. A call is a message on the
+/// CALL channel carrying the telephony fields. A sequence is the scripted
+/// follow-up per side and temperature; a run is one lead walking it.
+/// ---------------------------------------------------------------------------
+
+/// The ten channels. The three Meta channels (WhatsApp, Instagram DM,
+/// Messenger) may be written to only inside the 24-hour window after the
+/// lead's last inbound — WhatsApp also outside it, with an approved
+/// template. LINKEDIN, IN_PERSON and OTHER are logged by hand (D13: no cold
+/// DMs by API).
+enum LeadChannel {
+  SMS
+  EMAIL
+  WHATSAPP
+  INSTAGRAM
+  MESSENGER
+  GOOGLE_BUSINESS
+  CALL
+  LINKEDIN
+  IN_PERSON
+  OTHER
+}
+
+enum LeadMessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+/// QUEUED waits on quiet hours or the job; SKIPPED names why in `error`
+/// (NOT_CONFIGURED, WEEKLY_CAP, UNREACHABLE, NO_WINDOW); RECEIVED is an
+/// inbound row's only status.
+enum LeadMessageStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  READ
+  FAILED
+  SKIPPED
+  RECEIVED
+}
+
+enum LeadCallOutcome {
+  ANSWERED
+  NO_ANSWER
+  BUSY
+  VOICEMAIL
+}
+
+model LeadConversation {
+  id               String      @id @default(cuid())
+  leadId           String
+  channel          LeadChannel
+  /// The provider's thread: `wa:<E.164>` for WhatsApp, an Instagram-scoped
+  /// id, a Messenger PSID, a Business Messages conversation id, the lead's
+  /// number for SMS and CALL, the address for EMAIL.
+  providerThreadId String?
+  /// Meta's customer-service window — 24 h from the last inbound; null until
+  /// the lead has written once.
+  windowClosesAt   DateTime?
+  lastInboundAt    DateTime?
+  lastOutboundAt   DateTime?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  lead     Lead          @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  messages LeadMessage[]
+
+  @@unique([leadId, channel])
+  @@index([channel, providerThreadId])
+  @@index([lastInboundAt])
+}
+
+model LeadMessage {
+  id              String               @id @default(cuid())
+  conversationId  String
+  leadId          String
+  direction       LeadMessageDirection
+  channel         LeadChannel
+  /// The comms template (SMS / email / the copy of a DM) or the BSP's approved
+  /// WhatsApp template the message was rendered from; null for typed text.
+  templateKey     String?
+  body            String
+  /// The provider's own id — a message id, a delivery id, a call sid — unique
+  /// per channel so a replay is a no-op.
+  providerId      String?
+  status          LeadMessageStatus    @default(QUEUED)
+  /// Why it was skipped or failed — NOT_CONFIGURED, WEEKLY_CAP, NO_WINDOW,
+  /// UNREACHABLE, or the provider's own words.
+  error           String?
+  /// Waiting on the quiet hours: when it may leave.
+  scheduledFor    DateTime?
+  /// The run that produced it, when a sequence did.
+  sequenceRunId   String?
+  /// D5, calls: the number the lead saw (the provider's masked one), the
+  /// provider's call id, how it ended, how long it lasted, whether the consent
+  /// line played — and the recording as a private file, purged after 90 days.
+  maskedNumber    String?
+  providerCallId  String?
+  outcome         LeadCallOutcome?
+  durationSec     Int?
+  consentPlayed   Boolean?
+  recordingFileId String?
+  at              DateTime             @default(now())
+  byAgentId       String?
+  byUserId        String?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  conversation LeadConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  lead         Lead             @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@unique([channel, providerId])
+  @@index([leadId, at])
+  @@index([conversationId, at])
+  @@index([status, scheduledFor])
+  @@index([direction, channel, at])
+  @@index([recordingFileId])
+  @@index([providerCallId])
+}
+
+/// The scripted follow-up for one side and one temperature — steps as
+/// `[{ channel, delayHours, templateKey }]`, the first step's delay counted
+/// from enrolment, each next one from the step before. `stopOnReply` is the
+/// default and the rule: ANY inbound on ANY channel stops the run.
+model LeadSequence {
+  id          String          @id @default(cuid())
+  side        LeadSide
+  temperature LeadTemperature
+  name        String
+  steps       Json
+  stopOnReply Boolean         @default(true)
+  isActive    Boolean         @default(true)
+  createdById String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  runs LeadSequenceRun[]
+
+  @@index([side, temperature, isActive])
+}
+
+/// ---------------------------------------------------------------------------
+/// LH7 (the Lead Hunt, 22 Sep 2026) — DIGITAL CONVERSION (D6, D14)
+///
+/// An invite is the one link a lead is sent: `adx.in/j/<code>`, thirty days
+/// (D6), re-issuable, every open recorded. The landing behind it converts
+/// the lead through the OTP door, asks for a callback or a slot, and shows
+/// the proposals the agent sent — each of which records when it was opened
+/// and accepted.
+/// ---------------------------------------------------------------------------
+
+model LeadInvite {
+  id             String    @id @default(cuid())
+  leadId         String
+  /// Eight unambiguous characters, unique across time.
+  code           String    @unique
+  expiresAt      DateTime
+  /// `[{ at, ua? }]`, newest last, the last fifty kept.
+  opens          Json      @default("[]")
+  convertedAt    DateTime?
+  /// Re-issued or withdrawn: the code no longer opens.
+  revokedAt      DateTime?
+  issuedByUserId String?
+  createdAt      DateTime  @default(now())
+
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([leadId, createdAt])
+  @@index([expiresAt])
+}
+
+enum LeadProposalKind {
+  RATE_ESTIMATE
+  CAMPAIGN_ESTIMATE
+  PACKAGE_QUOTE
+}
+
+/// A proposal the agent sent: a publisher's rate estimate from the
+/// comparables, an advertiser's campaign estimate, or a package quote off
+/// the catalogue — the numbers as `payload`, and the two moments the landing
+/// records.
+model LeadProposal {
+  id              String           @id @default(cuid())
+  leadId          String
+  kind            LeadProposalKind
+  payload         Json
+  note            String?
+  sentAt          DateTime         @default(now())
+  openedAt        DateTime?
+  acceptedAt      DateTime?
+  createdByUserId String?
+  createdAt       DateTime         @default(now())
+
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([leadId, sentAt])
+}
+
+/// One lead walking one sequence: the step it is on, when that step is due,
+/// and — once stopped — why (REPLIED, COMPLETED, STAGE_MOVED, CLOSED,
+/// TEMPERATURE_CHANGED, DEACTIVATED, MANUAL).
+model LeadSequenceRun {
+  id         String    @id @default(cuid())
+  leadId     String
+  sequenceId String
+  stepIndex  Int       @default(0)
+  nextAt     DateTime?
+  startedAt  DateTime  @default(now())
+  stoppedAt  DateTime?
+  stopReason String?
+
+  lead     Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  sequence LeadSequence @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+
+  @@index([leadId, stoppedAt])
+  @@index([stoppedAt, nextAt])
+  @@index([sequenceId])
 }
 
 /// ---------------------------------------------------------------------------
@@ -7759,6 +8965,13 @@ model FieldVisit {
 
   notes             String?
   requestedByUserId String?
+  /// LH10: the proof of the visit — a photo and the agent's own fix at the
+  /// moment they marked it done. Optional: a visit completed without them is
+  /// still a visit, and the QA sample is what says the evidence was missing.
+  proofFileId    String?
+  proofLatitude  Float?
+  proofLongitude Float?
+  proofAt        DateTime?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -7976,4 +9189,83 @@ model WorkIssue {
   @@index([status, severity])
   @@index([taskId])
   @@index([assigneeId, status])
+}
+
+/**
+ * ------------------------------------------------------------------
+ */
+/**
+ * LT-1 (live agent tracking, 22 Sep 2026)
+ */
+/**
+ * ------------------------------------------------------------------
+ */
+
+/// What a trail is about: the trip an agent is on.
+enum TrailKind {
+  /// An order's job (the installation lane): both legs — to the print partner, then to the site.
+  ORDER
+  /// An order milestone (a survey, a verification) with a site of its own.
+  MILESTONE
+  /// A field visit (a lead, a publisher, an advertiser) — the visits desk's trip.
+  FIELD_VISIT
+}
+
+/// LT-1: one trip — the agent's position fixes while on one job, with the
+/// destination and the moments the desk reads off it (started, arrived,
+/// ended). The live position itself is Redis (`agentloc:last:<agentId>`,
+/// no history); the trail is what the live map draws behind a marker and
+/// what the order timeline reads. Swept after `tracking.retentionDays`.
+model AgentTrail {
+  id               String    @id @default(cuid())
+  agentId          String
+  kind             TrailKind
+  /// The order, milestone or field visit id.
+  contextId        String
+  /// The order behind a milestone trail too, so an order's timeline finds every leg.
+  orderId          String?
+  /// Where the trip is going, as known when it started; null for a trip with no site on record.
+  destinationLat   Float?
+  destinationLng   Float?
+  destinationLabel String?
+  startedAt        DateTime  @default(now())
+  lastFixAt        DateTime  @default(now())
+  /// The first fix inside the geofence around the destination.
+  arrivedAt        DateTime?
+  /// The context closed (the job moved on) or the agent went quiet for an hour.
+  endedAt          DateTime?
+  pointCount       Int       @default(0)
+  /// Metres covered, summed fix to fix.
+  distanceM        Float     @default(0)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  agent  AgentProfile         @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  points AgentLocationPoint[]
+
+  @@unique([agentId, kind, contextId])
+  @@index([orderId])
+  @@index([agentId, startedAt])
+  @@index([endedAt])
+}
+
+/// One fix on a trail. Thinned on write: a fix within 25 m and 60 s of the
+/// previous one is not kept, so a parked agent does not write a row a minute.
+model AgentLocationPoint {
+  id        String   @id @default(cuid())
+  trailId   String
+  agentId   String
+  latitude  Float
+  longitude Float
+  /// Metres, as the phone reported.
+  accuracy  Float?
+  /// Metres per second, as the phone reported.
+  speed     Float?
+  heading   Float?
+  at        DateTime
+
+  trail AgentTrail @relation(fields: [trailId], references: [id], onDelete: Cascade)
+
+  @@index([trailId, at])
+  @@index([at])
 }

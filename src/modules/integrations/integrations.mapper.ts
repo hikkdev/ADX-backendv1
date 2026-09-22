@@ -10,6 +10,8 @@ import {
   type IntegrationsConfig,
 } from '../../shared/integrations';
 import { readServiceAccount } from '../../shared/push';
+import { DEFAULT_CONSENT_LINE, DEFAULT_IVR } from '../../shared/integrations';
+import { describeGoogleBusiness, describeMetaDm, describeTelephony, describeWhatsApp } from '../../shared/outreach';
 import { ETHEREAL_WEB_URL } from '../../shared/email';
 
 /**
@@ -109,6 +111,87 @@ export function toIntegrationsResponse(cfg: IntegrationsConfig, extras: Integrat
         baseUrl: cfg.kyc?.baseUrl ?? env.DIGIO_BASE_URL,
         // Lot D (Q129): not a secret — the switch the KYC screen draws.
         kycProvider: cfg.kyc?.kycProvider ?? 'DIGIO',
+      },
+      // LH3 (D4): the directory feeds — an endpoint per partner, the key masked, and whether each is usable.
+      leadFeeds: Object.fromEntries(
+        (['justdial', 'indiamart', 'mca', 'gst', 'rera'] as const).map((key) => [
+          key,
+          {
+            endpoint: cfg.leadFeeds?.[key]?.endpoint ?? null,
+            apiKey: maskSecret(cfg.leadFeeds?.[key]?.apiKey),
+            headerName: cfg.leadFeeds?.[key]?.headerName ?? null,
+            configured: key === 'indiamart' ? Boolean(cfg.leadFeeds?.indiamart?.apiKey) : Boolean(cfg.leadFeeds?.[key]?.endpoint),
+          },
+        ]),
+      ),
+      // LH3: the lead-form ad webhooks.
+      leadForms: {
+        meta: { appSecret: maskSecret(cfg.leadForms?.meta?.appSecret), verifyToken: maskSecret(cfg.leadForms?.meta?.verifyToken), pageAccessToken: maskSecret(cfg.leadForms?.meta?.pageAccessToken), configured: Boolean(cfg.leadForms?.meta?.appSecret) },
+        google: { key: maskSecret(cfg.leadForms?.google?.key), configured: Boolean(cfg.leadForms?.google?.key) },
+        linkedin: { clientSecret: maskSecret(cfg.leadForms?.linkedin?.clientSecret), configured: Boolean(cfg.leadForms?.linkedin?.clientSecret) },
+      },
+      // LH6 (D5): the outreach channels — credential state per adapter, the consent line, the masked numbers, the IVR prompts.
+      leadChannels: {
+        whatsapp: {
+          bsp: cfg.leadChannels?.whatsapp?.bsp ?? null,
+          apiKey: maskSecret(cfg.leadChannels?.whatsapp?.apiKey),
+          appName: cfg.leadChannels?.whatsapp?.appName ?? null,
+          sourceNumber: cfg.leadChannels?.whatsapp?.sourceNumber ?? null,
+          phoneNumberId: cfg.leadChannels?.whatsapp?.phoneNumberId ?? null,
+          accessToken: maskSecret(cfg.leadChannels?.whatsapp?.accessToken),
+          appSecret: maskSecret(cfg.leadChannels?.whatsapp?.appSecret),
+          verifyToken: maskSecret(cfg.leadChannels?.whatsapp?.verifyToken),
+          templates: cfg.leadChannels?.whatsapp?.templates ?? {},
+          ...describeWhatsApp(cfg.leadChannels?.whatsapp),
+        },
+        instagram: {
+          pageId: cfg.leadChannels?.instagram?.pageId ?? null,
+          accessToken: maskSecret(cfg.leadChannels?.instagram?.accessToken),
+          appSecret: maskSecret(cfg.leadChannels?.instagram?.appSecret),
+          verifyToken: maskSecret(cfg.leadChannels?.instagram?.verifyToken),
+          ...describeMetaDm(cfg.leadChannels?.instagram, 'INSTAGRAM'),
+        },
+        messenger: {
+          pageId: cfg.leadChannels?.messenger?.pageId ?? null,
+          accessToken: maskSecret(cfg.leadChannels?.messenger?.accessToken),
+          appSecret: maskSecret(cfg.leadChannels?.messenger?.appSecret),
+          verifyToken: maskSecret(cfg.leadChannels?.messenger?.verifyToken),
+          ...describeMetaDm(cfg.leadChannels?.messenger, 'MESSENGER'),
+        },
+        googleBusiness: {
+          agentId: cfg.leadChannels?.googleBusiness?.agentId ?? null,
+          serviceAccountJson: maskSecret(cfg.leadChannels?.googleBusiness?.serviceAccountJson),
+          partnerKey: maskSecret(cfg.leadChannels?.googleBusiness?.partnerKey),
+          ...describeGoogleBusiness(cfg.leadChannels?.googleBusiness),
+        },
+        telephony: {
+          ...describeTelephony(cfg.leadChannels?.telephony),
+          provider: cfg.leadChannels?.telephony?.provider ?? null,
+          accountSid: cfg.leadChannels?.telephony?.accountSid ?? null,
+          apiKey: maskSecret(cfg.leadChannels?.telephony?.apiKey),
+          apiToken: maskSecret(cfg.leadChannels?.telephony?.apiToken),
+          subdomain: cfg.leadChannels?.telephony?.subdomain ?? null,
+          callerIds: cfg.leadChannels?.telephony?.callerIds ?? [],
+          missedCallNumber: cfg.leadChannels?.telephony?.missedCallNumber ?? null,
+          ivrNumber: cfg.leadChannels?.telephony?.ivrNumber ?? null,
+          recordCalls: cfg.leadChannels?.telephony?.recordCalls ?? false,
+          consentLine: cfg.leadChannels?.telephony?.consentLine || DEFAULT_CONSENT_LINE,
+          ivrGreeting: cfg.leadChannels?.telephony?.ivrGreeting || DEFAULT_IVR.greeting,
+          ivrPublisherPrompt: cfg.leadChannels?.telephony?.ivrPublisherPrompt || DEFAULT_IVR.publisherPrompt,
+          ivrAdvertiserPrompt: cfg.leadChannels?.telephony?.ivrAdvertiserPrompt || DEFAULT_IVR.advertiserPrompt,
+          webhookSecret: maskSecret(cfg.leadChannels?.telephony?.webhookSecret),
+        },
+      },
+      // DS-1 (Digio eSign): the signing rail — its own keys when set, else the KYC section's Digio account.
+      esign: {
+        clientId: maskSecret(cfg.esign?.clientId || cfg.kyc?.clientId || env.DIGIO_CLIENT_ID),
+        clientSecret: maskSecret(cfg.esign?.clientSecret || cfg.kyc?.clientSecret || env.DIGIO_CLIENT_SECRET),
+        apiUrl: cfg.esign?.apiUrl || env.DIGIO_ESIGN_API_URL,
+        gatewayUrl: cfg.esign?.gatewayUrl || env.DIGIO_ESIGN_GATEWAY_URL,
+        adxSignerName: cfg.esign?.adxSignerName ?? null,
+        adxSignerIdentifier: cfg.esign?.adxSignerIdentifier || env.RESEND_FROM_EMAIL || null,
+        configured: Boolean((cfg.esign?.clientId || cfg.kyc?.clientId || env.DIGIO_CLIENT_ID) && (cfg.esign?.clientSecret || cfg.kyc?.clientSecret || env.DIGIO_CLIENT_SECRET)),
+        sharesKycCredentials: !cfg.esign?.clientId,
       },
       twilio: {
         accountSid: cfg.twilio?.accountSid ?? env.TWILIO_ACCOUNT_SID ?? null,

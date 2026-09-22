@@ -1,5 +1,5 @@
 import { ApiError } from '../../shared/errors';
-import { lookupIfsc, normaliseIfsc, type IfscAnswer } from '../../shared/integrations';
+import { lookupIfsc, normaliseIfsc, verifyBankAccount, type IfscAnswer } from '../../shared/integrations';
 import { Decimal, money, type Money } from '../../shared/money';
 import { monthWindowIST } from '../../shared/time';
 import { platformAccount, post as postLedger } from '../ledger';
@@ -170,11 +170,27 @@ export async function verifyMethod(
   if (!method) throw new ApiError(404, 'NOT_FOUND', 'Payout method not found');
   if (method.status === 'VERIFIED') return method;
 
+  // AG-4: a PENNY_DROP on a bank method runs Cashfree's bank-account check
+  // (a rupee sent, the name at the bank read back). Cashfree saying the
+  // account is not live, refusing, or being unconfigured is a 409 the desk
+  // reads and may answer by hand; nothing is marked verified then.
+  let reference = input.reference ?? null;
+  let nameMatchPct = input.nameMatchPct ?? null;
+  if (input.via === 'PENNY_DROP' && method.type === 'BANK' && method.accountNumber && method.ifscCode) {
+    const answer = await verifyBankAccount({ accountNumber: method.accountNumber, ifsc: method.ifscCode, name: method.accountHolder });
+    if (!answer.ok) throw new ApiError(409, 'VERIFICATION_UNAVAILABLE', answer.message, { code: answer.code });
+    if (!answer.facts.valid) {
+      throw new ApiError(409, 'VERIFICATION_UNAVAILABLE', `Cashfree says the account is ${answer.facts.accountStatus ?? 'not live'}${answer.facts.nameAtBank ? ` (name at bank: ${answer.facts.nameAtBank})` : ''}`, { code: 'INVALID', facts: answer.facts });
+    }
+    reference = answer.facts.referenceId ?? answer.facts.utr ?? reference;
+    nameMatchPct = answer.facts.nameMatchScore !== null ? String(answer.facts.nameMatchScore) : nameMatchPct;
+  }
+
   return repository.updateMethod(methodId, {
     status: 'VERIFIED',
     verifiedVia: input.via,
-    verificationReference: input.reference ?? null,
-    nameMatchPct: input.nameMatchPct ? new Decimal(input.nameMatchPct) : null,
+    verificationReference: reference,
+    nameMatchPct: nameMatchPct ? new Decimal(nameMatchPct) : null,
     verifiedAt: now,
     verifiedByUserId: input.byUserId,
     rejectionReason: null,

@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { DEFAULT_ESIGN_POLICY, esignPolicySchema } from '../../shared/esign';
+import { DEFAULT_LEAD_SCORING, leadScoringSchema } from '../../shared/lead-scoring';
 import { invalidate, readThrough } from '../../shared/cache';
 import { getConfigObject, saveConfigObject } from './app-config.service';
 
@@ -299,6 +301,69 @@ export const platformSettingsSchema = z.object({
   audience: z.object({
     cityProfileSamplePoints: z.number().int().min(0).max(64),
   }),
+  /**
+   * DS-1 (Digio eSign, 22 Sep 2026): which of the five documents are
+   * e-signed rather than clicked, how and when — `shared/esign/policy.ts`
+   * has the table. Off by default; the wire (keys, hosts) is the
+   * integrations row's `esign` section.
+   */
+  esign: esignPolicySchema,
+  /**
+   * LT-1 (live agent tracking, 22 Sep 2026): how often the agent app
+   * reports its position on a job, how long the trails are kept, the
+   * geofence that counts as "arrived", the alerts' thresholds, and whether
+   * the parties are shown an ETA. The decisions the lot listed, as
+   * defaults; the console edits them under Settings › Live tracking.
+   */
+  tracking: z.object({
+    /** Seconds between pings while moving (the app reads it once a session). 30–60 s was the brief. */
+    pingMovingSec: z.number().int().min(15).max(600),
+    /** Seconds between pings while still. */
+    pingStillSec: z.number().int().min(60).max(3600),
+    /** WHILE_USING — the app reports only in the foreground; BACKGROUND needs a foreground service the build does not carry yet. */
+    mode: z.enum(['WHILE_USING', 'BACKGROUND']),
+    /** Days the trails and their fixes are kept before the nightly sweep. */
+    retentionDays: z.number().int().min(1).max(365),
+    /** Metres from the destination inside which a fix counts as arrived. */
+    geofenceRadiusM: z.number().int().min(25).max(2000),
+    /** Minutes without moving, on a job, before the live map flags the agent idle. */
+    idleAlertMin: z.number().int().min(1).max(240),
+    /** Minutes past a slot's start, not yet arrived, before the live map flags the job late. */
+    lateGraceMin: z.number().int().min(0).max(240),
+    /** Kilometres off the straight line to the destination before the live map flags the route. */
+    offRouteKm: z.number().min(0.5).max(50),
+    /** Minutes without any fix before the agent reads offline. */
+    offlineAfterMin: z.number().int().min(1).max(240),
+    /** Whether the parties' tracking screens are shown an ETA beside the position. */
+    partiesSeeEta: z.boolean(),
+  }),
+  /**
+   * LH1 (the Lead Hunt, 22 Sep 2026): the score behind hot / warm / cold —
+   * the five signals' weights, the recency decay, the thresholds, the agent
+   * flag's life. `shared/lead-scoring/policy.ts` has the table; the console
+   * edits it under Settings › Leads scoring.
+   */
+  leads: z.object({
+    scoring: leadScoringSchema,
+    /** LH3/LH5 (D3): a claim holds 72 h; caps per tier (null = unlimited); a lapsed lead waits 7 days before the same agent can re-claim it. */
+    claims: z.object({
+      holdHours: z.number().int().min(1).max(720),
+      caps: z.object({
+        BRONZE: z.number().int().min(1).max(1000).nullable(),
+        SILVER: z.number().int().min(1).max(1000).nullable(),
+        GOLD: z.number().int().min(1).max(1000).nullable(),
+        PLATINUM: z.number().int().min(1).max(1000).nullable(),
+      }),
+      cooldownDays: z.number().int().min(0).max(90),
+    }),
+    /** LH3 (D9): the wallet credit a publisher or advertiser earns when a business they referred activates, once per referred account. */
+    referralCredit: z.number().min(0).max(100_000),
+    /** LH5/LH7 (D7): the fixed top-up a priority-zone activation adds, and the platform-wide monthly cap on top-ups. */
+    priority: z.object({
+      topUp: z.number().min(0).max(100_000),
+      monthlyCap: z.number().min(0).max(100_000_000),
+    }),
+  }),
 });
 
 export type PlatformSettings = z.infer<typeof platformSettingsSchema>;
@@ -378,6 +443,25 @@ export const DEFAULT_PLATFORM_SETTINGS: PlatformSettings = {
   },
   geo: { launchMinListings: 10, launchNeedsPrintPartner: false, comingSoonWaitlist: true },
   audience: { cityProfileSamplePoints: 0 },
+  esign: DEFAULT_ESIGN_POLICY,
+  tracking: {
+    pingMovingSec: 45,
+    pingStillSec: 300,
+    mode: 'WHILE_USING',
+    retentionDays: 30,
+    geofenceRadiusM: 150,
+    idleAlertMin: 15,
+    lateGraceMin: 15,
+    offRouteKm: 2,
+    offlineAfterMin: 10,
+    partiesSeeEta: true,
+  },
+  leads: {
+    scoring: DEFAULT_LEAD_SCORING,
+    claims: { holdHours: 72, caps: { BRONZE: 10, SILVER: 20, GOLD: 40, PLATINUM: null }, cooldownDays: 7 },
+    referralCredit: 250,
+    priority: { topUp: 200, monthlyCap: 25_000 },
+  },
 };
 
 /**
@@ -437,6 +521,31 @@ export const platformSettingsPatchSchema = z.strictObject({
     .optional(),
   geo: sections.geo.partial().strict().optional(),
   audience: sections.audience.partial().strict().optional(),
+  /* DS-1 / LT-1 / LH1: the three sections the console's own pages save (diff-only patches). */
+  esign: esignPolicySchema
+    .partial()
+    .strict()
+    .extend({ insertionOrder: esignPolicySchema.shape.insertionOrder.partial().strict().optional() })
+    .optional(),
+  tracking: sections.tracking.partial().strict().optional(),
+  leads: z
+    .strictObject({
+      scoring: leadScoringSchema
+        .partial()
+        .strict()
+        .extend({
+          weights: leadScoringSchema.shape.weights.partial().strict().optional(),
+          recency: leadScoringSchema.shape.recency.partial().strict().optional(),
+          thresholds: leadScoringSchema.shape.thresholds.partial().strict().optional(),
+          intent: leadScoringSchema.shape.intent.partial().strict().optional(),
+          fit: leadScoringSchema.shape.fit.partial().strict().optional(),
+        })
+        .optional(),
+      claims: sections.leads.shape.claims.partial().strict().extend({ caps: sections.leads.shape.claims.shape.caps.partial().strict().optional() }).optional(),
+      referralCredit: z.number().min(0).max(100_000).optional(),
+      priority: sections.leads.shape.priority.partial().strict().optional(),
+    })
+    .optional(),
 });
 export type PlatformSettingsPatch = z.infer<typeof platformSettingsPatchSchema>;
 

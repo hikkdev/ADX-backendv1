@@ -116,4 +116,27 @@ export const prismaAgentMilestonesRepository: AgentMilestonesRepository = {
     });
     return orders.filter((order) => order.slotTime && order.checkIn && arrivedOnTime(order.slotTime, order.checkIn.checkedInAt)).length;
   },
+
+  countLeadConversions(agentId, window) {
+    // The holder at conversion is who LEAD_CONVERTED paid (LH2); the lead
+    // keeps that agent through the won stages, so the count is by holder and
+    // the conversion instant.
+    const at = inside(window);
+    return prisma.lead.count({
+      where: { assignedAgentId: agentId, status: 'CONVERTED', convertedAt: at ?? { not: null } },
+    });
+  },
+
+  countLeadContacts(agentId, window) {
+    // `firstContactedAt` is stamped once and never moved (the detail's "First
+    // contact — Not yet"), so a contact counts in exactly one window.
+    const at = inside(window);
+    return prisma.lead.count({
+      where: { assignedAgentId: agentId, firstContactedAt: at ?? { not: null } },
+    });
+  },
+
+  async hasTemplateOfType(type) {
+    return (await prisma.milestoneTemplate.count({ where: { type } })) > 0;
+  },
 };

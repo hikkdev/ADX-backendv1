@@ -24,6 +24,30 @@ export type ClaimedPublisher = {
   type: string;
 };
 
+/**
+ * QR-27: the account behind an identity code, for whoever scans it — the
+ * agent deciding what to ask for, the advertiser opening the profile, the
+ * web landing, the desk. `onboarded` is what decides whether an agent's scan
+ * is an onboarding claim or an access request.
+ */
+export type IdentitySummary = {
+  id: string;
+  displayId: string | null;
+  name: string;
+  mobile: string;
+  type: string;
+  city: string | null;
+  verified: boolean;
+  onboarded: boolean;
+};
+
+/** QR-27: what an agent asks for when they scan an onboarded account's code. */
+export type AccessAsk = {
+  scope: 'PROFILE' | 'LISTINGS';
+  reason: string;
+  durationMinutes: number;
+};
+
 export interface PublisherOnboardingPort {
   /**
    * Validates that `publisherId` can be claimed and that `scannedByUserId` is
@@ -48,6 +72,10 @@ export interface PublisherOnboardingPort {
     agentId: string,
     context: { qrId: string; scanId: string },
   ): Promise<{ grantId: string | null }>;
+  /** QR-27: the account behind the code, or null when it is gone. No writes. */
+  describe(publisherId: string): Promise<IdentitySummary | null>;
+  /** QR-27: the working agent behind a session, or null — an applicant, a held or an exited agent gets nothing. */
+  workingAgentId(scannedByUserId: string): Promise<string | null>;
 }
 
 /**
@@ -80,6 +108,18 @@ export interface AccessGrantPort {
   prepareClaim(grantId: string, scannedByUserId: string): Promise<ClaimedGrant>;
   /** Starts the window. Only called after prepareClaim has passed. */
   commitClaim(grantId: string, expiresAt: Date, scannedByUserId: string): Promise<void>;
+  /**
+   * QR-27: the authority an approved access request opens — no ticket, the
+   * agent who scanned, the scope and duration they asked for. Returns the
+   * grant's id for the scan row.
+   */
+  openRequested(input: {
+    subject: { publisherId: string } | { advertiserId: string };
+    agentId: string;
+    /** The agent's login — the actor the audit row names. */
+    scannedByUserId: string;
+    ask: AccessAsk;
+  }): Promise<{ grantId: string }>;
 }
 
 let registeredGrants: AccessGrantPort | null = null;
@@ -136,6 +176,10 @@ export interface AdvertiserOnboardingPort {
     agentId: string,
     context: { qrId: string; scanId: string },
   ): Promise<{ grantId: string | null }>;
+  /** QR-27: the account behind the code, or null when it is gone. No writes. */
+  describe(advertiserId: string): Promise<IdentitySummary | null>;
+  /** QR-27: the working agent behind a session, or null. */
+  workingAgentId(scannedByUserId: string): Promise<string | null>;
 }
 
 let registeredAdvertisers: AdvertiserOnboardingPort | null = null;

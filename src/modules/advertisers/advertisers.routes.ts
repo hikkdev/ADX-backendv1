@@ -44,6 +44,7 @@ import {
   updateProfileHandler,
   walletHandler,
   withdrawRefundHandler,
+  setAdvertiserBandHandler,
 } from './advertisers.controller';
 
 /**
@@ -105,6 +106,8 @@ advertiserRouter.get('/', requireRole('ADMIN'), asyncHandler(listAdvertisersHand
 advertiserRouter.post('/', asyncHandler(registerAdvertiserHandler));
 advertiserRouter.get('/:id', asyncHandler(getAdvertiserHandler));
 advertiserRouter.patch('/:id', asyncHandler(updateProfileHandler));
+// AG-5: the importance band — the agent grade's axis — set by the desk alone.
+advertiserRouter.patch('/:id/band', requireRole('ADMIN'), asyncHandler(setAdvertiserBandHandler));
 advertiserRouter.get('/:id/eligibility', asyncHandler(eligibilityHandler));
 advertiserRouter.patch('/:id/kyc', requireRole('ADMIN'), asyncHandler(kycDecisionHandler));
 

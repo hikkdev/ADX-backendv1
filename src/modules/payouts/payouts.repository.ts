@@ -407,7 +407,7 @@ export interface PayoutsRepository {
   publisherIdsWithAccruals(from: Date, to: Date): Promise<string[]>;
 
   /* ── Incentives ────────────────────────────────────────────────── */
-  findIncentiveRate(event: IncentiveEvent, tier: string, on: Date): Promise<IncentiveRateRow | null>;
+  findIncentiveRate(event: IncentiveEvent, tier: string, on: Date, side?: 'PUBLISHER' | 'ADVERTISER'): Promise<IncentiveRateRow | null>;
   listIncentiveRates(): Promise<IncentiveRateRow[]>;
   upsertIncentiveRate(data: {
     event: IncentiveEvent;
@@ -450,6 +450,10 @@ export interface PayoutsRepository {
       rejectionReason: string | null;
       walletEntryId: string | null;
       ledgerTransactionId: string | null;
+      /** LH10: the clawback's stamps. */
+      reversedAt: Date | null;
+      reversalReason: string | null;
+      reversalLedgerTransactionId: string | null;
     }>
   ): Promise<IncentiveRow>;
   listIncentives(filter: {

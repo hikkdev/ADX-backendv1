@@ -1,4 +1,5 @@
 import { ApiError } from '../../shared/errors';
+import { lookupVehicleRc, nameMatchScore, normaliseVehicleNumber } from '../../shared/integrations';
 import { PROFILE_BASIC_LABEL, profileBasicsMissing } from '../../shared/kyc-state';
 import { allocateIdentifier } from '../identifiers';
 import { auditDiff, findActivityRows, logActivity } from '../../shared/audit';
@@ -6,7 +7,8 @@ import { toListPage, type ListPage } from '../../shared/pagination';
 import { assertPublishable, belowFloorFlags, checkGate } from '../rate-cards';
 import { Decimal, money } from '../../shared/money';
 import { holdsLiveGrant } from '../access-grants';
-import { findAgentProfile } from '../agents';
+import { findWorkingAgentProfile } from '../agents';
+import { requestPublisherLicence } from '../agreements';
 import { isFeatureEnabled } from '../feature-flags';
 import { createNotification } from '../notifications';
 import { activeSurge, assertCityAllows, citySupport, cityKeyFor, classifySpot, suggestedRate, withCityKey } from '../pricing';
@@ -565,7 +567,7 @@ export async function assertCanEditListing(
   }
   if (publisher.userId === actor.userId) return;
 
-  const agent = await findAgentProfile(actor.userId);
+  const agent = await findWorkingAgentProfile(actor.userId);
   if (agent) {
     if (publisher.agentId === agent.id) return;
     if (await holdsLiveGrant(agent.id, publisher.id, 'LISTINGS', listingId)) return;
@@ -602,7 +604,7 @@ export async function assertCanCreateForPublisher(
   const publisher = await repository.findPublisherById(publisherId);
   if (!publisher) throw new ApiError(404, 'NOT_FOUND', 'Publisher not found');
 
-  const agent = await findAgentProfile(actor.userId);
+  const agent = await findWorkingAgentProfile(actor.userId);
   if (agent) {
     if (publisher.agentId === agent.id) return;
     // A grant that says "help me with my listings" covers adding one. It is
@@ -725,6 +727,10 @@ export type ReviewCase = ReviewQueueRow & {
   elevation: string | null;
   visibility: string | null;
   trafficGrade: string | null;
+  /** AG-4: a vehicle put up as a spot, and whether the desk checked its RC. */
+  vehicleNumber: string | null;
+  vehicleRcVerifiedAt: Date | null;
+  vehicleRc: Record<string, unknown> | null;
   minBookingDays: number | null;
   availableNow: boolean;
   availableFrom: Date | null;
@@ -861,6 +867,9 @@ export async function getReviewCase(listingId: string): Promise<ReviewCase> {
     elevation: listing.elevation,
     visibility: listing.visibility,
     trafficGrade: listing.trafficGrade,
+    vehicleNumber: listing.vehicleNumber,
+    vehicleRcVerifiedAt: listing.vehicleRcVerifiedAt,
+    vehicleRc: (listing.vehicleRcPayload as Record<string, unknown> | null) ?? null,
     minBookingDays: listing.minBookingDays,
     availableNow: listing.availableNow,
     availableFrom: listing.availableFrom,
@@ -968,7 +977,11 @@ export async function publishListing(listingId: string) {
   // basics are missing, not a silent skip.
   if (listing.publisherId) await assertPublisherBasics(listing.publisherId);
 
-  return repository.publish(listingId);
+  const published = await repository.publish(listingId);
+  // DS-3: the publisher's licence to display is asked for at the first
+  // approved listing (decision 6, the default) — idempotent, never blocking.
+  if (listing.publisherId) await requestPublisherLicence(listing.publisherId, 'FIRST_APPROVED_LISTING');
+  return published;
 }
 
 /** QR-5: the gate a spot has to clear to go live — the publisher's basics. 409 `PROFILE_INCOMPLETE` names what is missing. */
@@ -1223,4 +1236,28 @@ export async function setListingRatingSnapshot(
   snapshot: { ratingAvg: string | null; reviewCount: number },
 ): Promise<void> {
   await repository.setRatingSnapshot(listingId, snapshot);
+}
+
+/* ── AG-4: a vehicle put up as a spot ──────────────────────────────────── */
+
+/**
+ * The desk checks the vehicle's RC with Cashfree's lookup — the owner, the
+ * class, the insurance and fitness dates — and keeps what came back on the
+ * listing, with how well the RC's owner matches the publisher's name. A
+ * refusal (an unwhitelisted IP, an unknown number) or an unconfigured pair
+ * is a 409 the desk reads; nothing is stored then.
+ */
+export async function verifyListingVehicleRc(listingId: string, input: { vehicleNumber?: string }, byUserId: string) {
+  const listing = await repository.findWithPublisher(listingId);
+  if (!listing) throw new ApiError(404, 'NOT_FOUND', 'Listing not found');
+  const number = input.vehicleNumber ? normaliseVehicleNumber(input.vehicleNumber) : listing.vehicleNumber ? normaliseVehicleNumber(listing.vehicleNumber) : null;
+  if (!number) throw new ApiError(409, 'VERIFICATION_UNAVAILABLE', 'No vehicle registration number on the listing');
+  const answer = await lookupVehicleRc(number);
+  if (!answer.ok) throw new ApiError(409, 'VERIFICATION_UNAVAILABLE', answer.message, { code: answer.code });
+  const publisherName = listing.publisher?.name ?? null;
+  const nameMatch = nameMatchScore(answer.facts.ownerName, publisherName);
+  const payload = { ...answer.facts, nameMatch, publisherName, checkedAt: new Date().toISOString(), raw: answer.raw } as unknown as Record<string, never>;
+  const updated = await repository.update(listingId, { vehicleNumber: number, vehicleRcVerifiedAt: new Date(), vehicleRcPayload: payload });
+  await logActivity(byUserId, 'LISTING_VEHICLE_RC_VERIFIED', { targetType: 'Listing', targetId: listingId, module: 'listings', metadata: { number, via: 'CASHFREE_VRS', nameMatch, status: answer.facts.status } });
+  return { listing: updated, verification: { via: 'CASHFREE_VRS', nameMatch, facts: answer.facts } };
 }

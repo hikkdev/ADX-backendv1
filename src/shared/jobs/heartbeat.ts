@@ -38,6 +38,18 @@ export const JOB_NAMES = [
   'payout-batch-draft',
   // Lot H (Q147): the nightly quote-request expiry and re-invite.
   'print-quote-expiry',
+  // DS-1: the signing-request expiry sweep.
+  'esign-expiry',
+  // LT-1: the agent trails' retention sweep.
+  'agent-trail-retention',
+  'lead-scoring',
+  'lead-pipeline',
+  // LH5 (D3): the hourly claim sweep — lapses past the hold, the warning an hour before.
+  'lead-claim-sweep',
+  // LH6 (D5): every five minutes — queued outreach leaves, sequence steps go, recordings past 90 days are purged daily.
+  'lead-outreach-tick',
+  // LH10: hourly — the integrity scan's four patterns and the activation clawback; the QA draw once a day.
+  'lead-integrity',
   // Lot I: the minute sweep over live chats — first-response breaches and idle conversions.
   'live-chat-sla',
   // Lot J (B1): the daily publisher-subscription sweep — expiring and ended notices, stale orders; Lot J2: the renewals.
@@ -48,6 +60,8 @@ export const JOB_NAMES = [
   'city-winddown',
   // Lot AA: the daily 08:00 IST due-tomorrow / overdue notices on work tasks.
   'work-due',
+  // AG-4: every six hours — an agent's papers with a date: reminders at 30 and 7 days, EXPIRED on the day, a working agent held.
+  'agent-document-expiry',
 ] as const;
 
 export type JobName = (typeof JOB_NAMES)[number];

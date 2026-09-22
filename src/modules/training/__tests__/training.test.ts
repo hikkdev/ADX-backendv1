@@ -14,6 +14,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const { repository, agents, identifiers, audit } = vi.hoisted(() => ({
   repository: {
     findActiveModules: vi.fn(),
+    agentSides: vi.fn(async () => ({ publisher: true, advertiser: false })),
     findModules: vi.fn(),
     findModule: vi.fn(),
     createModule: vi.fn(),
@@ -61,6 +62,9 @@ const mod = (ordinal: number, over: Record<string, unknown> = {}) => ({
   unlockAfterOrdinal: ordinal > 1 ? ordinal - 1 : null,
   passPercent: 80,
   isActive: true,
+  audience: 'ALL',
+  kind: 'LESSON',
+  timeLimitMins: null,
   createdAt: NOW,
   updatedAt: NOW,
   ...over,
@@ -262,5 +266,46 @@ describe('revoking a certification', () => {
   it('refuses a second revoke', async () => {
     repository.listCertifications.mockResolvedValue([cert({ revokedAt: NOW })]);
     await expect(revokeCertification('crt_1', 'again', 'usr_admin', NOW)).rejects.toMatchObject({ statusCode: 409 });
+  });
+});
+
+/**
+ * AG-4: a curriculum per side, and the assessment as a module kind.
+ */
+describe('AG-4: sides and assessments', () => {
+  it('asks for the modules of the sides the agent works, and the certificate counts the lessons alone', async () => {
+    const { getCurriculum, submitQuiz, getAssessmentStanding } = await import('../training.service');
+    agents.requireAgentProfile.mockResolvedValue({ id: 'agt_1' });
+    repository.agentSides.mockResolvedValue({ publisher: false, advertiser: true });
+    const assessment = mod(3, { kind: 'ASSESSMENT', audience: 'ADVERTISER_AGENT', passPercent: 60, timeLimitMins: 20, unlockAfterOrdinal: null });
+    repository.findActiveModules.mockResolvedValue([mod(1, { unlockAfterOrdinal: null }), mod(2), assessment]);
+    repository.findProgress.mockResolvedValue([
+      { moduleId: 'mod_1', percent: 100, completedAt: new Date(), lastPositionSec: null },
+      { moduleId: 'mod_2', percent: 100, completedAt: new Date(), lastPositionSec: null },
+    ]);
+    repository.bestAttempts.mockResolvedValue([{ moduleId: 'mod_3', score: 9, total: 20, passed: false }]);
+    repository.findCertification.mockResolvedValue(null);
+    repository.agentName.mockResolvedValue('Ravi');
+
+    const curriculum = await getCurriculum('usr_1');
+    expect(repository.findActiveModules).toHaveBeenCalledWith({ publisher: false, advertiser: true });
+    expect(curriculum.modules.map((m) => m.kind)).toEqual(['LESSON', 'LESSON', 'ASSESSMENT']);
+    // Two lessons of two passed: the certificate is complete even though the assessment is not.
+    expect(curriculum.certification.progress).toEqual({ passed: 2, total: 2, pct: 100 });
+    expect(curriculum.certification.remaining).toEqual([]);
+
+    const standing = await getAssessmentStanding('agt_1');
+    expect(standing).toEqual({ required: true, passed: false, modules: [{ id: 'mod_3', title: 'Module 3', passPercent: 60, timeLimitMins: 20, best: { score: 9, total: 20, passed: false, percent: 45 } }] });
+
+    // Passing the assessment records the attempt and mints nothing.
+    repository.findModule.mockResolvedValue(assessment);
+    repository.findQuestions.mockResolvedValue([{ id: 'q1', ordinal: 1, prompt: 'Q', isActive: true, options: [{ id: 'o1', ordinal: 1, label: 'A', isCorrect: true }, { id: 'o2', ordinal: 2, label: 'B', isCorrect: false }] }]);
+    repository.createAttempt.mockResolvedValue({ moduleId: 'mod_3', score: 1, total: 1, passed: true });
+    repository.upsertProgress.mockResolvedValue({ percent: 100, completedAt: new Date(), lastPositionSec: null });
+    identifiers.allocateIdentifier.mockClear();
+    repository.createCertification.mockClear();
+    const result = await submitQuiz('usr_1', 'mod_3', [{ questionId: 'q1', optionId: 'o1' }]);
+    expect(result.passed).toBe(true);
+    expect(repository.createCertification).not.toHaveBeenCalled();
   });
 });

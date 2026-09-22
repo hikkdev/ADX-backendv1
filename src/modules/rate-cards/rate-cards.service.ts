@@ -3,7 +3,7 @@ import { logActivity } from '../../shared/audit';
 import { Decimal, money, type Money } from '../../shared/money';
 import type { PriceApprovalSource, PriceApprovalStatus, RateCardStatus, RateGrade } from '../../shared/database';
 import { createNotification } from '../notifications';
-import { findAgentProfile } from '../agents';
+import { findWorkingAgentProfile } from '../agents';
 import { holdsLiveGrant } from '../access-grants';
 import { listingEnforcementPort } from './listing-enforcement.port';
 import { prismaRateCardsRepository as repository } from './prisma-rate-cards.repository';
@@ -584,7 +584,7 @@ export async function assertMayAskGate(listingId: string, actor: GateActor): Pro
   }
   if (publisher.userId === actor.userId) return;
 
-  const agent = await findAgentProfile(actor.userId);
+  const agent = await findWorkingAgentProfile(actor.userId);
   if (agent) {
     if (publisher.agentId === agent.id) return;
     if (await holdsLiveGrant(agent.id, publisher.id, 'LISTINGS', listingId)) return;

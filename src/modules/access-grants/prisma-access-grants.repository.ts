@@ -36,6 +36,25 @@ export const prismaAccessGrantsRepository: AccessGrantsRepository = {
     });
   },
 
+  createRequested({ subject, assignedAgentId, scope, reason, durationMinutes }) {
+    const now = new Date();
+    return prisma.delegatedAccessGrant.create({
+      data: {
+        ...subject,
+        assignedAgentId,
+        purpose: 'SUPPORT',
+        reason,
+        scope,
+        listingIds: [],
+        supportTicketId: null,
+        durationMinutes,
+        status: 'ACTIVE',
+        claimedAt: now,
+        expiresAt: new Date(now.getTime() + durationMinutes * 60_000),
+      },
+    });
+  },
+
   findLiveOnboarding(subject, now: Date) {
     return prisma.delegatedAccessGrant.findFirst({
       where: { ...subject, purpose: 'ONBOARDING', status: 'ACTIVE', expiresAt: { gt: now } },

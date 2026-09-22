@@ -5,7 +5,7 @@ One overview read per user section — package O-B, 15 September 2026.
 ## Routes
 
 ```
-GET /section-overviews/:section?from=YYYY-MM-DD&to=YYYY-MM-DD&city=   ADMIN — :section is publishers | advertisers | agents | print-partners | employees | users; cached 60 s per section + window + city
+GET /section-overviews/:section?from=YYYY-MM-DD&to=YYYY-MM-DD&city=   ADMIN — :section is publishers | advertisers | agents | print-partners | employees | users | leads (LH9); cached 60 s per section + window + city
 ```
 
 `from` and `to` are inclusive Indian days (the window opens at `from`'s IST
@@ -61,8 +61,8 @@ exports take no window — and are said to be.
 `shared/cache` (the minute's cache), `shared/time`, `shared/money`,
 `shared/pagination`, `shared/kyc-state` (the party-level where fragments),
 `shared/database` (repository only). Modules: `supply`, `advertisers`,
-`agents`, `employees`, `print-partners`, `publishers`, `pricing` — exports
-only.
+`agents`, `employees`, `print-partners`, `publishers`, `pricing`, and since
+LH9 `leads` (`leadFunnel`, `LEAD_STAGES`) — exports only.
 
 **The city facet (Lot X-B).** `?city=` is a slug (the console's older links
 still pass a name — either resolves) — resolved once per read through
@@ -193,6 +193,33 @@ advertiser or agent profile says so.
 | `breakdowns.byRole` | `UserRole` per role, labelled (Publisher agent, Print partner, …); `/users?role=` |
 | `breakdowns.byLanguage` | `User.language` counted |
 | `breakdowns.byCity` | Publisher, advertiser and agent profiles' cities counted and summed — a login with two profiles in one city counts twice |
+
+## leads (LH9, the Lead Hunt, 22 Sep 2026)
+
+City: `Lead.cityId` / `Lead.city`, the way every lead read keys it. The
+hunt's money (`money.*`, the cost per activation) is scoped by the
+**agent's** city — an incentive row carries no city of its own.
+
+| Field | What it is |
+| --- | --- |
+| `tiles.open` | Leads neither converted nor lost now (state) |
+| `tiles.newInWindow` | `createdAt` in the window |
+| `tiles.contacted` | `firstContactedAt` in the window — stamped once, so a contact counts in one window |
+| `tiles.converted`, `tiles.activated` | `convertedAt` / `activatedAt` in the window (the catch: first listing live / first campaign paid) |
+| `tiles.lost` | Stage LOST reached inside the window (`stageChangedAt`) |
+| `tiles.byTemperature` | Open leads by HOT / WARM / COLD now (state); `/leads/list?temperature=` |
+| `funnel.byStage` | **`leads.leadFunnel`'s own answer over the leads CREATED in the window** (the desk's `/leads/funnel`, `to` the window's last instant), every stage in the pipeline's order (D12) with the count, the pipeline value (`estimatedValue` summed) and the average days in stage; `funnel.totals` and `funnel.lossMix` (D11) are the funnel's too |
+| `series.newLeads`, `series.conversions`, `series.activations` | `createdAt` / `convertedAt` / `activatedAt` by day |
+| `breakdowns.bySource` | The funnel's rows: leads in the cohort, how many converted / activated, the rate; `/leads/sources?key=` (the "No source" row has no link) |
+| `breakdowns.byAgent` | The funnel's rows labelled through `agents.findAgentLabels`; `/agents/:id` |
+| `breakdowns.byCity` | The repository's own keyed city rows (Lot X-B): leads created in the window per city and how many of that cohort converted; `/leads?city=` narrows this overview |
+| `breakdowns.byCategory` | The funnel's rows; `/leads/list?category=` |
+| `breakdowns.byChannel` | The funnel's D14 attribution: per channel, how many first contacts, engagements and conversions it produced (no link — nothing filters on a channel) |
+| `conversion.timeToConvert` | Days from `createdAt` to `convertedAt` over the rows converted in the window — the mean and the **median** (`PERCENTILE_CONT`, one raw SELECT), null with none; the previous window's beside them |
+| `conversion.costPerActivation` | `(incentives + topUps) / activations` — the LEAD_CONVERTED / ACTIVATED / RETAINED rows recorded in the window in any status but REJECTED (pending money is a cost already taken on), the priority rows (`orderId` `priority:…`, LH5) counted as `topUps`, over the catches in the window; null with no catch |
+| `conversion.pipelineValue` | The funnel's per-stage values folded |
+| `recycle` | Leads recycled in the window (`recycledAt`, stamped by the D11 recycle since LH9) and how many of those have converted since (`convertedAt >= recycledAt`, one raw COUNT) — the yield |
+| `money.incentives`, `money.topUps` | The same two sums as figures against the previous window |
 
 ## What the platform does not record
 

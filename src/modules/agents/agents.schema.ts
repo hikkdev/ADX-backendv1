@@ -26,6 +26,8 @@ export const createAgentSchema = z.object({
   side: z.enum(['PUBLISHER', 'ADVERTISER']),
   city: z.string().trim().min(1).max(80).optional(),
   state: z.string().trim().min(1).max(80).optional(),
+  /** AG-1: start an application (stage PROFILE, source DESK) rather than an ACTIVE agent. */
+  asApplication: z.boolean().optional(),
 });
 export type CreateAgentInput = z.infer<typeof createAgentSchema>;
 

@@ -26,7 +26,7 @@ const { service, agents, audit } = vi.hoisted(() => ({
     getKycCase: vi.fn(),
     restartDigioKyc: vi.fn(),
   },
-  agents: { requireAgentProfile: vi.fn(), agentExists: vi.fn() },
+  agents: (() => { const o = { requireAgentProfile: vi.fn(), agentExists: vi.fn() }; return { ...o, requireWorkingAgent: o.requireAgentProfile }; })(),
   audit: { logActivity: vi.fn() },
 }));
 

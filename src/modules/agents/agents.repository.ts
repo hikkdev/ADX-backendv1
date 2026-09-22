@@ -1,4 +1,5 @@
-import type { AgentProfile, AgentProfileStatus, AgentTier, KycStatus, SuspensionScope, TierLevel } from '../../shared/database';
+import type { DispatchAsk } from '../../shared/dispatch';
+import type { AgentGrade, AgentProfile, AgentProfileStatus, AgentStage, AgentTier, KycStatus, SuspensionScope, TierLevel } from '../../shared/database';
 import type { Money } from '../../shared/money';
 
 /** E7-3: what another desk needs to name an agent beside a user id. */
@@ -21,6 +22,8 @@ export type NewAgent = {
   name: string;
   email?: string;
   role: AgentRole;
+  /** AG-1: ACTIVE for the desk's one-step create (the default), PROFILE for an application started at the desk. */
+  stage?: 'ACTIVE' | 'PROFILE';
   city?: string;
   /** Lot X-B: the `City` row `city` denotes, stamped by the service through `pricing.withCityKey`; null for a typed town. */
   cityId?: string | null;
@@ -87,12 +90,13 @@ export interface AgentsRepository {
    * in, not in the exclusion list, and under their own `maxActiveOrders` —
    * the first of them in offer-priority order (`shared/dispatch`).
    */
-  findAssignable(excludeIds: string[], now?: Date): Promise<{ id: string } | null>;
+  /** The sweep's pick — AG-5: for the grade the work's band asks for, and where it is. */
+  findAssignable(excludeIds: string[], ask?: DispatchAsk, now?: Date): Promise<{ id: string } | null>;
   /**
    * Lot A: the profile's status and suspension scopes, for the dispatch points
    * that have to refuse a suspended agent — visits, milestones, leads.
    */
-  findWorkState(id: string): Promise<{ status: string; scopes: SuspensionScope[] } | null>;
+  findWorkState(id: string): Promise<{ status: string; scopes: SuspensionScope[]; stage: AgentStage; roles: string[] } | null>;
   /** D5: the profile facts ops or the agent may change. */
   update(id: string, patch: AgentProfilePatch): Promise<AgentProfile>;
   /** What "auto-accept in my zone" needs to decide: the switch and where the zone is. */
@@ -180,4 +184,8 @@ export type DashboardProfile = {
   suspensionScopes: SuspensionScope[];
   suspensionReason: string | null;
   suspendedAt: Date | null;
+  /** AG-1: where they stand on the application ladder, and the grade the desk gave them. */
+  stage: AgentStage;
+  grade: AgentGrade | null;
+  activatedAt: Date | null;
 };

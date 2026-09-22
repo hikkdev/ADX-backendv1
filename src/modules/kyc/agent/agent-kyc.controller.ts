@@ -3,9 +3,21 @@ import { ApiError } from '../../../shared/errors';
 import type { KycStatus } from '../../../shared/database';
 import { kycRequestSchema, pagination, reviewSchema } from '../kyc.schema';
 import { agentKycDocumentsSchema, agentKycSearchSchema, agentKycStateFilterSchema, agentKycStatusFilterSchema } from './agent-kyc.schema';
-import { getAgentKyc, getMyAgentKyc, listAgentKycs, recordAgentKyc, requestAgentKyc, reviewAgentKyc } from './agent-kyc.service';
+import { getAgentKyc, getMyAgentKyc, initiateMyAgentDigioKyc, listAgentKycs, myAgentDigioStatus, recordAgentKyc, requestAgentKyc, reviewAgentKyc } from './agent-kyc.service';
 
 const agentId = (req: Request) => req.params['agentId'] as string;
+
+/** KYC-D: `POST /agent-kyc/me/digio/initiate` — the agent's own Digio session. */
+export async function initiateMyAgentDigioHandler(req: Request, res: Response): Promise<void> {
+  res.json({ success: true, data: await initiateMyAgentDigioKyc(req.user!.sub) });
+}
+
+/** KYC-D: `GET /agent-kyc/me/digio/status` — what ADX has heard; 404 before any record. */
+export async function myAgentDigioStatusHandler(req: Request, res: Response): Promise<void> {
+  const status = await myAgentDigioStatus(req.user!.sub);
+  if (!status) throw new ApiError(404, 'NOT_FOUND', 'No KYC record found');
+  res.json({ success: true, data: status });
+}
 
 export async function getMyAgentKycHandler(req: Request, res: Response): Promise<void> {
   res.json({ success: true, data: await getMyAgentKyc(req.user!.sub) });

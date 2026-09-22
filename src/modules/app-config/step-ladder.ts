@@ -24,6 +24,8 @@ import { summariseChanges, type ChangeSummary } from './flow-schema';
 
 export const AGENT_JOB_FLOW_KEY = 'agent-job';
 export const EMPLOYEE_INTAKE_FLOW_KEY = 'employee-intake';
+/** LH7: the invite landing's copy per side — a step ladder with one step per side, its "proofs" the blocks the page shows. */
+export const LEAD_LANDING_FLOW_KEY = 'lead-landing';
 
 /** What the job's submit gate can check — the OrderPhoto kinds and the check-in. */
 export const AGENT_JOB_PROOFS = ['PICKUP', 'CHECK_IN', 'CONDITION', 'INSTALLATION'] as const;
@@ -70,6 +72,8 @@ const text = z.string().trim().min(1).max(300);
 export interface StepLadderSpec<P extends readonly [string, ...string[]]> {
   proofs: P;
   required: readonly P[number][];
+  /** LH7: a vocabulary whose entries may sit on several steps — the landing's blocks, one per side. Default: a proof is collected by at most one step. */
+  repeatable?: boolean | undefined;
 }
 
 /**
@@ -116,9 +120,15 @@ export function stepLadderSchema<P extends readonly [string, ...string[]]>(spec:
       ladder.steps.forEach((step, s) => {
         if (seenKeys.has(step.key)) ctx.addIssue({ code: 'custom', path: ['steps', s, 'key'], message: `Step key \`${step.key}\` is used twice` });
         seenKeys.add(step.key);
+        const seenHere = new Set<string>();
         step.proofs.forEach((proof, p) => {
           const earlier = seenProofs.get(proof.key);
-          if (earlier !== undefined) {
+          if (spec.repeatable) {
+            // Repeatable across steps, still once per step.
+            if (seenHere.has(proof.key)) ctx.addIssue({ code: 'custom', path: ['steps', s, 'proofs', p, 'key'], message: `Block \`${proof.key}\` is on this step twice` });
+            seenHere.add(proof.key);
+            seenProofs.set(proof.key, s);
+          } else if (earlier !== undefined) {
             ctx.addIssue({ code: 'custom', path: ['steps', s, 'proofs', p, 'key'], message: `Proof \`${proof.key}\` is already collected by step \`${ladder.steps[earlier]!.key}\`` });
           } else {
             seenProofs.set(proof.key, s);
@@ -134,6 +144,63 @@ export function stepLadderSchema<P extends readonly [string, ...string[]]>(spec:
 
 export const agentJobLadderSchema = stepLadderSchema({ proofs: AGENT_JOB_PROOFS, required: REQUIRED_AGENT_JOB_PROOFS });
 export const employeeIntakeLadderSchema = stepLadderSchema({ proofs: EMPLOYEE_INTAKE_PROOFS, required: REQUIRED_EMPLOYEE_INTAKE_PROOFS });
+
+/**
+ * LH7: the landing behind `adx.in/j/<code>`. One step per side (`publisher`,
+ * `advertiser`): `title` is the headline, `subtitle` the line under it,
+ * `hint` the bullet lines (one per line), `cta` the button; the "proofs"
+ * are the hook blocks the page draws for that side, each with its caption
+ * — which of them, in what order, is ops' to say. Nothing is required: a
+ * side with no blocks is a plain page with the OTP door.
+ */
+export const LEAD_LANDING_BLOCKS = ['RATE_ESTIMATE', 'NEARBY_CAMPAIGNS', 'NEARBY_SPOTS', 'SAMPLE_ESTIMATE', 'PACKAGES', 'PROPOSALS'] as const;
+export type LeadLandingBlock = (typeof LEAD_LANDING_BLOCKS)[number];
+export const REQUIRED_LEAD_LANDING_BLOCKS: readonly LeadLandingBlock[] = [];
+export const LEAD_LANDING_BLOCK_LABELS: Readonly<Record<LeadLandingBlock, string>> = {
+  RATE_ESTIMATE: 'What spaces like yours earn (publisher)',
+  NEARBY_CAMPAIGNS: 'Brands advertising nearby (publisher)',
+  NEARBY_SPOTS: 'Spots near you (advertiser)',
+  SAMPLE_ESTIMATE: 'A sample campaign (advertiser)',
+  PACKAGES: 'The packages (advertiser)',
+  PROPOSALS: 'The proposals the agent sent (both)',
+};
+export const leadLandingLadderSchema = stepLadderSchema({ proofs: LEAD_LANDING_BLOCKS, required: REQUIRED_LEAD_LANDING_BLOCKS, repeatable: true });
+export type LeadLandingLadder = StepLadder<LeadLandingBlock>;
+
+export const CODE_LEAD_LANDING_LADDER: LeadLandingLadder = {
+  label: 'Invite landing',
+  description: 'The copy behind adx.in/j/<code> per side — the headline, the line under it, the bullets, the button, and which hook blocks the page shows.',
+  audience: 'Prospects',
+  steps: [
+    {
+      key: 'publisher',
+      number: 1,
+      title: 'Earn from your wall, shutter or screen',
+      subtitle: 'Brands pay every month to advertise on spaces like yours. ADX finds the brand, prints and installs, and pays you the rent.',
+      hint: 'Nothing to install yourself — ADX brings the artwork\nPaid monthly into your bank\nYou approve every campaign before it goes up',
+      cta: 'Get my rate',
+      proofs: [
+        { key: 'RATE_ESTIMATE', label: 'What spaces like yours earn' },
+        { key: 'NEARBY_CAMPAIGNS', label: 'Brands advertising nearby' },
+        { key: 'PROPOSALS', label: 'Your estimate' },
+      ],
+    },
+    {
+      key: 'advertiser',
+      number: 2,
+      title: 'Reach your customers on the street',
+      subtitle: 'Walls, shutters and screens around your area — pick the streets, ADX prints, installs and reports.',
+      hint: 'Costs less than one newspaper ad\nYou choose the exact spots\nPhotos of every installation',
+      cta: 'Plan my campaign',
+      proofs: [
+        { key: 'NEARBY_SPOTS', label: 'Spots near you' },
+        { key: 'SAMPLE_ESTIMATE', label: 'A sample campaign' },
+        { key: 'PACKAGES', label: 'Packages' },
+        { key: 'PROPOSALS', label: 'Your proposal' },
+      ],
+    },
+  ],
+};
 
 /** The shape, generic over its proof vocabulary. */
 export interface LadderProof<P extends string = string> {
@@ -173,11 +240,13 @@ export function ladderDiff(before: unknown, after: unknown): { steps: ChangeSumm
 }
 
 /** The document GET /config/schema serves for the two ladders. G11-1: `proofOptions` names each key, in the order of `proofs`. */
-export function stepLadderVocabulary(spec: { proofs: readonly string[]; required: readonly string[]; labels: Readonly<Record<string, string>> }) {
+export function stepLadderVocabulary(spec: { proofs: readonly string[]; required: readonly string[]; labels: Readonly<Record<string, string>>; repeatable?: boolean | undefined }) {
   return {
     proofs: [...spec.proofs],
     proofOptions: spec.proofs.map((key) => ({ key, label: spec.labels[key] ?? key })),
     requiredProofs: [...spec.required],
+    /** LH7: true when an entry may sit on several steps (the landing's blocks, one per side). */
+    repeatable: spec.repeatable === true,
     proof: { key: 'Proof — one of `proofs`', label: 'string — printed while the proof is missing' },
     step: {
       key: 'string — unique on the ladder',
@@ -199,7 +268,7 @@ export function stepLadderVocabulary(spec: { proofs: readonly string[]; required
     rules: [
       'step keys are unique',
       'every proof key is one of `proofs`',
-      'a proof is collected by at most one step',
+      spec.repeatable ? 'a block may sit on several steps, once each' : 'a proof is collected by at most one step',
       'every proof in `requiredProofs` is collected by some step',
     ],
   };

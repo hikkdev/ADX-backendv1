@@ -33,7 +33,7 @@ vi.mock('../prisma-access-grants.repository', () => ({
   prismaAccessGrantsRepository: repository,
 }));
 vi.mock('../../qr', () => ({ generateQr, deactivateQr }));
-vi.mock('../../agents', () => ({ findAgentProfile }));
+vi.mock('../../agents', () => ({ findAgentProfile, findWorkingAgentProfile: findAgentProfile }));
 vi.mock('../../../shared/audit', () => ({ logActivity }));
 
 import {

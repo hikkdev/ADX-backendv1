@@ -1,4 +1,8 @@
+import type { Request } from 'express';
 import { ApiError } from '../../shared/errors';
+import { logActivity } from '../../shared/audit';
+import { getConfigObject, saveConfigObject } from '../app-config';
+import { ROUTING_CONFIG_KEY, meetsGrade, requiredGradeForBand, routingSettingsFrom, type AgentGradeCode, type DispatchAsk, type RoutingSettings } from '../../shared/dispatch';
 import type { AgentProfile } from '../../shared/database';
 import { prismaAgentsRepository as repository } from './prisma-agents.repository';
 import type { AgentFilter, AgentProfilePatch, AgentRole, AgentZone, NewAgent } from './agents.repository';
@@ -7,6 +11,8 @@ import { allocateIdentifier } from '../identifiers';
 import { kycSummaryOf } from '../../shared/kyc-state';
 import { normalizeMobile } from '../auth';
 import { assertCityAllows, cityKeyFor, withCityKey } from '../pricing';
+import { agentMayWork } from './application/application.rules';
+import { assertEngagementSigned, engagementSide, engagementSigning } from './engagement-signing';
 
 export async function listAgents(filter: AgentFilter, limit: number, offset: number) {
   // Lot X-B: `?city=` is a slug (or a name, for the console's older links) — matched by key, the spelling as the fallback.
@@ -57,6 +63,8 @@ export async function createAgent(input: CreateAgentInput) {
     ...(input.city ? { city: input.city } : {}),
     ...(input.state ? { state: input.state } : {}),
     displayId,
+    // AG-1: the desk that met the person makes a working agent; the desk starting an application for them makes an applicant.
+    stage: input.asApplication ? 'PROFILE' : 'ACTIVE',
   });
   const profile = existing
     ? await repository.attachAgent(existing.id, record)
@@ -152,8 +160,40 @@ export async function agentExists(agentId: string): Promise<boolean> {
   return repository.exists(agentId);
 }
 
-export async function findAssignableAgent(excludeIds: string[]) {
-  return repository.findAssignable(excludeIds);
+export async function findAssignableAgent(excludeIds: string[], ask: DispatchAsk = {}) {
+  return repository.findAssignable(excludeIds, ask);
+}
+
+/* ── AG-5: routing by grade ─────────────────────────────────────────────── */
+
+/** The routing settings — bands to grades, and whether dispatch enforces them — with the defaults filling gaps. */
+export async function getRoutingSettings(): Promise<RoutingSettings> {
+  return routingSettingsFrom(await getConfigObject(ROUTING_CONFIG_KEY));
+}
+
+export async function saveRoutingSettings(input: RoutingSettings, byUserId: string, req?: Request): Promise<RoutingSettings> {
+  const next = routingSettingsFrom(input as unknown as Record<string, unknown>);
+  await saveConfigObject(ROUTING_CONFIG_KEY, next as unknown as Record<string, unknown>);
+  await logActivity(byUserId, 'AGENT_ROUTING_SETTINGS_SAVED', { req, targetType: 'AppConfig', targetId: ROUTING_CONFIG_KEY, module: 'agents', metadata: next as unknown as Record<string, unknown> });
+  return next;
+}
+
+/** The grade the work's band asks for, as a dispatch ask — the sweep's and the desk's one question. */
+export async function dispatchAskFor(band: string | null | undefined, spot?: { latitude: number | null; longitude: number | null } | null): Promise<DispatchAsk> {
+  const settings = await getRoutingSettings();
+  return { requiredGrade: requiredGradeForBand(band, settings), enforce: settings.enforce, spot: spot ?? null };
+}
+
+/** AG-5: whether the agent's grade is at or above `required`; an unknown agent is not. */
+export async function agentMeetsGrade(agentId: string, required: AgentGradeCode): Promise<boolean> {
+  const agent = await repository.findById(agentId);
+  return agent ? meetsGrade(agent.grade, required) : false;
+}
+
+/** AG-5: the desk assigning over the band — allowed, and said so. True when the agent is below the grade the band asks for. */
+export async function isBelowRequiredGrade(agentId: string, band: string | null | undefined): Promise<boolean> {
+  const settings = await getRoutingSettings();
+  return !(await agentMeetsGrade(agentId, requiredGradeForBand(band, settings)));
 }
 
 /**
@@ -162,7 +202,9 @@ export async function findAssignableAgent(excludeIds: string[]) {
  * An agent is offered new work only while their profile is ACTIVE and
  * BLOCK_NEW is not on them. The two move together — suspending sets the status
  * as well — and both are checked so a hand-edited status cannot let work
- * through a suspension.
+ * through a suspension. AG-1 adds the third condition: the application
+ * ladder must have reached ACTIVE — an applicant, a held, rejected or
+ * exited agent is offered nothing.
  *
  * False for an agent that does not exist: a dispatch to nobody is not work
  * being offered.
@@ -170,13 +212,63 @@ export async function findAssignableAgent(excludeIds: string[]) {
 export async function agentAcceptsWork(agentId: string): Promise<boolean> {
   const state = await repository.findWorkState(agentId);
   if (!state) return false;
-  return state.status === 'ACTIVE' && !state.scopes.includes('BLOCK_NEW');
+  if (!(agentMayWork(state.stage) && state.status === 'ACTIVE' && !state.scopes.includes('BLOCK_NEW'))) return false;
+  // DS-1: an agent who has not signed the engagement terms is not offered work.
+  const signing = await engagementSigning(agentId, engagementSide(state.roles)).catch(() => null);
+  return signing?.satisfied ?? true;
 }
 
 /** The same answer, as the refusal every dispatch point raises. */
 export async function assertAgentAcceptsWork(agentId: string): Promise<void> {
+  const state = await repository.findWorkState(agentId);
+  if (state && !agentMayWork(state.stage)) {
+    throw new ApiError(409, 'AGENT_NOT_ACTIVE', 'That agent has not been activated yet');
+  }
+  if (state) {
+    const signing = await engagementSigning(agentId, engagementSide(state.roles)).catch(() => null);
+    if (signing && !signing.satisfied) {
+      throw new ApiError(409, 'SIGNATURE_REQUIRED', 'That agent has not signed the engagement terms yet', { signing: signing.request, kind: signing.kind });
+    }
+  }
   if (!(await agentAcceptsWork(agentId))) {
     throw new ApiError(409, 'AGENT_SUSPENDED', 'That agent is not being offered work at the moment');
+  }
+}
+
+/**
+ * AG-1: the profile of a signed-in agent who may do agent work — 404 without
+ * a profile, 403 AGENT_NOT_ACTIVE while the application is not through. The
+ * agent-initiated writes (onboarding a party, booking for one, listing on a
+ * publisher's behalf, withdrawing) ask this; the reads keep `requireAgentProfile`
+ * so an applicant can still see their own status.
+ */
+export async function requireWorkingAgent(userId: string): Promise<AgentProfile> {
+  const agent = await requireAgentProfile(userId);
+  if (!agentMayWork(agent.stage)) {
+    throw new ApiError(403, 'AGENT_NOT_ACTIVE', 'Your agent application is not through yet — this opens once ADX activates you');
+  }
+  // DS-1: and the engagement terms signed, when the policy asks for it.
+  const roles = (await repository.findWorkState(agent.id))?.roles ?? [];
+  await assertEngagementSigned(agent.id, engagementSide(roles));
+  return agent;
+}
+
+/**
+ * AG-1: for the attribution and on-behalf points — the profile only while the
+ * agent may work, else null: an applicant, a held or an exited agent is not
+ * an agent to a QR claim, an assisted booking or a listing on a publisher's
+ * behalf, and falls through to whatever a plain user may do there.
+ */
+export async function findWorkingAgentProfile(userId: string): Promise<AgentProfile | null> {
+  const agent = await repository.findByUserId(userId);
+  return agent && agentMayWork(agent.stage) ? agent : null;
+}
+
+/** The soft form for attribution points: no profile is fine (not an agent), an inactive one is refused. */
+export async function assertAgentMayWork(userId: string): Promise<void> {
+  const agent = await repository.findByUserId(userId);
+  if (agent && !agentMayWork(agent.stage)) {
+    throw new ApiError(403, 'AGENT_NOT_ACTIVE', 'Your agent application is not through yet — this opens once ADX activates you');
   }
 }
 

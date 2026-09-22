@@ -36,6 +36,12 @@ export { deviceRouter } from './push/devices.routes';
 export { broadcastFlagsChanged, sendPushToUser } from './push/push.service';
 export type { BroadcastOutcome, DeviceView, PushOutcome } from './push/push.service';
 
+/** LH6: the two comms rules as pure functions, so the outreach hub rules every outbound the way the dispatcher rules its own. */
+export { quietHoursDeferral, weekWindowIST } from './comms-rules';
+export type { QuietHours } from './comms-rules';
+export { TEMPLATE_CHANNELS } from './notifications.types';
+export { renderText, renderHtml } from './templates';
+
 /** For bootstrap and the jobs: the seed at boot, the sender tick, the nightly purge. */
 export { ensureTemplates, purgeDeliveries, sendQueuedDeliveries } from './dispatch.service';
 

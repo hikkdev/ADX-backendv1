@@ -29,7 +29,7 @@ const { service, pages, advertisers, agents, publishers } = vi.hoisted(() => ({
     returnRedirectUrlFor: vi.fn(async (id: string, status: string) => `http://api/api/v1/payments/${id}/return?t=tok_r&status=${status}`),
   },
   advertisers: { assertMayActFor: vi.fn(), getAdvertiserForUser: vi.fn() },
-  agents: { findAgentProfile: vi.fn() },
+  agents: (() => { const o = { findAgentProfile: vi.fn() }; return { ...o, findWorkingAgentProfile: o.findAgentProfile }; })(),
   // Lot J (B2): the controller resolves the publisher behind a session too.
   publishers: { findPublisherForUser: vi.fn() },
 }));

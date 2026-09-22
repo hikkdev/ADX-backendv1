@@ -333,6 +333,8 @@ export async function completeVisit(
   visitId: string,
   userId: string,
   notes: string | undefined,
+  /** LH10: the proof — a photo and the fix the phone had. Absent, the visit still completes and the QA sample says so. */
+  proof: { proofFileId?: string | undefined; latitude?: number | undefined; longitude?: number | undefined } = {},
   now = new Date(),
 ) {
   const visit = await own(visitId, userId);
@@ -363,6 +365,7 @@ export async function completeVisit(
     // earned nothing the platform can name, and the card prints nothing.
   }
 
+  const hasProof = proof.proofFileId !== undefined || (proof.latitude !== undefined && proof.longitude !== undefined);
   return toVisitCard(
     await repository.update(visitId, {
       status: 'COMPLETED',
@@ -370,6 +373,11 @@ export async function completeVisit(
       ...(notes !== undefined ? { notes } : {}),
       earnedAmount: earned,
       incentiveId,
+      // LH10: stamped only when something was sent — a completion with no
+      // proof leaves the columns null, which is what the QA draw reads.
+      ...(proof.proofFileId !== undefined ? { proofFileId: proof.proofFileId } : {}),
+      ...(proof.latitude !== undefined && proof.longitude !== undefined ? { proofLatitude: proof.latitude, proofLongitude: proof.longitude } : {}),
+      ...(hasProof ? { proofAt: now } : {}),
     }),
     now,
   );

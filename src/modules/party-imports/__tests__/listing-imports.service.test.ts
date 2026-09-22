@@ -48,7 +48,7 @@ const { repository, pricing, audit, maps, listings, supply, rateCards, agents } 
   listings: { createListing: vi.fn<AnyFn>(), updateListing: vi.fn<AnyFn>(), assertCanCreateForPublisher: vi.fn<AnyFn>(), LISTING_CATEGORIES: ['INDOOR', 'OUTDOOR', 'TRANSIT', 'MEDIA'] },
   supply: { createAttempt: vi.fn<AnyFn>(), attachListingToAttempt: vi.fn<AnyFn>() },
   rateCards: { floorFor: vi.fn<AnyFn>() },
-  agents: { findAgentProfile: vi.fn<AnyFn>() },
+  agents: (() => { const o = { findAgentProfile: vi.fn<AnyFn>() }; return { ...o, findWorkingAgentProfile: o.findAgentProfile }; })(),
 }));
 
 vi.mock('../prisma-party-imports.repository', () => ({ prismaPartyImportsRepository: repository }));

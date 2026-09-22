@@ -16,7 +16,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const { repository, identifiers, payouts, visits, agents, pricing } = vi.hoisted(() => ({
   pricing: { citySupport: vi.fn() },
   visits: { createVisit: vi.fn() },
-  agents: { assertAgentAcceptsWork: vi.fn() },
+  agents: { assertAgentAcceptsWork: vi.fn(), dispatchAskFor: vi.fn(async () => ({})), isBelowRequiredGrade: vi.fn(async () => false), agentMeetsGrade: vi.fn(async () => true), getRoutingSettings: vi.fn(async () => ({ bands: { INDIVIDUAL: 'G1', SMALL_AGENCY: 'G2', LARGE_AGENCY: 'G3' }, leadBands: { STANDARD: 'G1', KEY: 'G3', ENTERPRISE: 'G4' }, enforce: true })), findAgentProfile: vi.fn() },
   repository: {
     create: vi.fn(),
     findById: vi.fn(),
@@ -29,6 +29,12 @@ const { repository, identifiers, payouts, visits, agents, pricing } = vi.hoisted
     findAccountsByPhones: vi.fn(),
     findByNameAndCity: vi.fn(),
     importBatch: vi.fn(),
+    // LH1: the source door and the score — the source row exists, the score is computed elsewhere (scoring.test.ts).
+    findSourceByKey: vi.fn().mockResolvedValue({ id: 'lsrc_1', key: 'referral', kind: 'REFERRAL' }),
+    createSource: vi.fn(),
+    listSources: vi.fn().mockResolvedValue([]),
+    updateSource: vi.fn(),
+    findForScoring: vi.fn().mockResolvedValue(null),
   },
   identifiers: { allocateIdentifier: vi.fn() },
   payouts: { rateFor: vi.fn() },
@@ -39,6 +45,8 @@ vi.mock('../prisma-leads.repository', async (importOriginal) => {
   return { prismaLeadsRepository: repository, distanceM: actual.distanceM };
 });
 vi.mock('../../identifiers', () => ({ allocateIdentifier: identifiers.allocateIdentifier }));
+// LH1: the settings read behind the score is not this test's subject.
+vi.mock('../../app-config', () => ({ getPlatformSettings: vi.fn(async () => ({ leads: { scoring: { weights: { fitMax: 30, intentMax: 35, recencyMin: -25, sourceMax: 15, agentFlag: 10 }, recency: { afterDays7: -5, afterDays21: -15, afterDays45: -25 }, thresholds: { hot: 70, warm: 40 }, agentFlagDays: 14, intent: {}, fit: { defaultCategory: 12, categoryBySide: { PUBLISHER: {}, ADVERTISER: {} }, importanceBonus: { KEY: 4, ENTERPRISE: 8 }, localityBonus: 6, localityRadiusM: 1000 } } } })) }));
 vi.mock('../../payouts', () => ({ rateFor: payouts.rateFor }));
 vi.mock('../../visits', () => ({ createVisit: visits.createVisit }));
 vi.mock('../../agents', () => agents);

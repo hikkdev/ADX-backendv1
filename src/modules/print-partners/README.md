@@ -33,7 +33,17 @@ Three rows:
   partner switches the account off **and ends every session**
   (`auth.revokeSessions`); reactivating switches it back on only if it had
   been activated. The mobile is the account's identity — unique on `User`,
-  never attached to an existing person's account (409);
+  never attached to an existing person's account (409). **PP-1 (the owner,
+  21 Sep 2026)**: a shop may also *apply* from the app — the sign-up's third
+  side, "I print and install" — which opens the account the other way round:
+  the row is created under the shop's own signed-in user with `appliedAt`
+  stamped and `activatedAt` null, the PARTNER role granted at once (so the
+  floor answers `/me` and shows the application), and the desk reviews it
+  under Print partners › **Applications** and activates it through the same
+  `POST /print-partners/:id/activate` an invited partner gets. An account
+  that already holds a publisher, advertiser or agent side is refused (409
+  `CONFLICT`) — a shop is its own account. Applying twice returns the
+  application;
 - a **PrintPartner** row — legal name, GSTIN, PAN, the contact, the address
   the agent collects from, capabilities, the widest print, the turnaround,
   a `PRT-DDMM-YYnn` identifier; Lot H adds the rate card
@@ -47,7 +57,7 @@ Three rows:
 ### The desk (ADMIN)
 
 ```
-GET   /print-partners                       list contract: q, city, active, page, pageSize → { items, total, page, pageSize, counts: { ACTIVE, INACTIVE } }
+GET   /print-partners                       list contract: q, city, active, applied, page, pageSize → { items, total, page, pageSize, counts: { ACTIVE, INACTIVE } }; PP-1: `applied=true` narrows to the applications awaiting the desk (`appliedAt` set, `activatedAt` null); every row carries `appliedAt`
 POST  /print-partners                       { name, mobile, legalName?, gstin?, panNumber?, contactName?, email?, address?, city?, latitude?, longitude?, capabilities?, maxWidthFt?, turnaroundDays?, notes? } → 201; PRINT_PARTNER_CREATED
 GET   /print-partners/:id                   the row — Lot H adds activatedAt, activatedById, acceptsQuoteRequests, rateCard { hasRateCard, fileId, fileUrl, updatedAt, rows }, invoiceUploadFileId; G13-B: `lastLoginAt` (User.lastLoginAt behind the partner, null until they sign in) — on the list rows too, one lookup per page
 PATCH /print-partners/:id                   any of the above but the mobile; G13-B: `acceptsQuoteRequests` too (the desk flips the switch for a partner who never activates); PRINT_PARTNER_UPDATED with the diff
@@ -193,7 +203,8 @@ id. Every route is `requireRole('PARTNER')` behind `partners.print-floor`
 the partner's own user.
 
 ```
-GET    /print-partners/me                                    the row + walletId + balances (wallets.snapshot) + rateCard state + (N2-B) kyc { status, submittedAt, method, requestedAt, requestedChannel } | null beside kycStatus
+GET    /print-partners/me                                    the row + walletId + balances (wallets.snapshot) + rateCard state + (N2-B) kyc { status, submittedAt, method, requestedAt, requestedChannel } | null beside kycStatus; PP-1: `appliedAt` too — the app shows the application until `activatedAt`
+POST   /print-partners/me/application                        PP-1: { name, legalName?, gstin?, panNumber?, contactName?, address, city, latitude?, longitude?, capabilities?, maxWidthFt?, turnaroundDays?, acceptsQuoteRequests? } — the shop fills in its own details while the application is open; 409 once activated (PATCH /me from then on); PRINT_PARTNER_APPLICATION_UPDATED (and PRINT_PARTNER_APPLIED when the account chose the side)
 PATCH  /print-partners/me                                    { contactName?, email?, address?, city?, latitude?, longitude?, capabilities?, maxWidthFt?, turnaroundDays?, acceptsQuoteRequests? }; PRINT_PARTNER_PROFILE_UPDATED
 PUT    /print-partners/me/rate-card                          { fileId? (uploads purpose PARTNER_RATE_CARD, private, the partner's own), rows: [{ material, sizeClass?, unit, ratePerUnit, minQty?, notes? }] } — a file, rows, or both; replaces the card whole; PARTNER_RATE_CARD_UPDATED
 
@@ -399,6 +410,10 @@ Each documented here and in `print-quotes.service.ts`; none is a decision:
 - `shared/integrations/digio-client` (Lot N) — the partner's Digio session.
 - `app-config` (Lot N) — the review SLA on the partner queue.
 - `notifications` — `notify`. `auth` — `normalizeMobile`, `revokeSessions`.
+- `users` reads back through the `PartnerApplicationPort` it declares (PP-1:
+  `chooseParty('PRINT_PARTNER')` → `applyAsPartner`), filled in
+  `bootstrap/register-modules` — this module reaches `orders`, which notifies
+  through `users`, so `users` may not import it.
 - `identifiers` — the PRT series. `feature-flags` — `requireFeature`.
 - The order read behind the partner's job page (`findOrdersForPrint`:
   listing, agent user, the approved creative) is a join in this module's
@@ -407,8 +422,11 @@ Each documented here and in `print-quotes.service.ts`; none is a decision:
 ## Invariants
 
 - **A partner signs in only once ops activate the account**, and never once
-  deactivated (sessions ended).
-- **A partner is never an existing account.** The mobile must be free.
+  deactivated (sessions ended). PP-1's applicant is the one exception: the
+  account is already signed in (it applied from the app) and sees only its
+  application until the desk activates it.
+- **A partner is never an existing account.** The mobile must be free — or,
+  for an application, the signed-in account must hold no other side.
 - **One job per order; the cost is paid once.** One quote per partner per
   request; one award per request.
 - **The lowest quote wins unless ops say why.**

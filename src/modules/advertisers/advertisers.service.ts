@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { onboardingFactsOf, type OnboardingFacts } from '../../shared/onboarding';
+import type { Request } from 'express';
 import { ApiError } from '../../shared/errors';
+import { logActivity } from '../../shared/audit';
 import { logger } from '../../shared/logging';
 import { Decimal, money } from '../../shared/money';
 import { dateOfBirthToDate, dateOfBirthToString, normalizeMobile } from '../../shared/validation';
@@ -15,11 +17,12 @@ import type {
   TopUpMethod,
   WalletRefundRequest,
   WalletTopUp,
+  PartySizeBand,
 } from '../../shared/database';
 import type { ListQuery, PageQuery } from '../../shared/pagination';
 import { kycSummaryOf, type KycSummary } from '../../shared/kyc-state';
 import { findAgentTier } from '../agents';
-import { acceptInsertionOrder as recordInsertionOrder, isCurrentAcceptance } from '../agreements';
+import { acceptInsertionOrder as recordInsertionOrder, isCurrentAcceptance, openInsertionOrderSigning, type SigningView } from '../agreements';
 import { allocateIdentifier } from '../identifiers';
 import { platformAccount, post as postLedger } from '../ledger';
 import { findPayoutMethod, recordIncentiveOnce } from '../payouts';
@@ -343,6 +346,14 @@ export async function registerAdvertiser(input: RegisterInput): Promise<Advertis
  * them; a profile nobody has claimed that the desk gives a first name gets
  * its account opened and linked, the way a fresh onboarding does.
  */
+/** AG-5: the band is ADX's judgement, set from the desk alone — the grade of agent this account's work is routed to. */
+export async function setAdvertiserBand(id: string, adminId: string, sizeBand: PartySizeBand, req?: Request): Promise<Advertiser> {
+  const advertiser = await getAdvertiser(id);
+  const updated = await repository.updateAdvertiser(id, { sizeBand });
+  await logActivity(adminId, 'ADVERTISER_BAND_SET', { req, targetType: 'Advertiser', targetId: id, module: 'advertisers', metadata: { from: advertiser.sizeBand, to: sizeBand } });
+  return updated;
+}
+
 export async function updateProfile(
   id: string,
   patch: Parameters<typeof repository.updateAdvertiser>[1] & DeskPerson
@@ -551,7 +562,7 @@ export async function acceptInsertionOrder(
   advertiserId: string,
   campaignId: string,
   ctx: AcceptanceContext
-): Promise<{ accepted: true; templateVersion: number; acceptanceId: string }> {
+): Promise<{ accepted: true; templateVersion: number; acceptanceId: string } | { accepted: false; signing: SigningView }> {
   await getAdvertiser(advertiserId);
 
   const [platform, template] = await Promise.all([
@@ -565,6 +576,18 @@ export async function acceptInsertionOrder(
       'Accept the platform agreement before an insertion order'
     );
   }
+
+  // DS-3: above the threshold, or for a listed band, the insertion order is
+  // signed rather than clicked — the request is handed back for the app's
+  // signing screen and the acceptance row is written when it completes.
+  let signing: SigningView | null = null;
+  try {
+    signing = await openInsertionOrderSigning(campaignId, advertiserId, ctx.acceptedByUserId);
+  } catch (cause) {
+    // The policy's own refusals stand; anything else is the rail, and the click is recorded instead.
+    if (cause instanceof ApiError) throw cause;
+  }
+  if (signing) return { accepted: false, signing };
 
   return recordInsertionOrder(campaignId, advertiserId, ctx);
 }

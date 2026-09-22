@@ -247,3 +247,6 @@ export const failRefundSchema = z.object({ reason: z.string().trim().min(1).max(
 export const kycDecisionSchema = z.object({
   status: z.enum(['VERIFIED', 'REJECTED']),
 });
+
+/** AG-5: `PATCH /advertisers/:id/band` — the importance band, ADX's own judgement about who it is dealing with. */
+export const partyBandSchema = z.object({ sizeBand: z.enum(['INDIVIDUAL', 'SMALL_AGENCY', 'LARGE_AGENCY']) });

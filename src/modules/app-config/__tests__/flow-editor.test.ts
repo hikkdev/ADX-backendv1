@@ -101,6 +101,8 @@ describe('GET /config/schema and GET /config/flows', () => {
       { key: 'onboarding', version: 1, updatedAt: '2026-09-12T00:00:00.000Z', label: 'Onboarding', description: expect.stringContaining('onboarding ladder'), audience: 'Publishers and advertisers', shape: 'ladder', stored: true },
       { key: 'agent-job', version: 0, updatedAt: null, label: 'Agent job', description: expect.stringContaining('A1–A8'), audience: 'Agents', shape: 'steps', stored: false },
       { key: 'employee-intake', version: 0, updatedAt: null, label: 'Employee intake', description: expect.stringContaining('intake ladder'), audience: 'Employees', shape: 'steps', stored: false },
+      // LH7: the invite landing's copy per side.
+      { key: 'lead-landing', version: 0, updatedAt: null, label: 'Invite landing', description: expect.stringContaining('adx.in/j/<code>'), audience: 'Prospects', shape: 'steps', stored: false },
     ]);
   });
 
@@ -135,6 +137,9 @@ describe('GET /config/schema and GET /config/flows', () => {
     expect(schema.body.data.flows['agent-job'].proofOptions).toEqual(expect.arrayContaining([{ key: 'CHECK_IN', label: 'Check in' }]));
     expect(schema.body.data.flows['employee-intake'].proofOptions).toEqual(expect.arrayContaining([{ key: 'govIdFrontUrl', label: 'Government ID front' }]));
     expect(schema.body.data.flows['employee-intake'].requiredProofs).toEqual(['govIdFrontUrl', 'panFrontUrl', 'addressProofUrl', 'selfieUrl']);
+    // LH7: the landing's blocks may sit on both sides; nothing is required.
+    expect(schema.body.data.flows['lead-landing']).toMatchObject({ repeatable: true, requiredProofs: [], proofs: expect.arrayContaining(['RATE_ESTIMATE', 'PACKAGES', 'PROPOSALS']) });
+    expect(schema.body.data.flows['agent-job'].repeatable).toBe(false);
   });
 });
 
@@ -280,6 +285,27 @@ describe('a party mid-ladder', () => {
     expect((await getFlow('onboarding', 3))?.['version']).toBe(3);
     expect((await getFlow('onboarding', 1))?.['version']).toBe(3); // pruned: today's ladder rather than none
     expect(await getFlow('campaign')).toBeNull();
+  });
+});
+
+describe('PATCH /config/flows/lead-landing (LH7)', () => {
+  it('takes a block on both sides, refuses it twice on one side, and refuses an unknown block', async () => {
+    const ladder = {
+      label: 'Invite landing',
+      steps: [
+        { key: 'publisher', number: 1, title: 'Earn from your wall', hint: 'One\nTwo', cta: 'Get my rate', proofs: [{ key: 'RATE_ESTIMATE', label: 'What spaces like yours earn' }, { key: 'PROPOSALS', label: 'Your estimate' }] },
+        { key: 'advertiser', number: 2, title: 'Reach your customers', proofs: [{ key: 'PACKAGES', label: 'Packages' }, { key: 'PROPOSALS', label: 'Your proposal' }] },
+      ],
+    };
+    const ok = await request(app()).patch('/api/v1/config/flows/lead-landing').set('Authorization', `Bearer ${admin}`).send(ladder);
+    expect(ok.status).toBe(200);
+    expect(ok.body.data.version).toBe(1);
+    const twice = { steps: [{ ...ladder.steps[0], proofs: [...ladder.steps[0]!.proofs, { key: 'PROPOSALS', label: 'Again' }] }] };
+    const refused = await request(app()).patch('/api/v1/config/flows/lead-landing').set('Authorization', `Bearer ${admin}`).send(twice);
+    expect(refused.status).toBe(400);
+    expect(JSON.stringify(refused.body.error.details.issues)).toContain('on this step twice');
+    const unknown = { steps: [{ key: 'publisher', number: 1, title: 'x', proofs: [{ key: 'NOPE', label: 'x' }] }] };
+    expect((await request(app()).patch('/api/v1/config/flows/lead-landing').set('Authorization', `Bearer ${admin}`).send(unknown)).status).toBe(400);
   });
 });
 

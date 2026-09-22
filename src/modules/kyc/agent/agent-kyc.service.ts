@@ -3,11 +3,11 @@ import { ApiError } from '../../../shared/errors';
 import { auditDiff, logActivity } from '../../../shared/audit';
 import type { KycStatus } from '../../../shared/database';
 import { kycStateCounts } from '../../../shared/kyc-state';
-import { agentExists, findAgentProfile } from '../../agents';
+import { agentExists, findAgentProfile, upsertDocumentsFromKyc } from '../../agents';
 import { notify } from '../../notifications';
 import { kycChannelLabel, pageMeta, type KycRequestInput } from '../kyc.schema';
 import { kycCaseExtras } from '../case-read';
-import { initiateAgentDigioKyc } from './agent-digio.service';
+import { agentDigioStatus, initiateAgentDigioKyc } from './agent-digio.service';
 import { prismaAgentKycRepository as repository } from './prisma-agent-kyc.repository';
 import type { AgentKycFilter } from './agent-kyc.repository';
 import type { AgentKycDocuments } from './agent-kyc.schema';
@@ -51,6 +51,21 @@ export async function getMyAgentKyc(userId: string) {
   return repository.findByAgentId(agent.id);
 }
 
+/** KYC-D: the agent starts Digio from their own phone — the primary path; the papers are the fallback. */
+export async function initiateMyAgentDigioKyc(userId: string, now = new Date()) {
+  const profile = await findAgentProfile(userId);
+  if (!profile) throw new ApiError(404, 'NOT_FOUND', 'Agent profile not found');
+  const agent = await repository.findAgentContact(profile.id);
+  if (!agent) throw new ApiError(404, 'NOT_FOUND', 'Agent not found');
+  return initiateAgentDigioKyc(agent, { onBehalf: false }, now);
+}
+
+export async function myAgentDigioStatus(userId: string) {
+  const profile = await findAgentProfile(userId);
+  if (!profile) throw new ApiError(404, 'NOT_FOUND', 'Agent profile not found');
+  return agentDigioStatus(profile.id);
+}
+
 /**
  * Recording is an upsert: ops can record what they have and come back for
  * the rest, and a fresh recording after a rejection sends the record back
@@ -58,7 +73,28 @@ export async function getMyAgentKyc(userId: string) {
  */
 export async function recordAgentKyc(agentId: string, data: AgentKycDocuments, recordedById: string) {
   if (!(await agentExists(agentId))) throw new ApiError(404, 'NOT_FOUND', 'Agent not found');
-  return repository.record(agentId, data, recordedById);
+  const recorded = await repository.record(agentId, data, recordedById);
+  // AG-1: the same papers land in the application's document table, so the ladder and this desk agree.
+  await upsertDocumentsFromKyc(agentId, data, recordedById).catch(() => undefined);
+  return recorded;
+}
+
+/**
+ * AG-1: an applicant filed an identity paper in the app — it is written onto
+ * the desk's KYC record (the slot, PENDING, submitted now, recorded via APP)
+ * so the KYC queue sees it. Registered on the application port by bootstrap.
+ */
+export async function mirrorAgentIdentityDocument(agentId: string, userId: string, kind: string, url: string, number: string | null): Promise<void> {
+  const slot: AgentKycDocuments =
+    kind === 'AADHAAR_FRONT' ? { govIdType: 'AADHAAR', govIdFrontUrl: url }
+    : kind === 'AADHAAR_BACK' ? { govIdType: 'AADHAAR', govIdBackUrl: url }
+    : kind === 'PAN' ? { panFrontUrl: url, ...(number && /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(number.toUpperCase()) ? { panNumber: number.toUpperCase() } : {}) }
+    : kind === 'SELFIE' ? { selfieUrl: url }
+    : kind === 'ADDRESS_PROOF' ? { addressProofUrl: url }
+    : kind === 'BANK_PROOF' ? { bankProofUrl: url }
+    : {};
+  if (Object.keys(slot).length === 0) return;
+  await repository.recordFromApp(agentId, slot, userId);
 }
 
 export async function reviewAgentKyc(agentId: string, status: KycStatus, rejectionReason: string | undefined, reviewedById: string) {
@@ -90,7 +126,7 @@ export async function requestAgentKyc(agentId: string, input: KycRequestInput, b
     throw new ApiError(409, 'KYC_ALREADY_VERIFIED', 'This agent is already verified; there is nothing to request');
   }
 
-  const digio = input.channel === 'DIGIO' ? await initiateAgentDigioKyc(agent, now) : null;
+  const digio = input.channel === 'DIGIO' ? await initiateAgentDigioKyc(agent, { onBehalf: true }, now) : null;
   const kyc = await repository.requestKyc(agentId, { requestedById: byUserId, requestedChannel: input.channel, at: now });
 
   await logActivity(byUserId, 'AGENT_KYC_REQUESTED', {

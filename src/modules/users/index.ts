@@ -6,6 +6,9 @@
  * concern rather than by table; see the README.
  */
 export { userRouter } from './users.routes';
+/** PP-1: the print shop's application door, filled by `print-partners` at bootstrap (see users.ports.ts). */
+export { registerPartnerApplicationPort } from './users.ports';
+export type { PartnerApplicationPort } from './users.ports';
 
 /**
  * Narrow lookups for modules that would otherwise query the User table:
@@ -19,6 +22,9 @@ export { getUserDisplayName, userExists } from './users.service';
  * email — before `employees.createEmployee` gives it the record.
  */
 export { createUser } from './users.service';
+/** LH7: the invite landing opens the lead's side for the account the OTP proved, through the same door the app uses. */
+export { chooseParty } from './users.service';
+export type { PartyChoice } from './users.service';
 
 /**
  * E6: `{ id, name }` per actor id in one query, for the reads that join who

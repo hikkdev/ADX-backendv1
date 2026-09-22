@@ -13,6 +13,12 @@ export const agreementKindSchema = z.enum([
   'INSERTION_ORDER',
   'PACKAGE_SALE',
   'JOB_TERMS',
+  'AGENT_PUBLISHER_PLATFORM',
+  'AGENT_ADVERTISER_PLATFORM',
+  // DS-1: the three signed-only kinds.
+  'EMPLOYEE_APPOINTMENT',
+  'PRINT_PARTNER_SERVICE',
+  'PUBLISHER_LICENCE',
 ]);
 
 export const partyTypeSchema = z.enum(['publisher', 'advertiser', 'agent']);

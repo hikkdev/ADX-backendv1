@@ -1,5 +1,5 @@
 import { prisma } from '../../shared/database';
-import { pickAssignable, priorityWindowStart } from '../../shared/dispatch';
+import { pickAssignable, priorityWindowStart, type DispatchAsk } from '../../shared/dispatch';
 import { money } from '../../shared/money';
 import {
   AGENT_ACTIVE_ORDER_STATUSES,
@@ -40,6 +40,10 @@ export const prismaAgentsRepository: AgentsRepository = {
         // The nested `user` create puts this write on Prisma's checked shape, where the key is the relation, not the scalar.
         ...(input.cityId ? { cityRef: { connect: { id: input.cityId } } } : {}),
         state: input.state ?? null,
+        // AG-1: the desk's one-step create is ACTIVE from birth; an application starts at PROFILE.
+        stage: input.stage ?? 'ACTIVE',
+        sourceKind: 'DESK',
+        ...(input.stage === 'PROFILE' ? {} : { activatedAt: new Date() }),
         user: {
           create: {
             mobile: input.mobile,
@@ -76,6 +80,9 @@ export const prismaAgentsRepository: AgentsRepository = {
           city: input.city ?? null,
           cityId: input.cityId ?? null,
           state: input.state ?? null,
+          stage: input.stage ?? 'ACTIVE',
+          sourceKind: 'DESK',
+          ...(input.stage === 'PROFILE' ? {} : { activatedAt: new Date() }),
         },
       });
     });
@@ -173,7 +180,7 @@ export const prismaAgentsRepository: AgentsRepository = {
     return agent?.user ? { id: agent.id, userId: agent.user.id } : null;
   },
 
-  async findAssignable(excludeIds: string[], now: Date = new Date()) {
+  async findAssignable(excludeIds: string[], ask: DispatchAsk = {}, now: Date = new Date()) {
     // D5: only agents offered work (profile ACTIVE), and only under their own
     // cap. The cap is a comparison between two columns of the same row, which
     // the query language cannot express, so a short list is read and filtered.
@@ -193,11 +200,17 @@ export const prismaAgentsRepository: AgentsRepository = {
         id: true,
         createdAt: true,
         maxActiveOrders: true,
+        // AG-5: the grade the band asks for, the tier, and where they are.
+        grade: true,
+        tier: true,
+        tierLevel: true,
+        currentLatitude: true,
+        currentLongitude: true,
         _count: { select: { orders: { where: { status: { in: [...AGENT_ACTIVE_ORDER_STATUSES] } } } } },
         agentAssignments: { where: { assignedAt: { gte: priorityWindowStart(now) } }, select: { status: true } },
       },
       orderBy: { createdAt: 'asc' },
-      take: 25,
+      take: 50,
     });
     const open = pickAssignable(
       candidates.map((candidate) => ({
@@ -206,7 +219,13 @@ export const prismaAgentsRepository: AgentsRepository = {
         maxActiveOrders: candidate.maxActiveOrders,
         activeOrders: candidate._count.orders,
         recentOffers: candidate.agentAssignments,
+        grade: candidate.grade,
+        tier: candidate.tier,
+        tierLevel: candidate.tierLevel,
+        latitude: candidate.currentLatitude,
+        longitude: candidate.currentLongitude,
       })),
+      ask,
     );
     return open ? { id: open.id } : null;
   },
@@ -218,9 +237,9 @@ export const prismaAgentsRepository: AgentsRepository = {
   async findWorkState(id: string) {
     const agent = await prisma.agentProfile.findUnique({
       where: { id },
-      select: { status: true, suspensionScopes: true },
+      select: { status: true, suspensionScopes: true, stage: true, user: { select: { roles: { select: { role: true } } } } },
     });
-    return agent ? { status: agent.status, scopes: agent.suspensionScopes } : null;
+    return agent ? { status: agent.status, scopes: agent.suspensionScopes, stage: agent.stage, roles: agent.user.roles.map((r) => r.role) } : null;
   },
 
   findZone(id: string) {
@@ -262,6 +281,9 @@ export const prismaAgentsRepository: AgentsRepository = {
         suspensionScopes: true,
         suspensionReason: true,
         suspendedAt: true,
+        stage: true,
+        grade: true,
+        activatedAt: true,
         user: { select: { name: true, roles: { select: { role: true } } } },
       },
     });
@@ -280,6 +302,9 @@ export const prismaAgentsRepository: AgentsRepository = {
       suspensionScopes: agent.suspensionScopes,
       suspensionReason: agent.suspensionReason,
       suspendedAt: agent.suspendedAt,
+      stage: agent.stage,
+      grade: agent.grade,
+      activatedAt: agent.activatedAt,
     };
   },
 

@@ -19,7 +19,7 @@ const findAgentProfile = vi.hoisted(() => vi.fn());
 const holdsLiveGrant = vi.hoisted(() => vi.fn());
 
 vi.mock('../prisma-listings.repository', () => ({ prismaListingsRepository: repository }));
-vi.mock('../../agents', () => ({ findAgentProfile }));
+vi.mock('../../agents', () => ({ findAgentProfile, findWorkingAgentProfile: findAgentProfile }));
 vi.mock('../../access-grants', () => ({ holdsLiveGrant }));
 vi.mock('../../pricing', () => ({ classifySpot: vi.fn(), activeSurge: vi.fn() }));
 

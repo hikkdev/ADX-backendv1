@@ -89,8 +89,8 @@ export async function visitLocationHandler(req: Request, res: Response): Promise
 }
 
 export async function completeVisitHandler(req: Request, res: Response): Promise<void> {
-  const { notes } = parse(completeVisitSchema, req.body ?? {});
-  res.json({ success: true, data: await completeVisit(id(req), req.user!.sub, notes) });
+  const { notes, proofFileId, latitude, longitude } = parse(completeVisitSchema, req.body ?? {});
+  res.json({ success: true, data: await completeVisit(id(req), req.user!.sub, notes, { proofFileId, latitude, longitude }) });
 }
 
 export async function patchVisitHandler(req: Request, res: Response): Promise<void> {

@@ -1,6 +1,6 @@
 import { prisma } from '../../../shared/database';
 import { Decimal } from '../../../shared/money';
-import type { LeaderboardRepository } from './leaderboard.repository';
+import type { LeadFigures, LeaderboardRepository } from './leaderboard.repository';
 
 export const prismaLeaderboardRepository: LeaderboardRepository = {
   async cohort(city) {
@@ -34,5 +34,33 @@ export const prismaLeaderboardRepository: LeaderboardRepository = {
       _sum: { amount: true },
     });
     return new Map(groups.map((group) => [group.agentId, new Decimal(group._sum.amount ?? 0)]));
+  },
+
+  async leadFiguresByAgent(agentIds, window) {
+    if (agentIds.length === 0) return new Map();
+    const inside = { ...(window.from ? { gte: window.from } : {}), lt: window.to };
+    const [paid, converted] = await Promise.all([
+      prisma.agentIncentive.groupBy({
+        by: ['agentId'],
+        where: { agentId: { in: agentIds }, status: 'CREDITED', event: { in: ['LEAD_CONVERTED', 'LEAD_ACTIVATED', 'LEAD_RETAINED'] }, createdAt: inside },
+        _sum: { amount: true },
+      }),
+      prisma.lead.groupBy({
+        by: ['assignedAgentId'],
+        where: { assignedAgentId: { in: agentIds }, status: 'CONVERTED', convertedAt: inside },
+        _count: { _all: true },
+      }),
+    ]);
+    const figures = new Map<string, LeadFigures>();
+    const of = (agentId: string): LeadFigures => {
+      const existing = figures.get(agentId);
+      if (existing) return existing;
+      const fresh = { fromLeads: new Decimal(0), conversions: 0 };
+      figures.set(agentId, fresh);
+      return fresh;
+    };
+    for (const group of paid) of(group.agentId).fromLeads = new Decimal(group._sum.amount ?? 0);
+    for (const group of converted) if (group.assignedAgentId) of(group.assignedAgentId).conversions = group._count._all;
+    return figures;
   },
 };

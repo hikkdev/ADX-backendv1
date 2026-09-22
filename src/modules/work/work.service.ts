@@ -41,6 +41,8 @@ import {
   type CreateProjectInput,
   type CreateTaskInput,
   type IssuesQuery,
+  type LinkedKind,
+  type Priority,
   type MyStatusChangeInput,
   type MyTasksQuery,
   type OverviewQuery,
@@ -477,6 +479,65 @@ export async function createTask(input: CreateTaskInput, actor: Actor, now = new
   const by = input.assigneeUserIds.length > 0 ? await actorName(actor) : null;
   for (const userId of new Set(input.assigneeUserIds)) await notifyAssigned(row, userId, by);
   return getTask(row.id, now);
+}
+
+/**
+ * LH6: a task the platform raises on its own — a callback a lead asked for
+ * by a missed call, the IVR or a reply; a "call them" step of a sequence.
+ * No actor, so no audit row (the activity log needs a user); the lead's
+ * own thread records why it exists. `tag` names the kind so the day read
+ * and the tele queue can find it; one open task per (tag, lead) at a time —
+ * a second ask moves the deadline rather than doubling the work.
+ */
+export async function createSystemTask(
+  input: { title: string; description?: string | null; linkedKind: LinkedKind; linkedId: string; assigneeUserIds: readonly string[]; deadline?: Date | null; priority?: Priority; tag: string },
+  now = new Date(),
+): Promise<{ id: string; displayId: string | null; created: boolean }> {
+  const { rows } = await repository.findTasks({ linkedKind: input.linkedKind, linkedId: input.linkedId, tag: input.tag, statuses: OPEN_STATUSES }, { skip: 0, take: 1 }, { sort: 'DEADLINE', dir: 'asc' });
+  const open = rows[0];
+  if (open) {
+    if (input.deadline && (!open.deadline || open.deadline.getTime() > input.deadline.getTime())) await repository.updateTask(open.id, { deadline: input.deadline });
+    const held = new Set(open.assignees.map((a) => a.userId));
+    const missing = input.assigneeUserIds.filter((id) => !held.has(id));
+    if (missing.length > 0) await repository.setAssignees(open.id, [...held, ...missing], now);
+    return { id: open.id, displayId: open.displayId, created: false };
+  }
+  const displayId = await allocateIdentifier('TASK');
+  const row = await repository.createTask({
+    displayId,
+    projectId: null,
+    parentTaskId: null,
+    title: input.title,
+    description: input.description ?? null,
+    status: 'TODO',
+    priority: input.priority ?? 'HIGH',
+    startDate: null,
+    deadline: input.deadline ?? null,
+    effortEstimateH: null,
+    linkedKind: input.linkedKind,
+    linkedId: input.linkedId,
+    recurrence: null,
+    tags: [input.tag],
+    createdById: input.assigneeUserIds[0] ?? 'system',
+    assignedById: null,
+  });
+  const assignees = [...new Set(input.assigneeUserIds)];
+  if (assignees.length > 0) await repository.setAssignees(row.id, assignees, now);
+  for (const userId of assignees) await notifyAssigned(row, userId, null);
+  return { id: row.id, displayId, created: true };
+}
+
+/** LH6: the open tasks of one tag on a person's plate, due by an instant — the agent's callbacks for the day read. */
+export async function openTaggedTasks(userId: string, tag: string, dueBefore: Date): Promise<{ id: string; displayId: string | null; title: string; status: string; deadline: Date | null; linkedKind: string | null; linkedId: string | null }[]> {
+  const { rows } = await repository.findTasks({ assigneeUserId: userId, tag, statuses: OPEN_STATUSES, dueTo: dueBefore }, { skip: 0, take: 50 }, { sort: 'DEADLINE', dir: 'asc' });
+  return rows.map((row) => ({ id: row.id, displayId: row.displayId, title: row.title, status: row.status, deadline: row.deadline, linkedKind: row.linkedKind, linkedId: row.linkedId }));
+}
+
+/** LH6: close a system task from the thing it was about — the callback made, the call logged. */
+export async function completeTaggedTasks(linkedKind: LinkedKind, linkedId: string, tag: string, now = new Date()): Promise<number> {
+  const { rows } = await repository.findTasks({ linkedKind, linkedId, tag, statuses: OPEN_STATUSES }, { skip: 0, take: 20 }, { sort: 'DEADLINE', dir: 'asc' });
+  for (const row of rows) await repository.updateTask(row.id, { status: 'VERIFIED', progress: 100, completedAt: now });
+  return rows.length;
 }
 
 const dedupeReviewers = (reviewers: readonly { userId: string; approver: boolean }[]) => {

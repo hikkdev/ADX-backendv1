@@ -27,6 +27,12 @@ export {
   confirmPickupHandover,
   listScansFor,
   listScansBy,
+  getOrCreateIdentityQr,
+  describeIdentity,
+  askOf,
+  tokenOf,
+  isIdentityType,
+  REQUESTED_GRANT_MINUTES,
 } from './qr.service';
 export type { ScanWithScanner } from './qr.repository';
 export type { QrOptions } from './qr.service';
@@ -45,7 +51,7 @@ export {
   registerAccessGrantPort,
   registerQrRefLabelPort,
 } from './qr.ports';
-export type { QrRefLabelPort, QrRefLabel } from './qr.ports';
+export type { QrRefLabelPort, QrRefLabel, IdentitySummary, AccessAsk } from './qr.ports';
 export type {
   PublisherOnboardingPort,
   ClaimedPublisher,

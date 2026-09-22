@@ -18,7 +18,7 @@ import {
   reviewKyc as reviewKycAtDesk,
   splitKycSubmission,
 } from './kyc/kyc-desk.service';
-import type { KycStatus } from '../../shared/database';
+import type { KycStatus, PartySizeBand } from '../../shared/database';
 import { prismaPublishersRepository as repository } from './prisma-publishers.repository';
 import { logActivity } from '../../shared/audit';
 import { slaAge } from '../../shared/time';
@@ -106,6 +106,15 @@ export async function createPublisher(data: NewPublisher & DeskPerson) {
  * fields written to their account. A publisher with no account yet who is
  * given a first name gets one opened, the way the desk onboarding does.
  */
+/** AG-5: the band is ADX's judgement, set from the desk alone — the withdrawal ladder and the agent grade both read it. */
+export async function setPublisherBand(publisherId: string, adminId: string, sizeBand: PartySizeBand, req?: Request) {
+  const publisher = await repository.findById(publisherId);
+  if (!publisher) throw new ApiError(404, 'NOT_FOUND', 'Publisher not found');
+  const updated = await repository.update(publisherId, { sizeBand });
+  await logActivity(adminId, 'PUBLISHER_BAND_SET', { req, targetType: 'Publisher', targetId: publisherId, module: 'publishers', metadata: { from: publisher.sizeBand, to: sizeBand } });
+  return updated;
+}
+
 export async function updatePublisherAtDesk(publisherId: string, adminId: string, input: PublisherPatch & DeskPerson) {
   const publisher = await repository.findById(publisherId);
   if (!publisher) throw new ApiError(404, 'NOT_FOUND', 'Publisher not found');

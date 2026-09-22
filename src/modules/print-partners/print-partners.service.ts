@@ -1,4 +1,4 @@
-import { findActivityRows } from '../../shared/audit';
+import { findActivityRows, logActivity } from '../../shared/audit';
 import { ApiError } from '../../shared/errors';
 import { Decimal, money, type Money } from '../../shared/money';
 import { monthWindowIST } from '../../shared/time';
@@ -21,6 +21,7 @@ import { ensureWallet, findWalletFor, listEntries, snapshot, sumEntries } from '
 import { prismaPrintPartnersRepository as repository } from './prisma-print-partners.repository';
 import type { PartnerFileRow, PartnerListFilter, PartnerPatch, PartnerRow } from './print-partners.repository';
 import type {
+  ApplicationDetailsInput,
   CreatePartnerInput,
   PartnerInvoiceInput,
   PartnerWithdrawalInput,
@@ -97,6 +98,88 @@ export async function createPartner(input: CreatePartnerInput): Promise<PartnerR
   // wallet id is what the on-behalf withdrawal names.
   await ensureWallet({ kind: 'PRINT_PARTNER', id: partner.id }, walletLabelFor(partner));
   return partner;
+}
+
+/**
+ * PP-1 (the owner, 21 Sep 2026): a print shop applies from the app. The
+ * same row the desk would create, written by the applicant with `appliedAt`
+ * stamped and the account left active so they can watch the review; the
+ * desk reviews the details and the KYC and activates through the same
+ * door as ever (`activatePartner`), or takes them off the roster with a
+ * reason. A number that already holds a publisher, advertiser or agent
+ * account is refused — the app picks a floor by role, and a shop shares a
+ * phone with nobody. Idempotent: applying twice returns the application.
+ */
+export async function applyAsPartner(
+  userId: string,
+  input: { name: string; legalName?: string | null; mobile: string; email?: string | null },
+  now = new Date(),
+): Promise<{ partner: PartnerRow; created: boolean }> {
+  const existing = await repository.findPartnerByUserId(userId);
+  if (existing) return { partner: existing, created: false };
+  const roles = await repository.findUserRoles(userId);
+  if (roles.some((role) => role === 'PUBLISHER' || role === 'ADVERTISER' || role === 'AGENT_PUBLISHER' || role === 'AGENT_ADVERTISER')) {
+    throw new ApiError(409, 'CONFLICT', 'This number already has an ADX account. A print shop needs its own number.');
+  }
+  const displayId = await allocateIdentifier('PARTNER');
+  const partner = await repository.createApplication({
+    userId,
+    appliedAt: now,
+    displayId,
+    mobile: normalizeMobile(input.mobile),
+    name: input.name,
+    legalName: input.legalName ?? null,
+    gstin: null,
+    panNumber: null,
+    contactName: null,
+    email: input.email ?? null,
+    address: null,
+    city: null,
+    latitude: null,
+    longitude: null,
+    capabilities: [],
+    maxWidthFt: null,
+    turnaroundDays: null,
+    notes: null,
+  });
+  await ensureWallet({ kind: 'PRINT_PARTNER', id: partner.id }, walletLabelFor(partner));
+  await logActivity(userId, 'PRINT_PARTNER_APPLIED', undefined, { partnerId: partner.id, displayId });
+  return { partner, created: true };
+}
+
+/**
+ * PP-1: the applicant fills in what the desk would have typed. Open only
+ * while the application is — a partner the desk has activated changes the
+ * legal identity at the desk, and the rest through `updateMe`. The city is
+ * gated like the desk's create, so a shop in a city with print partners off
+ * hears CITY_NOT_OPEN now rather than at activation.
+ */
+export async function completeApplication(partner: PartnerRow, input: ApplicationDetailsInput): Promise<{ before: PartnerRow; after: PartnerRow }> {
+  if (!partner.appliedAt || partner.activatedAt) {
+    throw new ApiError(409, 'CONFLICT', 'This account is past its application. Ask ADX to change these details.');
+  }
+  if (input.email && input.email !== partner.email && (await repository.emailTaken(input.email))) {
+    throw new ApiError(409, 'CONFLICT', 'That email belongs to another account');
+  }
+  if (input.city !== undefined && input.city !== null) await assertCityAllows(input.city, 'printPartners');
+  const patch: PartnerPatch = {};
+  if (input.name !== undefined) patch.name = input.name;
+  if (input.legalName !== undefined) patch.legalName = input.legalName;
+  if (input.gstin !== undefined) patch.gstin = input.gstin;
+  if (input.panNumber !== undefined) patch.panNumber = input.panNumber;
+  if (input.contactName !== undefined) patch.contactName = input.contactName;
+  if (input.email !== undefined) patch.email = input.email;
+  if (input.address !== undefined) patch.address = input.address;
+  if (input.city !== undefined) patch.city = input.city;
+  if (input.latitude !== undefined) patch.latitude = input.latitude;
+  if (input.longitude !== undefined) patch.longitude = input.longitude;
+  if (input.capabilities !== undefined) patch.capabilities = input.capabilities;
+  if (input.maxWidthFt !== undefined) patch.maxWidthFt = input.maxWidthFt ? new Decimal(input.maxWidthFt) : null;
+  if (input.turnaroundDays !== undefined) patch.turnaroundDays = input.turnaroundDays;
+  if (input.acceptsQuoteRequests !== undefined) patch.acceptsQuoteRequests = input.acceptsQuoteRequests;
+  if (input.notes !== undefined) patch.notes = input.notes;
+  const after = await repository.updatePartner(partner.id, await withCityKey(patch));
+  return { before: partner, after };
 }
 
 /** O-B: the label per partner id, for `section-overviews`. */

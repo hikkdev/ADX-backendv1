@@ -5,6 +5,8 @@ import { ApiError } from '../../shared/errors';
 import { logger } from '../../shared/logging';
 import { sendEmail as sendThroughDoor } from '../../shared/email';
 import { isSmsKind, sendSms, type DeliveryReport, type SmsRailName } from '../../shared/sms';
+import { getEffectiveLeadChannelsConfig } from '../../shared/integrations';
+import { whatsappAdapter } from '../../shared/outreach';
 import type { DeliveryAttempt, NotificationChannel, NotificationDelivery, NotificationTemplate, NotificationType, Prisma } from '../../shared/database';
 import type { ListQuery } from '../../shared/pagination';
 import { dayWindowIST } from '../../shared/time';
@@ -44,9 +46,14 @@ import type { NewNotification } from './notifications.types';
  * gone before the log is read by anyone.
  */
 
-/** G6 (Q103/133): PUSH is the third outbound channel — to every device the person has registered. */
-export type OutboundChannel = 'EMAIL' | 'SMS' | 'PUSH';
-const OUTBOUND: readonly OutboundChannel[] = ['EMAIL', 'SMS', 'PUSH'];
+/**
+ * G6 (Q103/133): PUSH is the third outbound channel — to every device the
+ * person has registered. LH6: WHATSAPP is the fourth — the mobile on file,
+ * through the outreach hub's BSP adapter (`shared/outreach`); a template's
+ * `smsBody` is the text, or the card's approved template of the same key.
+ */
+export type OutboundChannel = 'EMAIL' | 'SMS' | 'PUSH' | 'WHATSAPP';
+const OUTBOUND: readonly OutboundChannel[] = ['EMAIL', 'SMS', 'PUSH', 'WHATSAPP'];
 
 export type SkipReason = 'NO_TEMPLATE' | 'NO_ADDRESS' | 'PREFERENCE_OFF' | 'UNSUBSCRIBED' | 'NO_SMS_KIND' | 'ACCOUNT_CLOSED' | 'WEEKLY_CAP' | 'NO_DEVICE';
 
@@ -95,6 +102,7 @@ async function forgetAddress(deliveryId: string): Promise<void> {
 
 function addressFor(recipient: { email?: string | null | undefined; mobile?: string | null | undefined } | null, channel: OutboundChannel): string | null {
   if (!recipient || channel === 'PUSH') return null;
+  // WhatsApp goes to the same number an SMS would.
   const value = channel === 'EMAIL' ? recipient.email : recipient.mobile;
   return value && value.trim() ? value.trim() : null;
 }
@@ -107,7 +115,7 @@ async function resolveAddress(row: NotificationDelivery): Promise<string | null>
   } catch {
     /* fall through to the user row */
   }
-  if (!row.userId || (row.channel !== 'EMAIL' && row.channel !== 'SMS')) return null;
+  if (!row.userId || (row.channel !== 'EMAIL' && row.channel !== 'SMS' && row.channel !== 'WHATSAPP')) return null;
   const recipient = await comms.findRecipient(row.userId);
   const current = addressFor(recipient, row.channel);
   if (!current) return null;
@@ -281,6 +289,29 @@ async function sendEmail(
   };
 }
 
+/**
+ * LH6: WhatsApp through the outreach adapter. The card's approved template
+ * of the same key goes when there is one (a business-initiated message
+ * must be one); else the template's `smsBody` as free text, which the BSP
+ * delivers only inside a customer-service window. `configured` false is a
+ * SKIPPED row, the way an unconfigured email door is.
+ */
+async function sendWhatsApp(
+  to: string,
+  template: NotificationTemplate,
+  vars: Record<string, string>,
+): Promise<{ ok: true; provider: string; providerId: string | null; response: string | null } | { ok: false; code: 'NOT_CONFIGURED' | 'PROVIDER_ERROR'; message: string }> {
+  const description = await whatsappAdapter.describe();
+  if (!description.configured) return { ok: false, code: 'NOT_CONFIGURED', message: `WhatsApp is not configured (${description.missing.join(', ')} missing)` };
+  const provider = `whatsapp:${description.provider ?? 'bsp'}`;
+  const approved = (await getEffectiveLeadChannelsConfig()).whatsapp?.templates?.[template.key];
+  const outcome = approved
+    ? await whatsappAdapter.sendTemplate({ to, template: approved, values: vars })
+    : await whatsappAdapter.sendText({ to, text: renderText(template.smsBody ?? template.pushBody ?? '', vars) });
+  if (!outcome.ok) return outcome.code === 'NOT_CONFIGURED' ? { ok: false, code: 'NOT_CONFIGURED', message: outcome.message } : { ok: false, code: 'PROVIDER_ERROR', message: outcome.message };
+  return { ok: true, provider, providerId: outcome.providerId, response: outcome.response };
+}
+
 /** Lot G (Q121): the rail's raw answer, cut to what a row holds, with any address inside it masked. */
 export const ATTEMPT_RESPONSE_MAX = 1_000;
 
@@ -324,7 +355,7 @@ async function recordAttempt(
 export async function attemptDelivery(deliveryId: string, now = new Date()): Promise<NotificationDelivery | null> {
   const row = await comms.findDelivery(deliveryId);
   if (!row || row.status !== 'QUEUED') return row;
-  if (row.channel !== 'EMAIL' && row.channel !== 'SMS' && row.channel !== 'PUSH') {
+  if (row.channel !== 'EMAIL' && row.channel !== 'SMS' && row.channel !== 'PUSH' && row.channel !== 'WHATSAPP') {
     return comms.updateDelivery(row.id, { status: 'SKIPPED', lastError: 'CHANNEL_NOT_OUTBOUND' });
   }
 
@@ -359,6 +390,19 @@ export async function attemptDelivery(deliveryId: string, now = new Date()): Pro
       }
       await recordAttempt(row, attempts, { ok: true, provider, providerMessageId, responseText });
       return await comms.updateDelivery(row.id, { status: 'SENT', attempts, provider, providerMessageId, lastError: null, sentAt: now });
+    }
+
+    if (row.channel === 'WHATSAPP') {
+      const outcome = await sendWhatsApp(address, template, vars);
+      await forgetAddress(row.id);
+      if (!outcome.ok) {
+        const skipped = outcome.code === 'NOT_CONFIGURED';
+        await recordAttempt(row, attempts, { ok: false, provider: 'whatsapp', error: skipped ? 'WHATSAPP_UNCONFIGURED' : outcome.message });
+        if (skipped) return await comms.updateDelivery(row.id, { status: 'SKIPPED', attempts, provider: 'whatsapp', lastError: 'WHATSAPP_UNCONFIGURED' });
+        throw new Error(outcome.message);
+      }
+      await recordAttempt(row, attempts, { ok: true, provider: outcome.provider, providerMessageId: outcome.providerId, responseText: outcome.response });
+      return await comms.updateDelivery(row.id, { status: 'SENT', attempts, provider: outcome.provider, providerMessageId: outcome.providerId, lastError: null, sentAt: now });
     }
 
     const smsKind = template.smsKind;

@@ -6,6 +6,8 @@
  * `users`, which owns identity and roles.
  */
 export { employeeRouter } from './employees.routes';
+/** DS-2: the appointment letter's completion hook (the deferred console invitation), registered at bootstrap. */
+export { registerAppointmentSigningHooks } from './appointment-signing';
 
 /** Lot D: `kyc/employee` reads the row behind a session and checks an id; `onboarding` provisions the row on approval. */
 export { findEmployeeByUserId, employeeExists, createEmployee, inviteEmployeeToConsole } from './employees.service';

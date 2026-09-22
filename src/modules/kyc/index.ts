@@ -105,3 +105,5 @@ export type { KycEscalateInput } from './kyc.schema';
 /** Lot N: the desk's request body and facet, shared with the publisher twin. */
 export { kycRequestSchema, requestedFilterSchema, KYC_REQUEST_CHANNELS, KYC_DEEP_LINK, kycChannelLabel } from './kyc.schema';
 export type { KycRequestInput, KycRequestChannel } from './kyc.schema';
+// AG-1: the applicant's identity papers, mirrored onto the desk's KYC record (registered on agents' application port by bootstrap).
+export { mirrorAgentIdentityDocument } from './agent/agent-kyc.service';

@@ -46,6 +46,14 @@ const { fake, repository, identifiers, wallets, payouts, auth, notifications, up
       return row;
     }),
     findPartner: vi.fn(async (id: string) => fake.partners.get(id) ?? null),
+    // PP-1: the shop's own application — the row on an account that exists.
+    createApplication: vi.fn(async ({ userId, appliedAt, ...data }: Row) => {
+      const row: Row = { id: `prt_${fake.partners.size + 1}`, userId, isActive: true, createdAt: appliedAt, activatedAt: null, activatedById: null, appliedAt, rateCardFileId: null, rateCardRows: null, acceptsQuoteRequests: true, kycStatus: 'PENDING', ...data };
+      fake.partners.set(row.id, row);
+      return row;
+    }),
+    findUserRoles: vi.fn(async (): Promise<string[]> => []),
+    findPartnerByUserId: vi.fn(async (userId: string) => [...fake.partners.values()].find((row) => row.userId === userId) ?? null),
     findPartnerByUser: vi.fn(async (userId: string) => [...fake.partners.values()].find((row) => row.userId === userId) ?? null),
     updatePartner: vi.fn(async (id: string, patch: Row) => {
       const next = { ...fake.partners.get(id), ...patch };
@@ -95,7 +103,8 @@ const { fake, repository, identifiers, wallets, payouts, auth, notifications, up
     },
     notifications: { notify: vi.fn(async () => ({ notificationId: 'ntf_1', templateKey: 'partner-activated', deliveries: [] })) },
     uploads: { findUploadedFile: vi.fn(async (id: string) => fake.files.get(id) ?? null) },
-    audit: { findActivityRows: vi.fn(async (): Promise<Row[]> => []) },
+    audit: { findActivityRows: vi.fn(async (): Promise<Row[]> => []), logActivity: vi.fn(async () => undefined) },
+    // PP-1: the application audits under the applicant's login.
     // Lot N: the activation gate reads `kyc.printPartnerActivationRequiresKyc`; off is today's behaviour.
     settings: { getPlatformSettings: vi.fn(async () => ({ kyc: { reviewSlaHours: 48, escalationSlaMultiplier: 2, printPartnerActivationRequiresKyc: false } })) },
     pricing: {
@@ -126,6 +135,7 @@ vi.mock('../../../shared/audit', async (importOriginal) => {
 
 import {
   activatePartner,
+  applyAsPartner,
   createPartner,
   deactivatePartner,
   getPartnerForUser,
@@ -222,6 +232,33 @@ describe('creating a partner', () => {
     expect(repository.createPartner).toHaveBeenCalledWith(expect.objectContaining({ city: 'Bangalore', cityId: 'city_bengaluru' }));
     await createPartner({ name: 'Typed Press', mobile: '9876543211', city: 'Rameswaram' });
     expect(repository.createPartner).toHaveBeenLastCalledWith(expect.objectContaining({ city: 'Rameswaram', cityId: null }));
+  });
+});
+
+describe('PP-1: a shop applies from the app', () => {
+  it('writes the row with appliedAt on the applicant\'s own account, the identifier and the wallet, and audits it', async () => {
+    const { partner, created } = await applyAsPartner('usr_shop', { name: 'Rapid Prints', legalName: 'Rapid Prints LLP', mobile: '9876500001', email: 'hi@rapid.in' }, NOW);
+    expect(created).toBe(true);
+    expect(partner).toMatchObject({ displayId: 'PRT-1209-2601', mobile: '+919876500001', name: 'Rapid Prints', legalName: 'Rapid Prints LLP', appliedAt: NOW, activatedAt: null });
+    expect(repository.createApplication).toHaveBeenCalledWith(expect.objectContaining({ userId: 'usr_shop', appliedAt: NOW }));
+    expect(wallets.ensureWallet).toHaveBeenCalledWith({ kind: 'PRINT_PARTNER', id: partner.id }, expect.any(String));
+    expect(audit.logActivity).toHaveBeenCalledWith('usr_shop', 'PRINT_PARTNER_APPLIED', undefined, expect.objectContaining({ partnerId: partner.id }));
+    // Applying again is the same application.
+    await expect(applyAsPartner('usr_shop', { name: 'Rapid Prints', mobile: '9876500001' }, NOW)).resolves.toMatchObject({ created: false, partner: { id: partner.id } });
+  });
+
+  it('refuses a number that already holds a publisher, advertiser or agent account', async () => {
+    repository.findUserRoles.mockResolvedValueOnce(['PUBLISHER']);
+    await expect(applyAsPartner('usr_pub', { name: 'Side Shop', mobile: '9876500002' }, NOW)).rejects.toMatchObject({ statusCode: 409 });
+    expect(repository.createApplication).not.toHaveBeenCalled();
+  });
+
+  it('is activated through the desk\'s usual door once reviewed', async () => {
+    const { partner } = await applyAsPartner('usr_shop', { name: 'Rapid Prints', mobile: '9876500001' }, NOW);
+    fake.users.set(partner.mobile, { id: 'usr_shop', isActive: true });
+    const result = await activatePartner(partner.id, 'usr_ops', NOW);
+    expect(result.activated).toBe(true);
+    expect(result.after).toMatchObject({ appliedAt: NOW, activatedAt: NOW, activatedById: 'usr_ops' });
   });
 });
 

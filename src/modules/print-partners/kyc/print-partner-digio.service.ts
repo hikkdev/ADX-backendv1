@@ -7,6 +7,7 @@ import { createNotification, notify } from '../../notifications';
 import type { PartnerRow } from '../print-partners.repository';
 import { prismaPrintPartnerKycRepository as repository } from './prisma-print-partner-kyc.repository';
 import type { PrintPartnerKycWithPartner } from './print-partner-kyc.repository';
+import { requestServiceAgreement } from '../service-agreement';
 
 /**
  * KYC by Digio for a print partner — Lot N.
@@ -119,6 +120,8 @@ export async function handlePrintPartnerDigioWebhook(payload: DigioWebhookPayloa
   });
 
   logger.info('Digio webhook applied to a print partner', { kycId: payload.id, status: payload.status, printPartnerId: row.printPartnerId });
+  // DS-2: the service agreement is asked for the moment KYC verifies, when the policy says so.
+  if (approved) await requestServiceAgreement(row.printPartnerId, null);
 
   if (decision === 'PENDING') {
     await createNotification({

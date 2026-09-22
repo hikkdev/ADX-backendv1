@@ -32,6 +32,7 @@ import { prismaPrintPartnerKycRepository as repository } from './prisma-print-pa
 import type { PrintPartnerKycFilter, PrintPartnerKycRow, PrintPartnerKycSort, PrintPartnerKycWithPartner } from './print-partner-kyc.repository';
 import { PRINT_PARTNER_KYC_DOCUMENT_FIELDS, type RequestPrintPartnerKycInput, type ReviewPrintPartnerKycInput, type SubmitPrintPartnerKycInput } from './print-partner-kyc.schema';
 import { initiatePrintPartnerDigioKyc } from './print-partner-digio.service';
+import { requestServiceAgreement } from '../service-agreement';
 
 /**
  * The print partner's KYC — Lot N (owner, 14 Sep 2026: "KYC can be done not
@@ -370,6 +371,8 @@ export async function reviewPrintPartnerKyc(id: string, input: ReviewPrintPartne
     throw new ApiError(409, 'LIVENESS_REQUIRED', 'Ask the partner to record the short liveness video — or attest their presence at the desk — before verifying');
   }
   const reviewed = await repository.review(row.id, input.status, input.rejectionReason ?? null, { reviewedById: reviewer.userId, reviewNote: input.reviewNote ?? null }, now);
+  // DS-2: the service agreement is asked for the moment KYC verifies, when the policy says so.
+  if (input.status === 'VERIFIED') await requestServiceAgreement(row.printPartnerId, reviewer.userId);
 
   await logActivity(reviewer.userId, 'PRINT_PARTNER_KYC_REVIEWED', {
     req: reviewer.req,

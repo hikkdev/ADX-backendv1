@@ -20,16 +20,25 @@ import type { AgentContact } from './agent-kyc.repository';
  * offered to the handlers registered at boot; `handleAgentDigioWebhook` is
  * one of them (`bootstrap/register-modules`).
  *
- * Only the desk opens a session (`POST /agent-kyc/:agentId/request`,
- * channel DIGIO — the default): agents never self-serve. `submittedAt` is
- * left for the webhook, so the queue reads REQUESTED until Digio answers.
+ * The desk opens a session (`POST /agent-kyc/:agentId/request`, channel
+ * DIGIO — the default) and, since KYC-D (the owner, 21 Sep 2026: "KYC by
+ * Digio for agents too; documents as the last resort for everyone"), so does
+ * the agent from their own phone (`POST /agent-kyc/me/digio/initiate`). An
+ * approval verifies the identity the application ladder asks for; the
+ * paper uploads remain the way through when Digio cannot be used. On the
+ * desk's request `submittedAt` is left for the webhook, so the queue reads
+ * REQUESTED until Digio answers; the agent's own start stamps it.
  */
 
 export const DIGIO_REFERENCE_PREFIX = 'adx-agt-';
 
 export type DigioSession = { kycId: string; accessToken: string; validTill: string; sdkUrl: string };
 
-export async function initiateAgentDigioKyc(agent: AgentContact, now = new Date()): Promise<DigioSession> {
+export async function initiateAgentDigioKyc(
+  agent: AgentContact,
+  opts: { onBehalf: boolean } = { onBehalf: true },
+  now = new Date(),
+): Promise<DigioSession> {
   const current = await repository.findByAgentId(agent.id);
   if (current?.status === 'VERIFIED') {
     throw new ApiError(409, 'KYC_ALREADY_VERIFIED', 'This agent is already verified; there is nothing to start');
@@ -41,8 +50,21 @@ export async function initiateAgentDigioKyc(agent: AgentContact, now = new Date(
     customerEmail: agent.user.email ?? '',
     customerMobile: agent.user.mobile,
   });
-  await repository.upsertDigio(agent.id, { method: 'DIGIO', digioRequestId: session.kycId, digioReferenceId: referenceId, digioStatus: 'pending' });
+  await repository.upsertDigio(agent.id, {
+    method: 'DIGIO',
+    digioRequestId: session.kycId,
+    digioReferenceId: referenceId,
+    digioStatus: 'pending',
+    ...(opts.onBehalf ? {} : { submittedAt: now }),
+  });
   return { kycId: session.kycId, accessToken: session.accessToken, validTill: session.validTill, sdkUrl: session.sdkUrl };
+}
+
+/** KYC-D: what the agent's phone polls after starting Digio — what ADX has heard; null before any record. */
+export async function agentDigioStatus(agentId: string): Promise<{ method: string; digioStatus: string | null; kycStatus: string; digioVerifiedAt: Date | null } | null> {
+  const row = await repository.findByAgentId(agentId);
+  if (!row) return null;
+  return { method: row.method, digioStatus: row.digioStatus, kycStatus: row.status, digioVerifiedAt: row.digioVerifiedAt };
 }
 
 /**

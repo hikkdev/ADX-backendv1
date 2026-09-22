@@ -90,7 +90,8 @@ describe('the two new events are in the table', () => {
 describe('installationFeeFor (Q102)', () => {
   it('is the flat rate when the platform is on FLAT, whatever the order says', async () => {
     expect(await installationFeeFor({ agentFeeAmount: new Decimal('1800.00') }, 'SILVER', NOW)).toBe('1450.00');
-    expect(repository.findIncentiveRate).toHaveBeenCalledWith('INSTALLATION', 'SILVER', NOW);
+    // LH2: the lookup carries the lead's side as a fourth argument, undefined for an order.
+    expect(repository.findIncentiveRate).toHaveBeenCalledWith('INSTALLATION', 'SILVER', NOW, undefined);
   });
 
   it('is the figure ops typed on the order when the platform is on PER_ORDER', async () => {

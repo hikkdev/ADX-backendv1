@@ -21,7 +21,7 @@ const { repository, qr, agents, grants, payouts } = vi.hoisted(() => ({
     completeOnboarding: vi.fn(),
   },
   qr: { deactivateQrsFor: vi.fn(), findActiveQrFor: vi.fn(), generateQr: vi.fn(), findPendingScan: vi.fn(), decideOnboardingScan: vi.fn(), ONBOARDING_QR_TTL_SECONDS: 90 },
-  agents: { findAgentProfile: vi.fn(), requireAgentProfile: vi.fn(), findAgentTier: vi.fn() },
+  agents: (() => { const o = { findAgentProfile: vi.fn(), requireAgentProfile: vi.fn(), findAgentTier: vi.fn() }; return { ...o, findWorkingAgentProfile: o.findAgentProfile, requireWorkingAgent: o.requireAgentProfile }; })(),
   grants: { openOnboardingGrant: vi.fn(), closeOnboardingGrants: vi.fn(), accessLogFor: vi.fn() },
   payouts: { recordIncentiveOnce: vi.fn() },
 }));

@@ -132,6 +132,7 @@ app screen can open — and the payload shapes are documented in
 | `ANNOUNCEMENT` | the announcement | `announcements` (payload `{ announcementId, importance, title, body }`) |
 | `LISTING` | the listing | `listings` (taken off the market), `pricing` (repriced), `rate-cards` (below the floor), `reviews` (new review), `supply` (verified, awaiting publish) |
 | `WORK` | the work task | `work/work.notify` — every `WORK` notice (assigned, review requested, sent back, due tomorrow, overdue, comment); AB-B |
+| `LEAD` | the lead | `leads/map.service` — LH5's three pushes (`LEAD_NEARBY_HOT`, `LEAD_CLAIM_LAPSING`, `LEAD_LINK_OPENED`); LH6's two (`LEAD_REPLY_RECEIVED`, `LEAD_CALLBACK_REQUESTED`); `deepLink` `adx://lead/<id>` rides the push data too |
 
 A `relatedId` that is none of these carries **no** `relatedType`: the
 advertiser's own KYC notices (the KYC case), a fraud case, a safety alert, a
@@ -381,3 +382,17 @@ npx vitest run src/modules/notifications
 
 Small — the feed is a good first module. The dispatcher and the desk are
 Platform: every outbound message passes through here.
+
+## WhatsApp as a channel (LH6)
+
+`NotificationChannel` carries `WHATSAPP`. A template may name it
+(`TEMPLATE_CHANNELS`); the dispatcher sends it to the person's mobile
+through `shared/outreach`'s WhatsApp adapter — the Channels card's approved
+template of the same key when one is mapped (a business-initiated message
+must be one), else the template's `smsBody` as free text (delivered only
+inside a customer-service window). No card: the row is SKIPPED
+`WHATSAPP_UNCONFIGURED`. There is no WhatsApp row on the preferences
+screen — it follows the person's SMS preference (`mayDeliver`). The
+outreach hub's own SMS and email to *leads* leave by `LEAD_OUTREACH` (the
+`lead-outreach` template, `{{body}}` the copy already rendered, transactional
+so the hub's own ruling on quiet hours and the weekly cap is the only one).

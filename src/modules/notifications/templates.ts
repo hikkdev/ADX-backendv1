@@ -126,6 +126,124 @@ export const DEFAULT_TEMPLATES: readonly TemplateSeed[] = [
     pushBody: 'ADX has asked you to verify your identity ({{channel}}). {{note}}',
   },
   {
+    // AG-1: the applicant pressed Submit — a receipt, and the same event
+    // tells every admin in-app (channels: [] on that send).
+    key: 'agent-application-received',
+    event: 'AGENT_APPLICATION_RECEIVED',
+    channels: ['EMAIL', 'SMS', 'PUSH'],
+    subject: 'ADX has your application',
+    emailBody:
+      '<p>Hello {{partyName}},</p>' +
+      '<p>ADX has your application to work as a {{side}}. We check the papers and get back to you within three working days.</p>' +
+      '<p>You can follow it in the ADX Agent app.</p>',
+    smsKind: 'AGENT_APPLICATION_RECEIVED',
+    smsBody: 'ADX: we have your {{side}} application. We check the papers and reply within three working days.',
+    pushTitle: 'Application received',
+    pushBody: 'ADX has your {{side}} application. We reply within three working days.',
+  },
+  {
+    // DS-1 (Digio eSign): a document is waiting for the person's signature.
+    // Digio sends its own link too when the policy says so; this is ADX's
+    // word, with the same link and a push that opens the app's signing
+    // screen (`deepLink` rides the push data). Transactional.
+    key: 'agreement-signature-requested',
+    event: 'AGREEMENT_SIGNATURE_REQUESTED',
+    channels: ['EMAIL', 'SMS', 'PUSH'],
+    subject: 'Please sign: {{document}}',
+    emailBody:
+      '<p>Hello {{partyName}},</p>' +
+      '<p>ADX has sent you the <strong>{{document}}</strong> to sign electronically. It takes a minute with Aadhaar OTP.</p>' +
+      '<p><a href="{{url}}">Open and sign</a> — the link is good until {{expires}}.</p>',
+    smsKind: 'AGREEMENT_SIGNATURE_REQUESTED',
+    smsBody: 'ADX: please sign the {{document}}: {{url}} (valid till {{expires}}).',
+    pushTitle: 'A document to sign',
+    pushBody: 'ADX has sent you the {{document}} to sign. It takes a minute.',
+  },
+  {
+    // DS-1: everyone has signed; the copy is in the app.
+    key: 'agreement-signed',
+    event: 'AGREEMENT_SIGNED',
+    channels: ['EMAIL', 'PUSH'],
+    subject: 'Signed: {{document}}',
+    emailBody: '<p>Hello {{partyName}},</p><p>The <strong>{{document}}</strong> is signed by every party. Your copy is in the ADX app under Agreements.</p>',
+    smsKind: 'AGREEMENT_SIGNED',
+    smsBody: 'ADX: the {{document}} is signed. Your copy is in the ADX app.',
+    pushTitle: 'Signed',
+    pushBody: 'The {{document}} is signed by every party.',
+  },
+  {
+    // DS-1: the link ran out; the desk (or the flow) opens a fresh one.
+    key: 'agreement-signature-expired',
+    event: 'AGREEMENT_SIGNATURE_EXPIRED',
+    channels: ['EMAIL', 'PUSH'],
+    subject: 'The signing link for {{document}} has expired',
+    emailBody: '<p>Hello {{partyName}},</p><p>The link to sign the <strong>{{document}}</strong> has expired. Open the ADX app to ask for a fresh one, or ADX will send it again.</p>',
+    smsKind: 'AGREEMENT_SIGNATURE_EXPIRED',
+    smsBody: 'ADX: the link to sign the {{document}} has expired. Open the ADX app for a fresh one.',
+    pushTitle: 'Signing link expired',
+    pushBody: 'The link to sign the {{document}} has expired. Ask for a fresh one in the app.',
+  },
+  {
+    // AG-1: the desk decided — accepted (with the grade), on hold, not accepted, or back under review.
+    key: 'agent-application-decision',
+    event: 'AGENT_APPLICATION_DECISION',
+    channels: ['EMAIL', 'SMS', 'PUSH'],
+    subject: 'Your ADX application: {{decision}}',
+    emailBody: '<p>Hello {{partyName}},</p><p>Your ADX agent application is <strong>{{decision}}</strong>.</p><p>{{reason}}</p>',
+    smsKind: 'AGENT_APPLICATION_DECISION',
+    smsBody: 'ADX: your agent application is {{decision}}. {{reason}}',
+    pushTitle: 'Your ADX application',
+    pushBody: 'Your application is {{decision}}. {{reason}}',
+  },
+  {
+    // AG-1: the desk flagged a paper or asked for it again.
+    key: 'agent-document-returned',
+    event: 'AGENT_DOCUMENT_RETURNED',
+    channels: ['PUSH', 'SMS'],
+    subject: 'ADX needs your {{document}} again',
+    emailBody: '<p>Hello {{partyName}},</p><p>ADX could not accept your {{document}}: {{note}}</p><p>Please upload it again in the ADX Agent app.</p>',
+    smsKind: 'AGENT_DOCUMENT_RETURNED',
+    smsBody: 'ADX: please upload your {{document}} again in the ADX Agent app. {{note}}',
+    pushTitle: '{{document}}: upload it again',
+    pushBody: '{{note}}',
+  },
+  {
+    // AG-4: the desk booked an interview.
+    key: 'agent-interview-scheduled',
+    event: 'AGENT_INTERVIEW_SCHEDULED',
+    channels: ['PUSH', 'SMS', 'EMAIL'],
+    subject: 'Your ADX interview',
+    emailBody: '<p>Hello {{partyName}},</p><p>Your ADX interview (round {{round}}) is on <strong>{{when}}</strong>, {{where}}.</p><p>Bring your original papers.</p>',
+    smsKind: 'AGENT_INTERVIEW_SCHEDULED',
+    smsBody: 'ADX: your interview is on {{when}}, {{where}}. Bring your original papers.',
+    pushTitle: 'Your ADX interview',
+    pushBody: '{{when}}, {{where}}.',
+  },
+  {
+    // AG-4: a paper with a date is about to run out.
+    key: 'agent-document-expiring',
+    event: 'AGENT_DOCUMENT_EXPIRING',
+    channels: ['PUSH', 'SMS'],
+    subject: 'Your {{document}} runs out in {{days}} days',
+    emailBody: '<p>Hello {{partyName}},</p><p>Your {{document}} expires on {{date}}. Upload the renewed one in the ADX Agent app before then and nothing stops.</p>',
+    smsKind: 'AGENT_DOCUMENT_EXPIRING',
+    smsBody: 'ADX: your {{document}} expires on {{date}}. Upload the renewed one in the ADX Agent app.',
+    pushTitle: '{{document}}: {{days}} days left',
+    pushBody: 'Expires {{date}}. Upload the renewed one.',
+  },
+  {
+    // AG-4: a paper's date has passed.
+    key: 'agent-document-expired',
+    event: 'AGENT_DOCUMENT_EXPIRED',
+    channels: ['PUSH', 'SMS'],
+    subject: 'Your {{document}} has expired',
+    emailBody: '<p>Hello {{partyName}},</p><p>Your {{document}} expired on {{date}}. Upload the renewed one in the ADX Agent app; ADX approves it and work goes on.</p>',
+    smsKind: 'AGENT_DOCUMENT_EXPIRED',
+    smsBody: 'ADX: your {{document}} expired on {{date}}. Upload the renewed one in the ADX Agent app.',
+    pushTitle: '{{document}} has expired',
+    pushBody: 'Upload the renewed one.',
+  },
+  {
     key: 'payout-paid',
     event: 'PAYOUT_PAID',
     channels: ['EMAIL', 'SMS'],
@@ -409,6 +527,34 @@ export const DEFAULT_TEMPLATES: readonly TemplateSeed[] = [
   { key: 'work-due', event: 'WORK_DUE', channels: ['PUSH'], pushTitle: 'Due tomorrow', pushBody: '{{task}} — due {{due}}.' },
   { key: 'work-overdue', event: 'WORK_OVERDUE', channels: ['PUSH'], pushTitle: 'A task is overdue', pushBody: '{{task}} was due {{due}}.' },
   { key: 'work-comment', event: 'WORK_COMMENT', channels: ['PUSH'], pushTitle: '{{author}} commented', pushBody: '{{task}}: {{preview}}' },
+  // LH5 (the Lead Hunt): the hunting map's three pushes. Not transactional
+  // — an offer, a nudge, a signal — so quiet hours and the weekly cap hold.
+  { key: 'lead-nearby-hot', event: 'LEAD_NEARBY_HOT', channels: ['PUSH'], transactional: false, pushTitle: 'A hot lead near you', pushBody: '{{businessName}} is {{metres}} m away and nobody holds it yet.' },
+  { key: 'lead-claim-lapsing', event: 'LEAD_CLAIM_LAPSING', channels: ['PUSH'], transactional: false, pushTitle: 'Your claim lapses soon', pushBody: '{{businessName}} goes back to the pool in {{minutes}} min — log a contact to keep it.' },
+  { key: 'lead-link-opened', event: 'LEAD_LINK_OPENED', channels: ['PUSH'], transactional: false, pushTitle: 'They opened your link', pushBody: '{{businessName}} just opened the link you sent — a good time to call.' },
+  // LH6 (the Lead Hunt): the outreach hub. `lead-outreach` is the one door
+  // the hub's SMS and email leave by — `{{body}}` is the copy the hub
+  // rendered (typed by the agent, or a step template below), so the DLT
+  // registration is one template with one variable. Transactional on
+  // purpose: the hub rules quiet hours and the weekly cap per lead before
+  // any adapter, and the dispatcher must not rule a second time.
+  { key: 'lead-outreach', event: 'LEAD_OUTREACH', channels: ['SMS', 'EMAIL'], smsKind: 'LEAD_OUTREACH', smsBody: '{{body}}', subject: '{{subject}}', emailBody: '<p style="white-space:pre-line">{{body}}</p><p>{{agentName}}, ADX{{agentPhoneLine}}</p>' },
+  // The step templates the default sequences name — copy only, read by the
+  // hub (`smsBody` for a short channel, `subject` + `emailBody` for email, an
+  // approved WhatsApp template of the same key outside the window). The
+  // desk edits them under Comms › Templates like any other.
+  { key: 'lead-seq-publisher-intro', event: 'LEAD_SEQUENCE', channels: ['SMS', 'EMAIL', 'WHATSAPP'], smsKind: 'LEAD_OUTREACH', transactional: false, subject: 'Earn from your space at {{businessName}}', smsBody: 'Hi {{contactName}}, {{agentName}} from ADX. Brands pay to advertise on walls, shutters and screens like the one at {{businessName}}. A 10-minute look is all it takes — reply YES and I will call. {{link}}', emailBody: '<p>Hi {{contactName}},</p><p>{{agentName}} here from ADX. Brands pay monthly to advertise on walls, shutters and screens like the one at {{businessName}} — we handle the campaign, you collect the rent.</p><p>A 10-minute look is all it takes. Reply to this email or open your link: {{link}}</p><p>{{agentName}}, ADX{{agentPhoneLine}}</p>' },
+  { key: 'lead-seq-publisher-nudge', event: 'LEAD_SEQUENCE', channels: ['SMS', 'EMAIL', 'WHATSAPP'], smsKind: 'LEAD_OUTREACH', transactional: false, subject: 'Your estimate for {{businessName}}', smsBody: 'Hi {{contactName}}, {{agentName}} from ADX again. Spaces near {{businessName}} are earning from ads this month. Want your estimate? Reply YES. {{link}}', emailBody: '<p>Hi {{contactName}},</p><p>Spaces near {{businessName}} are earning from ads this month. Want yours priced? It takes one reply.</p><p>{{link}}</p><p>{{agentName}}, ADX{{agentPhoneLine}}</p>' },
+  { key: 'lead-seq-advertiser-intro', event: 'LEAD_SEQUENCE', channels: ['SMS', 'EMAIL', 'WHATSAPP'], smsKind: 'LEAD_OUTREACH', transactional: false, subject: 'Reach your customers near {{businessName}}', smsBody: 'Hi {{contactName}}, {{agentName}} from ADX. Walls, shutters and screens around {{businessName}} can carry your name for less than a newspaper ad. Reply YES for a plan. {{link}}', emailBody: '<p>Hi {{contactName}},</p><p>{{agentName}} here from ADX. Walls, shutters and screens around {{businessName}} can carry your name for less than one newspaper ad — and you pick the streets.</p><p>Reply YES for a plan, or open your link: {{link}}</p><p>{{agentName}}, ADX{{agentPhoneLine}}</p>' },
+  { key: 'lead-seq-advertiser-nudge', event: 'LEAD_SEQUENCE', channels: ['SMS', 'EMAIL', 'WHATSAPP'], smsKind: 'LEAD_OUTREACH', transactional: false, subject: 'A campaign plan for {{businessName}}', smsBody: 'Hi {{contactName}}, {{agentName}} from ADX. I have a street-level plan for {{businessName}} ready to share — a reply is all it takes. {{link}}', emailBody: '<p>Hi {{contactName}},</p><p>I have a street-level plan for {{businessName}} ready to share. Reply and I will send it over.</p><p>{{link}}</p><p>{{agentName}}, ADX{{agentPhoneLine}}</p>' },
+  { key: 'lead-seq-last-call', event: 'LEAD_SEQUENCE', channels: ['SMS', 'EMAIL', 'WHATSAPP'], smsKind: 'LEAD_OUTREACH', transactional: false, subject: 'Last note from ADX', smsBody: 'Hi {{contactName}}, last note from {{agentName}} at ADX — if the timing is wrong, no problem. Reply LATER and I will check back in a couple of months. {{link}}', emailBody: '<p>Hi {{contactName}},</p><p>Last note from me. If the timing is wrong, no problem at all — reply LATER and I will check back in a couple of months.</p><p>{{agentName}}, ADX{{agentPhoneLine}}</p>' },
+  // The hub's own notices to the agent: a reply came in, a callback was asked for.
+  { key: 'lead-reply-received', event: 'LEAD_REPLY_RECEIVED', channels: ['PUSH'], pushTitle: '{{businessName}} replied', pushBody: '{{channel}}: {{preview}}' },
+  { key: 'lead-callback-requested', event: 'LEAD_CALLBACK_REQUESTED', channels: ['PUSH'], pushTitle: 'Callback asked for', pushBody: '{{businessName}} wants a call back{{when}} — it is on your day.' },
+  // LH7: the landing's Accept on a proposal.
+  { key: 'lead-proposal-accepted', event: 'LEAD_PROPOSAL_ACCEPTED', channels: ['PUSH'], pushTitle: '{{businessName}} accepted', pushBody: '{{proposal}} — time to close it.' },
+  // LH10: the clawback — the catch that did not last. Worded as what happened, with the reason.
+  { key: 'incentive-reversed', event: 'INCENTIVE_REVERSED', channels: ['PUSH'], pushTitle: 'A reward came back', pushBody: '₹{{amount}} for {{businessName}} was reversed — {{reason}}.' },
 ];
 
 /* ── the events catalogue (E10-2) ────────────────────────────────── */
@@ -447,6 +593,15 @@ export const EVENT_REGISTRY: readonly EventRegistryEntry[] = [
   { event: 'KYC_DECISION', variables: ['partyName', 'decision', 'reason'], raisedBy: ['kyc', 'publishers', 'print-partners'], via: 'notify' },
   { event: 'KYC_REQUESTED', variables: ['partyName', 'channel', 'note', 'deepLink'], raisedBy: ['kyc', 'publishers', 'print-partners'], via: 'notify', note: "Lot N: the desk asked the party for their KYC (DIGIO or MANUAL); `deepLink` rides the push data and opens the party's KYC screen." },
   { event: 'PAYOUT_PAID', variables: ['amount', 'method', 'reference', 'utr'], raisedBy: ['payouts'], via: 'notify' },
+  { event: 'AGENT_APPLICATION_RECEIVED', variables: ['partyName', 'side'], raisedBy: ['agents'], via: 'notify', note: 'AG-1: the applicant\'s receipt; the same event, in-app only, tells every admin.' },
+  { event: 'AGENT_APPLICATION_DECISION', variables: ['partyName', 'decision', 'reason'], raisedBy: ['agents'], via: 'notify', note: 'AG-1: accepted (with the grade), on hold, not accepted, or back under review.' },
+  { event: 'AGREEMENT_SIGNATURE_REQUESTED', variables: ['partyName', 'document', 'url', 'expires', 'deepLink'], raisedBy: ['agreements'], via: 'notify', sensitive: true, note: 'DS-1 (Digio eSign): a document waits for the signature; `url` is the signing page, `deepLink` opens the app\'s signing screen.' },
+  { event: 'AGREEMENT_SIGNED', variables: ['partyName', 'document'], raisedBy: ['agreements'], via: 'notify', note: 'DS-1: every party has signed.' },
+  { event: 'AGREEMENT_SIGNATURE_EXPIRED', variables: ['partyName', 'document'], raisedBy: ['agreements'], via: 'notify', note: 'DS-1: the signing link ran out.' },
+  { event: 'AGENT_DOCUMENT_RETURNED', variables: ['partyName', 'document', 'note'], raisedBy: ['agents'], via: 'notify', note: 'AG-1: the desk flagged a paper or asked for it again.' },
+  { event: 'AGENT_INTERVIEW_SCHEDULED', variables: ['partyName', 'when', 'where', 'round'], raisedBy: ['agents'], via: 'notify', note: 'AG-4: the desk booked an interview.' },
+  { event: 'AGENT_DOCUMENT_EXPIRING', variables: ['partyName', 'document', 'days', 'date'], raisedBy: ['agents'], via: 'notify', note: 'AG-4: the expiry sweep, thirty and seven days out.' },
+  { event: 'AGENT_DOCUMENT_EXPIRED', variables: ['partyName', 'document', 'date'], raisedBy: ['agents'], via: 'notify', note: 'AG-4: the expiry sweep on the day; a working agent is put on hold.' },
   { event: 'VISIT_OFFER', variables: ['agentName', 'address', 'when', 'minutes'], raisedBy: ['visits'], via: 'notify' },
   { event: 'STATEMENT_READY', variables: ['month', 'net', 'url', 'partyName', 'reference'], raisedBy: ['invoices'], via: 'notify' },
   { event: 'ANNOUNCEMENT', variables: ['title', 'body', 'unsubscribeUrl'], raisedBy: ['announcements'], via: 'notify' },
@@ -484,6 +639,17 @@ export const EVENT_REGISTRY: readonly EventRegistryEntry[] = [
   { event: 'WORK_DUE', variables: ['task', 'due'], raisedBy: ['work'], via: 'notify', note: 'Lot AA: the 08:00 IST sweep — to the assignees of a task due tomorrow, once per task per day.' },
   { event: 'WORK_OVERDUE', variables: ['task', 'due'], raisedBy: ['work'], via: 'notify', note: 'Lot AA: the 08:00 IST sweep — to the assignees of an overdue task, once per task per day.' },
   { event: 'WORK_COMMENT', variables: ['task', 'author', 'preview'], raisedBy: ['work'], via: 'notify', note: "Lot AA: to the task's assignees, reviewers and creator, minus the author." },
+  // LH5: the hunting map. `deepLink` opens the lead in the agent app.
+  { event: 'LEAD_NEARBY_HOT', variables: ['businessName', 'metres', 'deepLink'], raisedBy: ['leads'], via: 'notify', note: 'LH5: a lead turned HOT within a kilometre of an agent of its side with a fix today, unclaimed — once per lead per agent per week.' },
+  { event: 'LEAD_CLAIM_LAPSING', variables: ['businessName', 'minutes', 'deepLink'], raisedBy: ['leads'], via: 'notify', note: 'LH5 (D3): the hourly sweep, an hour before an unworked claim lapses — once per claim.' },
+  { event: 'LEAD_LINK_OPENED', variables: ['businessName', 'deepLink'], raisedBy: ['leads'], via: 'notify', note: 'LH5 / LH7: the lead opened the link the agent sent — to the holder, at most once an hour per lead.' },
+  // LH6: the outreach hub.
+  { event: 'LEAD_OUTREACH', variables: ['body', 'subject', 'contactName', 'businessName', 'agentName', 'agentPhoneLine', 'link'], raisedBy: ['leads'], via: 'notify', note: 'LH6 (D5): the one door the hub\'s SMS and email leave by — `body` is the copy already rendered; the recipient is the lead, not a user.' },
+  { event: 'LEAD_SEQUENCE', variables: ['contactName', 'businessName', 'agentName', 'agentPhoneLine', 'link', 'city'], raisedBy: ['leads'], via: 'notify', note: 'LH6: the step templates a sequence names — copy only; the hub renders them and sends through LEAD_OUTREACH (or the WhatsApp adapter), never by this event.' },
+  { event: 'LEAD_REPLY_RECEIVED', variables: ['businessName', 'channel', 'preview', 'deepLink'], raisedBy: ['leads'], via: 'notify', note: 'LH6: any inbound on any channel — to the agent holding the lead, once per message.' },
+  { event: 'LEAD_CALLBACK_REQUESTED', variables: ['businessName', 'when', 'deepLink'], raisedBy: ['leads'], via: 'notify', note: 'LH6: a callback asked for by a missed call, the IVR or a reply — to the agent the task landed on.' },
+  { event: 'LEAD_PROPOSAL_ACCEPTED', variables: ['businessName', 'proposal', 'deepLink'], raisedBy: ['leads'], via: 'notify', note: 'LH7: the person tapped Accept on a proposal on the invite landing — to the holder.' },
+  { event: 'INCENTIVE_REVERSED', variables: ['businessName', 'amount', 'reason'], raisedBy: ['leads'], via: 'notify', note: 'LH10: the activation reward clawed back — the account closed or its business came down inside thirty days.' },
 ];
 
 export const isRegisteredEvent = (event: string): boolean => EVENT_REGISTRY.some((entry) => entry.event === event);

@@ -1,4 +1,4 @@
-import type { AgentCertification, TrainingAttempt, TrainingModule } from '../../shared/database';
+import type { AgentCertification, TrainingAttempt, TrainingAudience, TrainingModule, TrainingModuleKind } from '../../shared/database';
 import { logActivity } from '../../shared/audit';
 import { ApiError } from '../../shared/errors';
 import { requireAgentProfile } from '../agents';
@@ -36,6 +36,10 @@ export type ModuleRow = {
   title: string;
   summary: string | null;
   durationMins: number | null;
+  /** AG-4: a LESSON counts toward the certificate; an ASSESSMENT is the screening test. */
+  kind: TrainingModuleKind;
+  audience: TrainingAudience;
+  timeLimitMins: number | null;
   state: ModuleState;
   /** The "60%" on an in-progress row. */
   percent: number;
@@ -75,6 +79,9 @@ export type ModuleView = ModuleRow & {
 export type QuizView = {
   moduleId: string;
   passPercent: number;
+  /** AG-4: an assessment's clock, in minutes; null is untimed. The app submits what is answered when it runs out. */
+  timeLimitMins: number | null;
+  kind: TrainingModuleKind;
   questions: { id: string; ordinal: number; prompt: string; options: { id: string; ordinal: number; label: string }[] }[];
 };
 
@@ -89,7 +96,10 @@ export type QuizResult = {
 };
 
 type Standing = {
+  /** AG-4: the modules for this agent's sides — lessons and assessments, in order. */
   modules: TrainingModule[];
+  /** The lessons alone: what the certificate counts. */
+  lessons: TrainingModule[];
   progress: Map<string, { percent: number; completedAt: Date | null; lastPositionSec: number | null }>;
   best: Map<string, TrainingAttempt>;
   passedOrdinals: Set<number>;
@@ -97,8 +107,9 @@ type Standing = {
 };
 
 async function standingOf(agentId: string): Promise<Standing> {
+  const sides = await repository.agentSides(agentId);
   const [modules, progressRows, attempts, certification] = await Promise.all([
-    repository.findActiveModules(),
+    repository.findActiveModules(sides),
     repository.findProgress(agentId),
     repository.bestAttempts(agentId),
     repository.findCertification(agentId),
@@ -106,7 +117,7 @@ async function standingOf(agentId: string): Promise<Standing> {
   const progress = new Map(progressRows.map((row) => [row.moduleId, { percent: row.percent, completedAt: row.completedAt, lastPositionSec: row.lastPositionSec }]));
   const best = new Map(attempts.map((attempt) => [attempt.moduleId, attempt]));
   const passedOrdinals = new Set(modules.filter((m) => progress.get(m.id)?.completedAt).map((m) => m.ordinal));
-  return { modules, progress, best, passedOrdinals, certification };
+  return { modules, lessons: modules.filter((m) => m.kind !== 'ASSESSMENT'), progress, best, passedOrdinals, certification };
 }
 
 function rowOf(module: TrainingModule, standing: Standing): ModuleRow {
@@ -118,6 +129,9 @@ function rowOf(module: TrainingModule, standing: Standing): ModuleRow {
     title: module.title,
     summary: module.summary,
     durationMins: module.durationMins,
+    kind: module.kind,
+    audience: module.audience,
+    timeLimitMins: module.timeLimitMins,
     state: moduleStateOf(module, progress, standing.passedOrdinals),
     percent: progress?.completedAt ? 100 : progress?.percent ?? 0,
     best: best ? { score: best.score, total: best.total, passed: best.passed } : null,
@@ -130,8 +144,9 @@ function nextOf(module: TrainingModule, standing: Standing) {
 }
 
 async function certificationOf(standing: Standing, agentName: string | null): Promise<CertificationView> {
-  const passed = standing.modules.filter((m) => standing.passedOrdinals.has(m.ordinal));
-  const progress = certificationProgress(passed.length, standing.modules.length);
+  // AG-4: the certificate counts the lessons; an assessment is scored, never certified.
+  const passed = standing.lessons.filter((m) => standing.passedOrdinals.has(m.ordinal));
+  const progress = certificationProgress(passed.length, standing.lessons.length);
   const cert = standing.certification;
   const state: CertificationState = cert ? (cert.revokedAt ? 'REVOKED' : 'CERTIFIED') : 'LOCKED';
   return {
@@ -140,7 +155,7 @@ async function certificationOf(standing: Standing, agentName: string | null): Pr
     certificateId: cert && !cert.revokedAt ? cert.certificateId : null,
     issuedAt: cert && !cert.revokedAt ? cert.issuedAt.toISOString() : null,
     agentName,
-    remaining: standing.modules.filter((m) => !standing.passedOrdinals.has(m.ordinal)).map((m) => m.title),
+    remaining: standing.lessons.filter((m) => !standing.passedOrdinals.has(m.ordinal)).map((m) => m.title),
   };
 }
 
@@ -213,7 +228,7 @@ export async function getQuiz(userId: string, moduleId: string): Promise<QuizVie
   const { module } = await openModule(userId, moduleId);
   const questions = await repository.findQuestions(module.id);
   if (questions.length === 0) throw new ApiError(409, 'CONFLICT', 'This module has no quiz yet');
-  return { moduleId: module.id, passPercent: module.passPercent, questions: stripCorrectness(questions) };
+  return { moduleId: module.id, passPercent: module.passPercent, timeLimitMins: module.timeLimitMins, kind: module.kind, questions: stripCorrectness(questions) };
 }
 
 /**
@@ -242,7 +257,8 @@ export async function submitQuiz(
     standing.progress.set(module.id, { percent: saved.percent, completedAt: saved.completedAt, lastPositionSec: saved.lastPositionSec });
     standing.passedOrdinals.add(module.ordinal);
 
-    const allPassed = standing.modules.every((m) => standing.passedOrdinals.has(m.ordinal));
+    // AG-4: the last lesson passed mints the certificate; an assessment passed mints nothing.
+    const allPassed = module.kind !== 'ASSESSMENT' && standing.lessons.length > 0 && standing.lessons.every((m) => standing.passedOrdinals.has(m.ordinal));
     if (allPassed && !standing.certification) {
       const certificateId = await allocateIdentifier('CERTIFICATE');
       standing.certification = await repository.createCertification(me.id, certificateId, now);
@@ -258,6 +274,34 @@ export async function submitQuiz(
     next: nextOf(module, standing),
     certification: await certificationOf(standing, await repository.agentName(me.id)),
   };
+}
+
+/**
+ * AG-4: the screening assessment — every active ASSESSMENT module for the
+ * agent's sides, with the best attempt on each. `required` is false when
+ * none is published (then screening is the desk's word alone); `passed`
+ * when every one has a passing best attempt.
+ */
+export type AssessmentStanding = {
+  required: boolean;
+  passed: boolean;
+  modules: { id: string; title: string; passPercent: number; timeLimitMins: number | null; best: { score: number; total: number; passed: boolean; percent: number } | null }[];
+};
+
+export async function getAssessmentStanding(agentId: string): Promise<AssessmentStanding> {
+  const standing = await standingOf(agentId);
+  const assessments = standing.modules.filter((m) => m.kind === 'ASSESSMENT');
+  const modules = assessments.map((m) => {
+    const best = standing.best.get(m.id) ?? null;
+    return {
+      id: m.id,
+      title: m.title,
+      passPercent: m.passPercent,
+      timeLimitMins: m.timeLimitMins,
+      best: best ? { score: best.score, total: best.total, passed: best.passed, percent: best.total > 0 ? Math.round((best.score / best.total) * 100) : 0 } : null,
+    };
+  });
+  return { required: modules.length > 0, passed: modules.length > 0 && modules.every((m) => m.best?.passed), modules };
 }
 
 export async function getCertification(userId: string): Promise<CertificationView> {
@@ -290,6 +334,9 @@ function toAdminView(module: TrainingModule, questionCount: number): ModuleAdmin
     questionCount,
     isActive: module.isActive,
     unlockAfterOrdinal: module.unlockAfterOrdinal,
+    kind: module.kind,
+    audience: module.audience,
+    timeLimitMins: module.timeLimitMins,
     createdAt: module.createdAt.toISOString(),
     updatedAt: module.updatedAt.toISOString(),
   };

@@ -48,3 +48,42 @@ export type { AcceptanceAnchor, AcceptanceParty, InsertionOrderSnapshot, StalePa
 
 // Lot G (answer 144): the module's feature declarations, loaded with the module so the registry sees them at boot.
 import './features';
+
+/**
+ * DS-1 (Digio eSign, 22 Sep 2026): e-signatures on the five documents. The
+ * owning modules open a request (`openSigningRequest`) and read where a
+ * party stands (`signingStanding` / `assertSigned`); bootstrap fills the
+ * three ports (the policy, the messages, the completion hooks) and mounts
+ * the webhook; `expireSigningRequests` is the sweep.
+ */
+export {
+  DOCUMENT_OF,
+  SIGNABLE_KINDS,
+  SIGNING_PARTY_OF,
+  assertSigned,
+  expireSigningRequests,
+  findSigningRequest,
+  handleEsignWebhook,
+  mySigningRequests,
+  openSigningRequest,
+  signingRequired,
+  signingStanding,
+  signingView,
+} from './esign/esign.service';
+export type { OpenSigningInput, SigningContext, SigningStanding, SigningView } from './esign/esign.service';
+export { onSigningCompleted, registerEsignNotifyPort, registerEsignPolicyPort, resetSigningHooks } from './esign/esign.ports';
+export type { EsignMessage, EsignNotifyPort, EsignPolicyPort, SigningCompletionHook } from './esign/esign.ports';
+export { esignWebhookHandler } from './esign/esign.controller';
+/** DS-3: the apps' two mid-flow documents and the slice every party read carries. */
+export {
+  assertPublisherLicenceSigned,
+  insertionOrderSigning,
+  insertionOrderSigningContext,
+  openInsertionOrderSigning,
+  publisherLicenceFor,
+  publisherLicenceStanding,
+  requestPublisherLicence,
+  signingSlice,
+} from './esign/esign.doors';
+export type { InsertionOrderSigning, SigningSlice } from './esign/esign.doors';
+export type { SigningRow, SignerState } from './esign/esign.repository';

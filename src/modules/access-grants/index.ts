@@ -1,6 +1,7 @@
 import { registerAccessGrantPort } from '../qr';
 import {
   commitGrantClaim,
+  openRequestedGrant,
   prepareGrantClaim,
 } from './access-grants.service';
 
@@ -29,6 +30,8 @@ export { holdsLiveGrant, liveGrantFor } from './access-grants.service';
 export { openOnboardingGrant, closeOnboardingGrants, hasLiveOnboardingGrant } from './access-grants.service';
 /** U9: the owner's log of scans, authorities and writes on their account. */
 export { accessLogFor } from './access-grants.service';
+// AG-5: an exited agent's live grants closed by ADX, for the agents port in bootstrap.
+export { revokeLiveGrantsForAgent } from './access-grants.service';
 /** K-B1: by grant id, for the QR desk (registered on qr's ref-label port by bootstrap). */
 export { findAccessGrantLabels } from './access-grants.service';
 export type { AccessLogView } from './access-grants.service';
@@ -38,6 +41,8 @@ export function registerAccessGrantsModule(): void {
   registerAccessGrantPort({
     prepareClaim: prepareGrantClaim,
     commitClaim: commitGrantClaim,
+    // QR-27: the grant an approved access request opens.
+    openRequested: async ({ subject, agentId, scannedByUserId, ask }) => ({ grantId: (await openRequestedGrant({ subject, agentId, scannedByUserId, ask })).id }),
   });
 }
 

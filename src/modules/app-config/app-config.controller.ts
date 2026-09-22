@@ -6,6 +6,9 @@ import {
   AGENT_JOB_PROOF_LABELS,
   AGENT_JOB_PROOFS,
   EMPLOYEE_INTAKE_PROOF_LABELS,
+  LEAD_LANDING_BLOCKS,
+  LEAD_LANDING_BLOCK_LABELS,
+  REQUIRED_LEAD_LANDING_BLOCKS,
   EMPLOYEE_INTAKE_PROOFS,
   REQUIRED_AGENT_JOB_PROOFS,
   REQUIRED_EMPLOYEE_INTAKE_PROOFS,
@@ -187,6 +190,8 @@ export async function getConfigSchemaHandler(_req: Request, res: Response): Prom
         // Lot G (Q141): the two step ladders, one vocabulary each.
         'agent-job': stepLadderVocabulary({ proofs: AGENT_JOB_PROOFS, required: REQUIRED_AGENT_JOB_PROOFS, labels: AGENT_JOB_PROOF_LABELS }),
         'employee-intake': stepLadderVocabulary({ proofs: EMPLOYEE_INTAKE_PROOFS, required: REQUIRED_EMPLOYEE_INTAKE_PROOFS, labels: EMPLOYEE_INTAKE_PROOF_LABELS }),
+        // LH7: the invite landing's copy per side; its "proofs" are the hook blocks the page shows.
+        'lead-landing': stepLadderVocabulary({ proofs: LEAD_LANDING_BLOCKS, required: REQUIRED_LEAD_LANDING_BLOCKS, labels: LEAD_LANDING_BLOCK_LABELS, repeatable: true }),
       },
       enums: { entry: { value: 'string — unique in its group', label: 'string', description: 'string?' } },
       routes: {

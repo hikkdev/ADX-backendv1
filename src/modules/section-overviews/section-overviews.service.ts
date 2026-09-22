@@ -6,13 +6,14 @@ import { MAX_LIST_PAGE_SIZE, type ListPage } from '../../shared/pagination';
 import { dayWindowISTFor } from '../../shared/time';
 import { advertiserFunnel, findAdvertiserLabels, type AdvertiserFunnel } from '../advertisers';
 import { findAgentLabels, getLeaderboardForCity, type LeaderboardView } from '../agents';
+import { leadFunnel, LEAD_STAGES, type LeadFunnelRows } from '../leads';
 import { employeesOverview, workloadReport, type EmployeesOverview, type WorkloadReport } from '../employees';
 import { findPrintPartnerLabels } from '../print-partners';
 import { cityKeyFor } from '../pricing';
 import { findPublisherLabels } from '../publishers';
 import { supplyFunnel, type SupplyFunnel } from '../supply';
 import { prismaSectionOverviewsRepository as repository } from './prisma-section-overviews.repository';
-import type { CityCount, CityGroup, DayCount, DaySum, GroupCount, KycStateCountMap, Scope, Window } from './section-overviews.repository';
+import type { CityCount, CityGroup, DayCount, DaySum, GroupCount, KycStateCountMap, LeadTimeToConvert, Scope, Window } from './section-overviews.repository';
 
 /**
  * One overview read per user section — package O-B.
@@ -32,7 +33,8 @@ import type { CityCount, CityGroup, DayCount, DaySum, GroupCount, KycStateCountM
  * here.
  */
 
-export const SECTIONS = ['publishers', 'advertisers', 'agents', 'print-partners', 'employees', 'users'] as const;
+// LH9: the Leads section joined the six user sections.
+export const SECTIONS = ['publishers', 'advertisers', 'agents', 'print-partners', 'employees', 'users', 'leads'] as const;
 export type Section = (typeof SECTIONS)[number];
 
 export const SECTION_OVERVIEW_CACHE_SECONDS = 60;
@@ -194,7 +196,58 @@ export type UsersOverview = Base & {
   breakdowns: { byRole: ListPage<CountRow>; byLanguage: ListPage<CountRow>; byCity: ListPage<CityRow> };
 };
 
+/**
+ * LH9 (the Lead Hunt): the Leads overview — aggregates only. The funnel by
+ * stage (with the pipeline value per stage), the conversion by source /
+ * agent / city / category / channel, the loss mix and the mean time to
+ * convert are `leads.funnel`'s own answer over the leads CREATED in the
+ * window, carried as it is; the tiles and series read the window's events
+ * (created, first contacted, converted, activated, lost) against the
+ * previous window; the cost per activation is the hunt's recorded rewards
+ * plus the priority top-ups over the catches; the recycle yield is how many
+ * of the leads recycled in the window have converted since.
+ */
+export type ConversionRow = { key: string; label: string; href: string | null; leads: number; converted: number; activated: number; ratePct: string };
+export type ChannelRow = { key: string; label: string; href: null; firstContact: number; engaged: number; converted: number };
+export type StageRow = { key: string; label: string; count: number; value: Money | null; avgDaysInStage: number | null };
+
+export type LeadsOverview = Base & {
+  section: 'leads';
+  tiles: {
+    /** Open now — neither converted nor lost. A state. */
+    open: Figure;
+    newInWindow: Figure;
+    contacted: Figure;
+    converted: Figure;
+    activated: Figure;
+    lost: Figure;
+    /** Open leads by temperature now. A state. */
+    byTemperature: ListPage<CountRow>;
+  };
+  /** The funnel over the window's cohort, as `/leads/funnel` answers it, with the stages in the pipeline's own order. */
+  funnel: { byStage: StageRow[]; totals: LeadFunnelRows['totals']; lossMix: LeadFunnelRows['lossMix'] };
+  series: { newLeads: Series; conversions: Series; activations: Series };
+  breakdowns: {
+    bySource: ListPage<ConversionRow>;
+    byAgent: ListPage<ConversionRow & { displayId: string | null }>;
+    byCity: ListPage<CityRow & { converted: number; ratePct: string }>;
+    byCategory: ListPage<ConversionRow>;
+    byChannel: ListPage<ChannelRow>;
+  };
+  conversion: {
+    /** Days from creation to conversion over the rows converted in the window; null with none. */
+    timeToConvert: { meanDays: number | null; medianDays: number | null; previousMeanDays: number | null; previousMedianDays: number | null };
+    /** (incentives + top-ups) / activations, this window and the one before; null with no activation. */
+    costPerActivation: { value: Money | null; previous: Money | null; incentives: Money; topUps: Money; activations: number };
+    /** The pipeline's worth by stage, summed — the funnel's `value` column folded. */
+    pipelineValue: Money;
+  };
+  recycle: { recycled: Figure; convertedAfterRecycle: Figure; yieldPct: string };
+  money: { incentives: MoneyFigure; topUps: MoneyFigure };
+};
+
 export type SectionOverview =
+  | LeadsOverview
   | PublishersOverview
   | AdvertisersOverview
   | AgentsOverview
@@ -780,8 +833,173 @@ async function users(resolved: ResolvedWindow, scope: Scope, now: Date): Promise
 
 /* ── The read ────────────────────────────────────────────────────────── */
 
+/* ── LH9: leads ──────────────────────────────────────────────────────── */
+
+const STAGE_LABEL: Record<string, string> = {
+  SOURCED: 'Sourced',
+  SCORED: 'Scored',
+  CLAIMED: 'Claimed',
+  CONTACTED: 'Contacted',
+  ENGAGED: 'Engaged',
+  VISIT_BOOKED: 'Visit booked',
+  PROPOSED: 'Proposed',
+  CONVERTED: 'Converted',
+  ONBOARDING: 'Onboarding',
+  ACTIVATED: 'Activated',
+  RETAINED: 'Retained',
+  LOST: 'Lost',
+};
+
+const CHANNEL_LABEL: Record<string, string> = {
+  SMS: 'SMS',
+  EMAIL: 'Email',
+  WHATSAPP: 'WhatsApp',
+  INSTAGRAM: 'Instagram',
+  MESSENGER: 'Messenger',
+  GOOGLE_BUSINESS: 'Google Business',
+  CALL: 'Call',
+  LINKEDIN: 'LinkedIn',
+  IN_PERSON: 'In person',
+  LINK: 'Invite link',
+  OTHER: 'Other',
+};
+
+const perActivation = (incentives: Money, topUps: Money, activations: number): Money | null =>
+  activations > 0 ? money(new Decimal(incentives).plus(topUps).dividedBy(activations).toFixed(2)) : null;
+
+const timeOrNull = (read: LeadTimeToConvert, field: 'meanDays' | 'medianDays'): number | null => (read.converted > 0 ? read[field] : null);
+
+async function leads(resolved: ResolvedWindow, scope: Scope, now: Date): Promise<LeadsOverview> {
+  const { window, previous } = resolved;
+  const city = scope.city?.trim();
+  const [
+    open,
+    created,
+    createdBefore,
+    createdByDay,
+    createdByDayBefore,
+    contacted,
+    contactedBefore,
+    converted,
+    convertedBefore,
+    convertedByDay,
+    convertedByDayBefore,
+    activated,
+    activatedBefore,
+    activatedByDay,
+    activatedByDayBefore,
+    lost,
+    lostBefore,
+    byTemperature,
+    byCity,
+    time,
+    timeBefore,
+    incentives,
+    incentivesBefore,
+    topUps,
+    topUpsBefore,
+    recycled,
+    recycledBefore,
+    afterRecycle,
+    afterRecycleBefore,
+    funnel,
+  ] = await Promise.all([
+    repository.leadsOpen(scope),
+    repository.leadsCreated(window, scope),
+    repository.leadsCreated(previous, scope),
+    repository.leadsCreatedByDay(window, scope),
+    repository.leadsCreatedByDay(previous, scope),
+    repository.leadsContacted(window, scope),
+    repository.leadsContacted(previous, scope),
+    repository.leadsConverted(window, scope),
+    repository.leadsConverted(previous, scope),
+    repository.leadsConvertedByDay(window, scope),
+    repository.leadsConvertedByDay(previous, scope),
+    repository.leadsActivated(window, scope),
+    repository.leadsActivated(previous, scope),
+    repository.leadsActivatedByDay(window, scope),
+    repository.leadsActivatedByDay(previous, scope),
+    repository.leadsLost(window, scope),
+    repository.leadsLost(previous, scope),
+    repository.leadsByTemperature(scope),
+    repository.leadsByCity(window, scope),
+    repository.leadsTimeToConvert(window, scope),
+    repository.leadsTimeToConvert(previous, scope),
+    repository.leadIncentivesRecorded(window, scope),
+    repository.leadIncentivesRecorded(previous, scope),
+    repository.leadTopUpsRecorded(window, scope),
+    repository.leadTopUpsRecorded(previous, scope),
+    repository.leadsRecycled(window, scope),
+    repository.leadsRecycled(previous, scope),
+    repository.leadsConvertedAfterRecycle(window, scope),
+    repository.leadsConvertedAfterRecycle(previous, scope),
+    // The funnel over the window's cohort — `to` is inclusive on the funnel's side, so the window's last instant.
+    leadFunnel({ ...(city ? { city } : {}), from: window.start, to: new Date(window.end.getTime() - 1) }),
+  ]);
+
+  const conversionRows = (rows: readonly { key: string; label?: string; total: number; converted: number; activated: number }[], href: (key: string) => string | null, label: (key: string) => string = titleCase): ConversionRow[] =>
+    rows.map((row) => ({ key: row.key, label: row.label ?? label(row.key), href: href(row.key), leads: row.total, converted: row.converted, activated: row.activated, ratePct: pct(row.converted, row.total) }));
+  const agentRows = await labelled(
+    funnel.byAgent.map((row) => ({ key: row.key, leads: row.total, converted: row.converted, activated: row.activated, ratePct: pct(row.converted, row.total) })),
+    findAgentLabels,
+    (id) => `/agents/${id}`,
+  );
+  const byStage = new Map(funnel.byStage.map((row) => [row.stage, row]));
+  const stages: StageRow[] = LEAD_STAGES.map((stage) => {
+    const row = byStage.get(stage);
+    return { key: stage, label: STAGE_LABEL[stage] ?? titleCase(stage), count: row?.count ?? 0, value: row?.value ? money(row.value) : null, avgDaysInStage: row?.avgDaysInStage ?? null };
+  });
+  const pipelineValue = money(stages.reduce((acc, row) => acc.plus(row.value ?? 0), new Decimal(0)));
+
+  return {
+    ...base('leads', resolved, scope.city, now),
+    tiles: {
+      open: stateFigure(open),
+      newInWindow: figure(created, createdBefore),
+      contacted: figure(contacted, contactedBefore),
+      converted: figure(converted, convertedBefore),
+      activated: figure(activated, activatedBefore),
+      lost: figure(lost, lostBefore),
+      byTemperature: listOf(countRows(byTemperature, (key) => `/leads/list?temperature=${key}`)),
+    },
+    funnel: { byStage: stages, totals: funnel.totals, lossMix: funnel.lossMix },
+    series: {
+      newLeads: seriesOf(resolved, createdByDay, createdByDayBefore),
+      conversions: seriesOf(resolved, convertedByDay, convertedByDayBefore),
+      activations: seriesOf(resolved, activatedByDay, activatedByDayBefore),
+    },
+    breakdowns: {
+      bySource: listOf(conversionRows(funnel.bySource, (key) => (key === 'none' ? null : `/leads/sources?key=${encodeURIComponent(key)}`), (key) => key)),
+      byAgent: listOf(agentRows),
+      byCity: listOf(byCity.map((row) => ({ ...cityRowOf(row, (slug) => `/leads?city=${encodeURIComponent(slug)}`), count: row.count, converted: row.converted, ratePct: pct(row.converted, row.count) }))),
+      byCategory: listOf(conversionRows(funnel.byCategory, (key) => `/leads/list?category=${encodeURIComponent(key)}`, (key) => key)),
+      byChannel: listOf(funnel.byChannel.map((row) => ({ key: row.channel, label: CHANNEL_LABEL[row.channel] ?? titleCase(row.channel), href: null, firstContact: row.firstContact, engaged: row.engaged, converted: row.converted }))),
+    },
+    conversion: {
+      timeToConvert: {
+        meanDays: timeOrNull(time, 'meanDays'),
+        medianDays: timeOrNull(time, 'medianDays'),
+        previousMeanDays: timeOrNull(timeBefore, 'meanDays'),
+        previousMedianDays: timeOrNull(timeBefore, 'medianDays'),
+      },
+      costPerActivation: {
+        value: perActivation(incentives, topUps, activated),
+        previous: perActivation(incentivesBefore, topUpsBefore, activatedBefore),
+        incentives: money(incentives),
+        topUps: money(topUps),
+        activations: activated,
+      },
+      pipelineValue,
+    },
+    recycle: { recycled: figure(recycled, recycledBefore), convertedAfterRecycle: figure(afterRecycle, afterRecycleBefore), yieldPct: pct(afterRecycle, recycled) },
+    money: { incentives: moneyFigure(incentives, incentivesBefore), topUps: moneyFigure(topUps, topUpsBefore) },
+  };
+}
+
 function load(section: Section, resolved: ResolvedWindow, scope: Scope, now: Date): Promise<SectionOverview> {
   switch (section) {
+    case 'leads':
+      return leads(resolved, scope, now);
     case 'publishers':
       return publishers(resolved, scope, now);
     case 'advertisers':

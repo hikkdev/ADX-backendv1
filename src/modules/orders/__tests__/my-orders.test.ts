@@ -21,7 +21,7 @@ const { queries, agents } = vi.hoisted(() => ({
     getAllOrders: vi.fn(),
     getOrderById: vi.fn(),
   },
-  agents: { requireAgentProfile: vi.fn(), findAgentProfile: vi.fn() },
+  agents: { requireAgentProfile: vi.fn(), findAgentProfile: vi.fn(), dispatchAskFor: vi.fn(async () => ({})), isBelowRequiredGrade: vi.fn(async () => false), agentMeetsGrade: vi.fn(async () => true), getRoutingSettings: vi.fn(async () => ({ bands: { INDIVIDUAL: 'G1', SMALL_AGENCY: 'G2', LARGE_AGENCY: 'G3' }, leadBands: { STANDARD: 'G1', KEY: 'G3', ENTERPRISE: 'G4' }, enforce: true })) },
 }));
 
 vi.mock('../orders.queries', () => queries);

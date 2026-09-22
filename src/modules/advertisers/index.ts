@@ -11,7 +11,7 @@
  * so the campaign model can land without reopening anything here.
  */
 import { registerAdvertiserOnboardingPort } from '../qr';
-import { commitClaim, prepareClaim } from './advertiser-onboarding.service';
+import { commitClaim, prepareClaim, describeForQr, workingAgentIdForQr } from './advertiser-onboarding.service';
 
 export { advertiserRouter, refundDeskRouter, topUpDeskRouter } from './advertisers.routes';
 
@@ -21,7 +21,7 @@ export { advertiserRouter, refundDeskRouter, topUpDeskRouter } from './advertise
  * reason `publishers` registers its port: `qr` must not import this module.
  */
 export function registerAdvertiserModule(): void {
-  registerAdvertiserOnboardingPort({ prepareClaim, commitClaim });
+  registerAdvertiserOnboardingPort({ prepareClaim, commitClaim, describe: describeForQr, workingAgentId: workingAgentIdForQr });
 }
 
 /**

@@ -14,7 +14,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const { notifications, users, agents } = vi.hoisted(() => ({
   notifications: { createNotification: vi.fn(async (data: unknown) => ({ id: 'ntf_1', ...(data as object) })) },
   users: { listAdminUserIds: vi.fn(async () => ['usr_admin']) },
-  agents: { getAgentWithUser: vi.fn() },
+  agents: { getAgentWithUser: vi.fn(), dispatchAskFor: vi.fn(async () => ({})), isBelowRequiredGrade: vi.fn(async () => false), agentMeetsGrade: vi.fn(async () => true), getRoutingSettings: vi.fn(async () => ({ bands: { INDIVIDUAL: 'G1', SMALL_AGENCY: 'G2', LARGE_AGENCY: 'G3' }, leadBands: { STANDARD: 'G1', KEY: 'G3', ENTERPRISE: 'G4' }, enforce: true })), findAgentProfile: vi.fn() },
 }));
 
 vi.mock('../../notifications', () => notifications);

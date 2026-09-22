@@ -2,6 +2,7 @@ import { dayWindowIST } from '../../shared/time';
 import { getAgentMilestones } from '../order-milestones';
 import { getAgentOrdersInWindow } from '../orders';
 import { requireAgentProfile } from '../agents';
+import { openTaggedTasks } from '../work';
 import { visitKindLabel } from './visits.schema';
 import { outcomesFor, visitsInRange, visitsToday, type VisitCard } from './visits.service';
 
@@ -25,7 +26,8 @@ import { outcomesFor, visitsInRange, visitsToday, type VisitCard } from './visit
  * (an onboarding or renewal call that is not on an order).
  */
 export type DayEntry = {
-  kind: 'JOB' | 'SITE_VISIT' | 'FIELD_VISIT';
+  /** LH6: CALLBACK is a call a lead asked for — a task on the agent's plate, due today or overdue, that opens the lead. */
+  kind: 'JOB' | 'SITE_VISIT' | 'FIELD_VISIT' | 'CALLBACK';
   id: string;
   title: string;
   where: string | null;
@@ -37,12 +39,14 @@ export type DayEntry = {
   visitKind?: string;
   /** E7-2, field visits only: the drive the visit belongs to, or null. */
   campaignTag?: string | null;
+  /** LH6, callbacks only: the lead the call is to, so the row opens it. */
+  leadId?: string | null;
 };
 
 export type AgentDay = {
   date: string;
   entries: DayEntry[];
-  counts: { jobs: number; siteVisits: number; fieldVisits: number };
+  counts: { jobs: number; siteVisits: number; fieldVisits: number; callbacks: number };
 };
 
 /**
@@ -118,6 +122,21 @@ async function foldFieldVisits(visits: VisitCard[]): Promise<OverlayEntry[]> {
   }));
 }
 
+/** LH6: the callbacks a lead asked for — open `callback` tasks on the agent, due by the end of the day (an overdue one stays until it is made). */
+async function foldCallbacks(userId: string, window: Window): Promise<OverlayEntry[]> {
+  const tasks = await openTaggedTasks(userId, 'callback', window.end).catch(() => []);
+  return tasks.map((task) => ({
+    kind: 'CALLBACK',
+    id: task.id,
+    title: task.title,
+    where: null,
+    at: task.deadline ? task.deadline.toISOString() : null,
+    status: task.status,
+    leadId: task.linkedKind === 'LEAD' ? task.linkedId : null,
+    link: task.linkedKind === 'LEAD' && task.linkedId ? `/leads/${task.linkedId}` : `/work/tasks/${task.id}`,
+  }));
+}
+
 /** Unslotted first — a request with no time needs answering before the day starts — then by time. */
 const byWhen = (a: DayEntry, b: DayEntry): number => {
   if (a.at === null && b.at !== null) return -1;
@@ -129,10 +148,11 @@ export async function getAgentDay(userId: string, now = new Date()): Promise<Age
   const me = await requireAgentProfile(userId);
   const window = dayWindowIST(now);
 
-  const [orders, milestones, fieldVisits] = await Promise.all([
+  const [orders, milestones, fieldVisits, callbacks] = await Promise.all([
     getAgentOrdersInWindow(me.id, window),
     getAgentMilestones(me.id),
     visitsToday(me.id, now),
+    foldCallbacks(userId, window),
   ]);
 
   const jobs = foldJobs(orders as OrderRow[]);
@@ -140,12 +160,12 @@ export async function getAgentDay(userId: string, now = new Date()): Promise<Age
   const field = await foldFieldVisits(fieldVisits);
 
   // The phone's day view never carried links; the shape stays as it was.
-  const entries: DayEntry[] = [...jobs, ...site, ...field].sort(byWhen).map(({ link: _link, ...entry }) => entry);
+  const entries: DayEntry[] = [...jobs, ...site, ...field, ...callbacks].sort(byWhen).map(({ link: _link, ...entry }) => entry);
 
   return {
     date: window.start.toISOString().slice(0, 10),
     entries,
-    counts: { jobs: jobs.length, siteVisits: site.length, fieldVisits: field.length },
+    counts: { jobs: jobs.length, siteVisits: site.length, fieldVisits: field.length, callbacks: callbacks.length },
   };
 }
 

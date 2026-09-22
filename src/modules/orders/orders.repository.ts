@@ -207,7 +207,7 @@ export interface OrdersRepository {
   findAll(query: AdminOrdersQuery): Promise<AdminOrdersPage>;
   findAgentLocation(
     orderId: string,
-  ): Promise<{ agentLatitude: number | null; agentLongitude: number | null; agentLocationUpdatedAt: Date | null } | null>;
+  ): Promise<{ agentLatitude: number | null; agentLongitude: number | null; agentLocationUpdatedAt: Date | null; listing: { latitude: number | null; longitude: number | null } } | null>;
 
   // ── Assignment ──
   findPendingAssignment(orderId: string, agentId: string): Promise<OrderAgentAssignment | null>;

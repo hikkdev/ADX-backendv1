@@ -8,7 +8,7 @@ import {
   releaseCampaignHold,
 } from '../advertisers';
 import { findAgentTier } from '../agents';
-import { transactionAcceptance, type AgreementStanding } from '../agreements';
+import { insertionOrderSigning, transactionAcceptance, type AgreementStanding, type InsertionOrderSigning } from '../agreements';
 import { getPlatformSettings } from '../app-config';
 import { createNotification } from '../notifications';
 import { notifyAdmins, placeOrder } from '../orders';
@@ -110,6 +110,8 @@ export type CampaignReview = {
    * `current` is what authorisation checks: accepted on the version live now.
    */
   agreements: AgreementStanding[];
+  /** DS-3: the insertion order as a signature — required above the threshold or for a listed band; the app's signing door. */
+  signing: InsertionOrderSigning;
   /**
    * The trigger the brief asked for, and the fact that nothing enforces it.
    * The review screen is the last chance to say so before money moves.
@@ -235,9 +237,15 @@ async function priceCampaign(
 
   // Lot D (Q123): the insertion order, on the version live now. Asked here so
   // the review screen can show the gate before the advertiser reaches it.
-  const insertionOrder = await transactionAcceptance('INSERTION_ORDER', { campaignId: campaign.id });
+  const [insertionOrder, signing] = await Promise.all([
+    transactionAcceptance('INSERTION_ORDER', { campaignId: campaign.id }),
+    // DS-3: whether this campaign's insertion order is signed rather than clicked, and where that stands.
+    signingOf(campaign.id),
+  ]);
   const missing = missingAnswers(campaign);
-  if (!insertionOrder.current) {
+  if (signing.required && !signing.satisfied) {
+    missing.push({ step: 'AUTHORIZE', field: 'SIGNATURE_REQUIRED', label: 'Sign the insertion order' });
+  } else if (!insertionOrder.current) {
     missing.push({
       step: 'AUTHORIZE',
       field: 'AGREEMENT_REQUIRED',
@@ -274,6 +282,7 @@ async function priceCampaign(
           ]
         : [],
     agreements: [insertionOrder],
+    signing,
     triggers: triggerPlan(campaign),
     clashes: campaign.spots
       .filter(
@@ -282,6 +291,15 @@ async function priceCampaign(
       .map((spot) => ({ spotId: spot.id, listingId: spot.listingId, title: spot.listing.title, reason: 'NO_SLOT_LEFT' as const })),
   };
   return { review, commissions };
+}
+
+/** DS-3: the rail must never take the review down — a rail that cannot answer reads as "a click is what is wanted". */
+async function signingOf(campaignId: string): Promise<InsertionOrderSigning> {
+  try {
+    return await insertionOrderSigning(campaignId);
+  } catch {
+    return { required: false, satisfied: true, request: null };
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -441,7 +459,7 @@ function assertAuthorisable(
     throw new ApiError(409, 'CONFLICT', 'Payment for this campaign is already authorized.');
   }
 
-  const brief = review.missing.filter((item) => item.field !== 'AGREEMENT_REQUIRED');
+  const brief = review.missing.filter((item) => item.field !== 'AGREEMENT_REQUIRED' && item.field !== 'SIGNATURE_REQUIRED');
   if (brief.length > 0) {
     throw new ApiError(
       400,
@@ -453,6 +471,11 @@ function assertAuthorisable(
   // Lot D (Q123): the insertion order, accepted on the version live now. Its
   // own code, because the app sends the advertiser to the agreement screen on
   // it rather than back into the wizard.
+  // DS-3: a signed insertion order, where the policy asks for one — its own
+  // code, carrying the open request, so the app opens the signing screen.
+  if (options.agreement && review.signing.required && !review.signing.satisfied) {
+    throw new ApiError(403, 'SIGNATURE_REQUIRED', 'Sign the insertion order to authorise the campaign.', { signing: review.signing.request, kind: 'INSERTION_ORDER', missing: review.missing });
+  }
   const insertionOrder = review.agreements.find((item) => item.kind === 'INSERTION_ORDER');
   if (options.agreement && !insertionOrder?.current) {
     throw new ApiError(

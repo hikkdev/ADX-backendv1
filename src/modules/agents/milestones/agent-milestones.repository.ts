@@ -48,4 +48,10 @@ export interface AgentMilestonesRepository {
   countActivity(agentId: string, userId: string, window: Window): Promise<number>;
   sumCreditedIncentives(agentId: string, window: Window): Promise<Decimal>;
   countOnTimeArrivals(agentId: string, window: Window): Promise<number>;
+  /** LH8: leads the agent holds that converted inside the window. */
+  countLeadConversions(agentId: string, window: Window): Promise<number>;
+  /** LH8: leads the agent holds whose first contact was logged inside the window. */
+  countLeadContacts(agentId: string, window: Window): Promise<number>;
+  /** LH8: whether any template of the type exists, active or not — the seed's guard. */
+  hasTemplateOfType(type: MilestoneType): Promise<boolean>;
 }

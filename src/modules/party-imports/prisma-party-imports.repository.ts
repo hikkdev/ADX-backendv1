@@ -154,6 +154,35 @@ export const prismaPartyImportsRepository: PartyImportsRepository = {
     };
   },
 
+  async matchLeads({ mobiles }) {
+    const rows = mobiles.length
+      ? await prisma.lead.findMany({
+          where: { OR: [{ phoneNormalised: { in: mobiles } }, { phone: { in: mobiles } }] },
+          select: { id: true, displayId: true, phone: true, phoneNormalised: true, businessName: true, category: true, contactName: true, email: true, address: true, locality: true, city: true, interest: true },
+        })
+      : [];
+    const blockedMobiles = new Map<string, string>();
+    if (mobiles.length) {
+      const [publishers, advertisers] = await Promise.all([
+        prisma.publisher.findMany({ where: { mobile: { in: mobiles } }, select: { mobile: true, displayId: true } }),
+        prisma.advertiser.findMany({ where: { mobile: { in: mobiles } }, select: { mobile: true, displayId: true } }),
+      ]);
+      for (const row of publishers) blockedMobiles.set(row.mobile, `already publisher ${row.displayId ?? ''}`.trim());
+      for (const row of advertisers) blockedMobiles.set(row.mobile, `already advertiser ${row.displayId ?? ''}`.trim());
+    }
+    return {
+      ...emptyMatch(),
+      byMobile: rows.map((row) => ({
+        id: row.id,
+        displayId: row.displayId,
+        mobile: row.phoneNormalised ?? row.phone ?? '',
+        label: row.businessName,
+        fields: { businessName: row.businessName, category: text(row.category), contactName: text(row.contactName), email: text(row.email), address: text(row.address), locality: text(row.locality), city: text(row.city), interest: text(row.interest) },
+      })),
+      blockedMobiles,
+    };
+  },
+
   async matchPrintPartners({ mobiles, pans, gstins, emails }) {
     const select = {
       id: true,

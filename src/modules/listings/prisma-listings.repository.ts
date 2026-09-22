@@ -439,6 +439,8 @@ export const prismaListingsRepository: ListingsRepository = {
       ...(filter.category ? { category: filter.category } : {}),
       // QR-20: the sub-category, one venue.
       ...(filter.venueTypeId ? { venueTypeId: filter.venueTypeId } : {}),
+      // QR-27: one publisher's spaces.
+      ...(filter.publisherId ? { publisherId: filter.publisherId } : {}),
       ...(filter.display === 'DIGITAL'
         ? { subType: { contains: 'digital', mode: 'insensitive' } }
         : filter.display === 'STATIC'

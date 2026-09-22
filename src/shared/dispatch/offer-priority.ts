@@ -16,6 +16,9 @@
  * rating: no stars, no score out of five — a lane and the number behind it.
  */
 
+import { GRADE_RANK, distanceKm, gradeRank, meetsGrade, tierRank, type AgentGradeCode } from './grade-bands';
+
+
 export const PRIORITY_WINDOW_DAYS = 30;
 export const FAST_LANE_MAX_RATE = 0.1;
 export const MIN_OFFERS_FOR_A_RATE = 5;
@@ -41,6 +44,20 @@ export type DispatchCandidate = {
   activeOrders: number;
   /** Status of every offer inside the window. */
   recentOffers: { status: string }[];
+  /** AG-5: the desk-set grade (null before AG-1 reads as G1), the earned tier, and where the agent is. */
+  grade?: string | null;
+  tier?: string | null;
+  tierLevel?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+};
+
+/** AG-5: what the work asks for — the grade its band wants, and where it is. */
+export type DispatchAsk = {
+  requiredGrade?: AgentGradeCode;
+  /** Off: the grade is preferred, not demanded. */
+  enforce?: boolean;
+  spot?: { latitude: number | null; longitude: number | null } | null;
 };
 
 export function priorityOf(recentOffers: { status: string }[]): OfferPriority {
@@ -70,17 +87,41 @@ export function underCap(candidate: Pick<DispatchCandidate, 'maxActiveOrders' | 
 }
 
 /**
- * The order the sweep offers in. Fast lane first; then the lower decline
- * rate; then the lighter load; then the longer-serving agent. Stable, so two
- * equal agents keep the order they were read in.
+ * The order the sweep offers in.
+ *
+ * AG-5 first: agents below the grade the work's band asks for are dropped
+ * (when the settings enforce it), and among the rest the closest fit to that
+ * grade comes first — a G2 spot goes to a G2 before a G4, so the senior
+ * agents stay free for the accounts that need them — then the higher tier.
+ * Then DR 07's rule as it was: fast lane first, the lower decline rate, the
+ * nearer agent (when both sides have a fix), the lighter load, the
+ * longer-serving agent. Stable, so two equal agents keep the order they were
+ * read in.
  */
-export function rankCandidates<T extends DispatchCandidate>(candidates: T[]): T[] {
-  const scored = candidates.map((candidate, index) => ({ candidate, index, priority: priorityOf(candidate.recentOffers) }));
+export function rankCandidates<T extends DispatchCandidate>(candidates: T[], ask: DispatchAsk = {}): T[] {
+  const required = ask.requiredGrade ?? 'G1';
+  const enforce = ask.enforce ?? true;
+  const pool = enforce && ask.requiredGrade ? candidates.filter((c) => meetsGrade(c.grade, required)) : candidates;
+  const scored = pool.map((candidate, index) => ({
+    candidate,
+    index,
+    priority: priorityOf(candidate.recentOffers),
+    gap: Math.max(0, gradeRank(candidate.grade) - GRADE_RANK[required]),
+    tier: tierRank(candidate.tier, candidate.tierLevel),
+    km: ask.spot ? distanceKm({ latitude: candidate.latitude ?? null, longitude: candidate.longitude ?? null }, ask.spot) : null,
+  }));
   scored.sort((a, b) => {
+    // An agent below the grade (only when not enforced) ranks after everyone who meets it.
+    const shortA = gradeRank(a.candidate.grade) < GRADE_RANK[required] ? 1 : 0;
+    const shortB = gradeRank(b.candidate.grade) < GRADE_RANK[required] ? 1 : 0;
+    if (shortA !== shortB) return shortA - shortB;
+    if (a.gap !== b.gap) return a.gap - b.gap;
+    if (a.tier !== b.tier) return b.tier - a.tier;
     if (a.priority.lane !== b.priority.lane) return a.priority.lane === 'FAST' ? -1 : 1;
     const rateA = a.priority.declineRate ?? 0;
     const rateB = b.priority.declineRate ?? 0;
     if (rateA !== rateB) return rateA - rateB;
+    if (a.km !== null && b.km !== null && a.km !== b.km) return a.km - b.km;
     if (a.candidate.activeOrders !== b.candidate.activeOrders) return a.candidate.activeOrders - b.candidate.activeOrders;
     const byAge = a.candidate.createdAt.getTime() - b.candidate.createdAt.getTime();
     return byAge !== 0 ? byAge : a.index - b.index;
@@ -89,6 +130,6 @@ export function rankCandidates<T extends DispatchCandidate>(candidates: T[]): T[
 }
 
 /** The sweep's pick: the first ranked candidate with room for the work. */
-export function pickAssignable<T extends DispatchCandidate>(candidates: T[]): T | null {
-  return rankCandidates(candidates).find(underCap) ?? null;
+export function pickAssignable<T extends DispatchCandidate>(candidates: T[], ask: DispatchAsk = {}): T | null {
+  return rankCandidates(candidates, ask).find(underCap) ?? null;
 }

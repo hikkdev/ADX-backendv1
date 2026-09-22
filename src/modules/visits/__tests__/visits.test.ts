@@ -181,7 +181,7 @@ describe('answering an offer', () => {
 describe('completing a visit', () => {
   it('records the SITE_VISIT incentive at the agent\'s tier and copies the amount onto the card', async () => {
     repository.findById.mockResolvedValue(visit({ status: 'IN_PROGRESS', offerExpiresAt: null }));
-    const card = await completeVisit('vst_1', 'usr_agent', undefined, NOW);
+    const card = await completeVisit('vst_1', 'usr_agent', undefined, {}, NOW);
     expect(payouts.recordIncentive).toHaveBeenCalledWith(
       expect.objectContaining({ agentId: 'agt_1', event: 'SITE_VISIT', tier: 'SILVER' }),
       NOW,
@@ -192,19 +192,39 @@ describe('completing a visit', () => {
     );
     // "₹145 earned" on the card is the figure the wallet will show.
     expect(card.earned).toBe('500.00');
+    // LH10: nothing was sent, so the proof columns stay null — which is what the QA draw reads.
+    expect(repository.update.mock.calls[0]![1]).not.toHaveProperty('proofAt');
+  });
+
+  it('LH10: stamps the proof a completion carries — the photo, the fix and the moment', async () => {
+    repository.findById.mockResolvedValue(visit({ status: 'IN_PROGRESS', offerExpiresAt: null }));
+    await completeVisit('vst_1', 'usr_agent', 'Met the owner', { proofFileId: 'fil_1', latitude: 12.9352, longitude: 77.6245 }, NOW);
+    expect(repository.update).toHaveBeenCalledWith(
+      'vst_1',
+      expect.objectContaining({ proofFileId: 'fil_1', proofLatitude: 12.9352, proofLongitude: 77.6245, proofAt: NOW }),
+    );
+
+    // A fix with no photo still stamps what came.
+    vi.clearAllMocks();
+    repository.findById.mockResolvedValue(visit({ status: 'IN_PROGRESS', offerExpiresAt: null }));
+    await completeVisit('vst_1', 'usr_agent', undefined, { latitude: 12.9, longitude: 77.6 }, NOW);
+    const patch = repository.update.mock.calls[0]![1] as Record<string, unknown>;
+    expect(patch['proofLatitude']).toBe(12.9);
+    expect(patch).not.toHaveProperty('proofFileId');
+    expect(patch['proofAt']).toEqual(NOW);
   });
 
   it('is still done when no rate is configured — it just earned nothing the platform can name', async () => {
     repository.findById.mockResolvedValue(visit({ status: 'IN_PROGRESS', offerExpiresAt: null }));
     payouts.recordIncentive.mockRejectedValue(new Error('No incentive rate'));
-    const card = await completeVisit('vst_1', 'usr_agent', undefined, NOW);
+    const card = await completeVisit('vst_1', 'usr_agent', undefined, {}, NOW);
     expect(card.status).toBe('COMPLETED');
     expect(card.earned).toBeNull();
   });
 
   it('is a read the second time', async () => {
     repository.findById.mockResolvedValue(visit({ status: 'COMPLETED', completedAt: NOW, earnedAmount: '500.00' }));
-    await completeVisit('vst_1', 'usr_agent', undefined, NOW);
+    await completeVisit('vst_1', 'usr_agent', undefined, {}, NOW);
     expect(payouts.recordIncentive).not.toHaveBeenCalled();
   });
 });

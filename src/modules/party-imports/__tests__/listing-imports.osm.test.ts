@@ -36,7 +36,8 @@ const { repository, pricing, audit, integrations, cache, listings, supply, rateC
   pricing: { resolveCity: vi.fn<AnyFn>(), citySupport: vi.fn<AnyFn>() },
   audit: { logActivity: vi.fn<AnyFn>(), auditDiff: vi.fn<AnyFn>(() => ({})) },
   integrations: { getEffectiveMapsConfig: vi.fn<AnyFn>() },
-  cache: { redis: { set: vi.fn<AnyFn>() } },
+  // `call` because the leads adapter reaches the leads router, whose rate limiter builds its Redis store at import.
+  cache: { redis: { set: vi.fn<AnyFn>(), call: vi.fn<AnyFn>(async (command: string) => (command === 'SCRIPT' ? 'sha' : null)) } },
   listings: { createListing: vi.fn<AnyFn>(), updateListing: vi.fn<AnyFn>(), assertCanCreateForPublisher: vi.fn<AnyFn>(), LISTING_CATEGORIES: ['INDOOR', 'OUTDOOR', 'TRANSIT', 'MEDIA'] },
   supply: { createAttempt: vi.fn<AnyFn>(), attachListingToAttempt: vi.fn<AnyFn>() },
   rateCards: { floorFor: vi.fn<AnyFn>() },

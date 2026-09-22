@@ -2,7 +2,8 @@ import { z } from 'zod';
 import { upperEnum } from '../../../shared/validation';
 import { MILESTONE_CHIPS } from './milestone.rules';
 
-export const MILESTONE_TYPES = ['ONBOARDING', 'REVENUE', 'ACTIVITY', 'QUALITY'] as const;
+// LH8: the two lead types — conversions and first contacts inside the window.
+export const MILESTONE_TYPES = ['ONBOARDING', 'REVENUE', 'ACTIVITY', 'QUALITY', 'LEAD_CONVERSIONS', 'LEAD_CONTACTS'] as const;
 
 /** A rupee amount on the wire is a decimal string, never a float. */
 const amount = z

@@ -8,6 +8,7 @@ import type {
   DaySum,
   GroupCount,
   KycStateCountMap,
+  LeadsOverviewRepository,
   Scope,
   SectionOverviewsRepository,
   Window,
@@ -136,6 +137,115 @@ async function kycByState(count: (state: KycQueueState) => Promise<number>): Pro
 }
 
 const sum = (value: Decimal | null | undefined): Money => money(value ?? 0);
+
+/* ── LH9: the Leads overview ─────────────────────────────────────────── */
+
+const LEAD_EVENTS = ['LEAD_CONVERTED', 'LEAD_ACTIVATED', 'LEAD_RETAINED'] as const;
+/** Every recorded hunt reward but the refused ones — pending money is a cost the platform has taken on. */
+const leadIncentiveWhere = (window: Window, scope: Scope): Prisma.AgentIncentiveWhereInput => ({
+  event: { in: [...LEAD_EVENTS] },
+  status: { not: 'REJECTED' },
+  createdAt: between(window),
+  agent: viaCity(scope),
+});
+/** The city clause for a raw SELECT over "Lead" (the key, or the spelling for a row with no key). */
+const leadCitySql = (scope: Scope): Prisma.Sql =>
+  scope.city
+    ? scope.cityId
+      ? Prisma.sql`AND ("cityId" = ${scope.cityId} OR ("cityId" IS NULL AND lower("city") = lower(${scope.city.trim()})))`
+      : Prisma.sql`AND "cityId" IS NULL AND lower("city") = lower(${scope.city.trim()})`
+    : Prisma.empty;
+
+const leadsOverviewRepository: LeadsOverviewRepository = {
+  leadsOpen(scope) {
+    return prisma.lead.count({ where: { status: { notIn: ['CONVERTED', 'LOST'] }, ...cityOf(scope) } });
+  },
+  leadsCreated(window, scope) {
+    return prisma.lead.count({ where: { createdAt: between(window), ...cityOf(scope) } });
+  },
+  async leadsCreatedByDay(window, scope) {
+    const rows = await prisma.lead.groupBy({ by: ['createdAt'], where: { createdAt: between(window), ...cityOf(scope) }, _count: { _all: true } });
+    return foldDays(rows.map((row) => ({ at: row.createdAt, count: row._count._all })));
+  },
+  leadsContacted(window, scope) {
+    return prisma.lead.count({ where: { firstContactedAt: between(window), ...cityOf(scope) } });
+  },
+  leadsConverted(window, scope) {
+    return prisma.lead.count({ where: { convertedAt: between(window), ...cityOf(scope) } });
+  },
+  async leadsConvertedByDay(window, scope) {
+    const rows = await prisma.lead.groupBy({ by: ['convertedAt'], where: { convertedAt: between(window), ...cityOf(scope) }, _count: { _all: true } });
+    return foldDays(rows.map((row) => ({ at: row.convertedAt, count: row._count._all })));
+  },
+  leadsActivated(window, scope) {
+    return prisma.lead.count({ where: { activatedAt: between(window), ...cityOf(scope) } });
+  },
+  async leadsActivatedByDay(window, scope) {
+    const rows = await prisma.lead.groupBy({ by: ['activatedAt'], where: { activatedAt: between(window), ...cityOf(scope) }, _count: { _all: true } });
+    return foldDays(rows.map((row) => ({ at: row.activatedAt, count: row._count._all })));
+  },
+  leadsLost(window, scope) {
+    return prisma.lead.count({ where: { stage: 'LOST', stageChangedAt: between(window), ...cityOf(scope) } });
+  },
+  async leadsByTemperature(scope) {
+    const rows = await prisma.lead.groupBy({ by: ['temperature'], where: { status: { notIn: ['CONVERTED', 'LOST'] }, temperature: notNull, ...cityOf(scope) }, _count: { _all: true } });
+    return groups(rows.map((row) => ({ key: row.temperature, count: row._count._all })));
+  },
+  async leadsByCity(window, scope) {
+    const created = { createdAt: between(window) };
+    const [keyed, typed, keyedWon, typedWon] = await Promise.all([
+      prisma.lead.groupBy({ by: ['cityId'], where: { ...created, cityId: notNull, ...cityOf(scope) }, _count: { _all: true } }),
+      prisma.lead.groupBy({ by: ['city'], where: { ...created, cityId: null, city: notNull, ...cityOf(scope) }, _count: { _all: true } }),
+      prisma.lead.groupBy({ by: ['cityId'], where: { ...created, status: 'CONVERTED', cityId: notNull, ...cityOf(scope) }, _count: { _all: true } }),
+      prisma.lead.groupBy({ by: ['city'], where: { ...created, status: 'CONVERTED', cityId: null, city: notNull, ...cityOf(scope) }, _count: { _all: true } }),
+    ]);
+    const cities = await cityGroups(keyed, typed);
+    const wonByKey = new Map(keyedWon.map((row) => [row.cityId, row._count._all]));
+    const wonTyped = typedWon.reduce((n, row) => n + row._count._all, 0);
+    return cities.map((row) => ({ ...row, converted: row.cityId ? (wonByKey.get(row.cityId) ?? 0) : wonTyped }));
+  },
+  async leadsTimeToConvert(window, scope) {
+    const rows = await prisma.$queryRaw<{ converted: bigint | number; mean: unknown; median: unknown }[]>(
+      Prisma.sql`SELECT COUNT(*) AS converted,
+          AVG(EXTRACT(EPOCH FROM ("convertedAt" - "createdAt")) / 86400) AS mean,
+          PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM ("convertedAt" - "createdAt")) / 86400) AS median
+        FROM "Lead"
+        WHERE "convertedAt" >= ${window.start} AND "convertedAt" < ${window.end} ${leadCitySql(scope)}`,
+    );
+    const row = rows[0];
+    const days = (raw: unknown): number => {
+      const value = Number(raw);
+      return Number.isFinite(value) ? Math.round(value * 10) / 10 : 0;
+    };
+    return { converted: Number(row?.converted ?? 0), meanDays: days(row?.mean), medianDays: days(row?.median) };
+  },
+  async leadIncentivesRecorded(window, scope) {
+    const result = await prisma.agentIncentive.aggregate({
+      where: { ...leadIncentiveWhere(window, scope), NOT: { orderId: { startsWith: 'priority:' } } },
+      _sum: { amount: true },
+    });
+    return sum(result._sum.amount);
+  },
+  async leadTopUpsRecorded(window, scope) {
+    const result = await prisma.agentIncentive.aggregate({
+      where: { ...leadIncentiveWhere(window, scope), orderId: { startsWith: 'priority:' } },
+      _sum: { amount: true },
+    });
+    return sum(result._sum.amount);
+  },
+  leadsRecycled(window, scope) {
+    return prisma.lead.count({ where: { recycledAt: between(window), ...cityOf(scope) } });
+  },
+  async leadsConvertedAfterRecycle(window, scope) {
+    // A column-to-column comparison Prisma's builder cannot express: one COUNT.
+    const rows = await prisma.$queryRaw<{ count: bigint | number }[]>(
+      Prisma.sql`SELECT COUNT(*) AS count FROM "Lead"
+        WHERE "recycledAt" >= ${window.start} AND "recycledAt" < ${window.end}
+          AND "convertedAt" IS NOT NULL AND "convertedAt" >= "recycledAt" ${leadCitySql(scope)}`,
+    );
+    return Number(rows[0]?.count ?? 0);
+  },
+};
 
 export const prismaSectionOverviewsRepository: SectionOverviewsRepository = {
   /* ── publishers ──────────────────────────────────────────────────────── */
@@ -650,6 +760,9 @@ export const prismaSectionOverviewsRepository: SectionOverviewsRepository = {
     ]);
     return mergeCityGroups([publishers, advertisers, agents]);
   },
+
+  /* ── leads (LH9) ─────────────────────────────────────────────────────── */
+  ...leadsOverviewRepository,
 };
 
 /** A login with an agent profile — in the city, when one is asked for. */

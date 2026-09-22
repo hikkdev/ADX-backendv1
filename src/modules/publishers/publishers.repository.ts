@@ -1,6 +1,6 @@
 import type { KycQueueState } from '../../shared/kyc-state';
 import type { Provenance } from '../../shared/onboarding';
-import type { Gender } from '../../shared/database';
+import type { Gender, PartySizeBand } from '../../shared/database';
 import type {
   KycStatus,
   Listing,
@@ -93,6 +93,8 @@ export type PublisherPatch = Partial<{
   contactName: string;
   contactMobile: string;
   contactEmail: string;
+  /** AG-5: the band ops sets — the withdrawal ladder and, since AG-5, the grade of agent the publisher's work is routed to. */
+  sizeBand: PartySizeBand;
 }>;
 
 export type KycDocuments = Partial<{

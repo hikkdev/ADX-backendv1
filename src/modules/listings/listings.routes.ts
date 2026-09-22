@@ -27,6 +27,7 @@ import {
   unsaveListingHandler,
   updateListingHandler,
   publishListingHandler,
+  verifyListingVehicleRcHandler,
   repriceLogHandler,
   spotPageHandler,
   submitListingHandler,
@@ -152,6 +153,8 @@ listingRouter.post(
   asyncHandler(sendBackListingHandler),
 );
 listingRouter.post('/:listingId/publish', requireRole('ADMIN'), asyncHandler(publishListingHandler));
+/* AG-4: a vehicle put up as a spot — the desk checks its RC with Cashfree's lookup. */
+listingRouter.post('/:listingId/vehicle-rc/verify', requireRole('ADMIN'), asyncHandler(verifyListingVehicleRcHandler));
 
 /**
  * Lot D (Q5): the advertiser's saved spaces, under their account but owned

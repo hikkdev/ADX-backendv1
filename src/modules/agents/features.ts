@@ -64,3 +64,42 @@ feature('agent.work-preferences', {
     'What work an agent takes, and where.',
   routes: ['/api/v1/agents/me/preferences'],
 });
+
+feature('agent.application', {
+  surfaces: ['APP_AGENT', 'CONSOLE'],
+  owner: 'agent-experience',
+  kind: 'FEATURE',
+  launch: 'on',
+  description:
+    'AG-1: the agent application — apply in the app, the profile, papers, bank and engagement terms, submission; the desk\'s queue, per-paper review, decision, grade and exit.',
+  routes: [
+    '/api/v1/agents/apply',
+    '/api/v1/agents/me/application',
+    '/api/v1/agents/applications',
+    '/api/v1/agents/:id/application',
+    '/api/v1/agents/:id/grade',
+    '/api/v1/agents/:id/exit',
+  ],
+  // AG-4: screening (the assessment, interviews, the desk's tick), the paper-expiry sweep, and Cashfree's vehicle-RC check.
+  // AG-5: the exit's settlement and the purge ninety days on ride the same feature and the same job.
+  jobs: ['agent-document-expiry'],
+});
+
+feature('agent.routing', {
+  surfaces: ['CONSOLE', 'BACKEND'],
+  owner: 'agent-experience',
+  kind: 'FEATURE',
+  launch: 'on',
+  description:
+    'AG-5: routing by grade — the importance bands on publishers, advertisers and leads mapped to the agent grade they are routed to; dispatch prefers the closest fit at or above it, then the tier, then the nearer agent; the desk may assign over it.',
+  routes: ['/api/v1/agents/routing-settings'],
+});
+
+feature('agent.fleets', {
+  surfaces: ['CONSOLE', 'BACKEND'],
+  owner: 'agent-experience',
+  kind: 'FEATURE',
+  launch: 'on',
+  description: 'AG-5: fleet partners — the delivery and ride fleets whose riders ADX invites by SMS to apply as field agents, with the partner kept as the provenance on the application.',
+  routes: ['/api/v1/agents/fleet-partners', '/api/v1/agents/fleet-partners/:partnerId', '/api/v1/agents/fleet-partners/:partnerId/invites'],
+});

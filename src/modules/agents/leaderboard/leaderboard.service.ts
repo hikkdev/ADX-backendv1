@@ -4,6 +4,7 @@ import { cityKeyFor } from '../../pricing';
 import { MIN_COHORT } from '../rating/rating.rules';
 import { prismaAgentsRepository as agents } from '../prisma-agents.repository';
 import { prismaLeaderboardRepository as repository } from './prisma-leaderboard.repository';
+import type { LeadFigures } from './leaderboard.repository';
 import { periodWindow, rank, viewFor, type Competitor, type LeaderboardPeriod, type MeRow, type PodiumRow, type PublicRow } from './leaderboard.rules';
 
 /**
@@ -50,16 +51,24 @@ async function board(city: string | null, period: LeaderboardPeriod, viewerAgent
 
   const { from, to, previous } = periodWindow(period, now);
   const ids = members.map((member) => member.agentId);
-  const [current, before] = await Promise.all([
+  const [current, before, leads] = await Promise.all([
     repository.earningsByAgent(ids, { from, to }),
     previous ? repository.earningsByAgent(ids, previous) : Promise.resolve(null),
+    // LH8: the "from leads" column is read once, for the current window; the
+    // previous window ranks on earnings alone, which is all the delta needs.
+    repository.leadFiguresByAgent(ids, { from, to }),
   ]);
 
-  const competitors = (earnings: Map<string, Decimal>): Competitor[] =>
-    members.map((member) => ({ ...member, earnings: earnings.get(member.agentId) ?? new Decimal(0) }));
+  const competitors = (earnings: Map<string, Decimal>, figures: Map<string, LeadFigures> | null): Competitor[] =>
+    members.map((member) => ({
+      ...member,
+      earnings: earnings.get(member.agentId) ?? new Decimal(0),
+      fromLeads: figures?.get(member.agentId)?.fromLeads ?? new Decimal(0),
+      conversions: figures?.get(member.agentId)?.conversions ?? 0,
+    }));
 
-  const ranked = rank(competitors(current));
-  const previouslyRanked = before ? rank(competitors(before)) : null;
+  const ranked = rank(competitors(current, leads));
+  const previouslyRanked = before ? rank(competitors(before, null)) : null;
   const view = viewFor(ranked, viewerAgentId, previouslyRanked, windowTo);
 
   return {

@@ -42,7 +42,16 @@ export type Kind =
   | 'holiday'
   | 'user'
   | 'signIn'
-  | 'userClosed';
+  | 'userClosed'
+  // LH9: a lead's moments, each a fact at its instant — `key` the lead's id so a recycle and its conversion can be paired.
+  | 'lead'
+  | 'leadContact'
+  | 'leadConversion'
+  | 'leadActivation'
+  | 'leadLoss'
+  | 'leadIncentive'
+  | 'leadTopUp'
+  | 'leadRecycle';
 
 export type Seed = Partial<Record<Kind, Fact[]>> & {
   kyc?: Partial<KycStateCountMap>;
@@ -56,6 +65,8 @@ export type Seed = Partial<Record<Kind, Fact[]>> & {
     erasureRequestsOpen: number;
     usersWithoutRole: number;
     turnaroundDays: Record<string, number | null>;
+    /** LH9 */
+    leadsOpen: number;
   }>;
   groups?: Partial<Record<string, GroupCount[]>>;
   /**
@@ -235,5 +246,39 @@ export function inMemoryRepository(seed: Seed): SectionOverviewsRepository & { c
     contactsVerified: async () => ({ verified: 30, total: 40 }),
     usersByLanguage: async () => [{ key: 'en', count: 9 }, { key: 'kn', count: 3 }],
     usersByPartyCity: async (scope) => cityGroups(scope),
+
+    /* ── leads (LH9) ─────────────────────────────────────────────────── */
+    leadsOpen: async () => state('leadsOpen'),
+    leadsCreated: async (window, scope) => count('lead', window, scope),
+    leadsCreatedByDay: async (window, scope) => byDay('lead', window, scope),
+    leadsContacted: async (window, scope) => count('leadContact', window, scope),
+    leadsConverted: async (window, scope) => count('leadConversion', window, scope),
+    leadsConvertedByDay: async (window, scope) => byDay('leadConversion', window, scope),
+    leadsActivated: async (window, scope) => count('leadActivation', window, scope),
+    leadsActivatedByDay: async (window, scope) => byDay('leadActivation', window, scope),
+    leadsLost: async (window, scope) => count('leadLoss', window, scope),
+    leadsByTemperature: async () => seed.groups?.['temperature'] ?? [],
+    leadsByCity: async (window, scope) =>
+      cityGroups(scope).map((row) => ({
+        ...row,
+        count: row.name ? count('lead', window, { city: row.name }) : row.count,
+        // The cohort's conversions: of the leads created in the window, those with a conversion fact at any time.
+        converted: row.name ? pick('lead', window, { city: row.name }).filter((lead) => facts('leadConversion').some((conversion) => conversion.key === lead.key)).length : 0,
+      })),
+    // The mean and the median of the seeded conversions' `amount`, read as days.
+    leadsTimeToConvert: async (window, scope) => {
+      const days = pick('leadConversion', window, scope).map((fact) => Number(fact.amount ?? 0)).sort((a, b) => a - b);
+      if (days.length === 0) return { converted: 0, meanDays: 0, medianDays: 0 };
+      const mean = days.reduce((a, b) => a + b, 0) / days.length;
+      const mid = Math.floor(days.length / 2);
+      const median = days.length % 2 ? days[mid]! : (days[mid - 1]! + days[mid]!) / 2;
+      return { converted: days.length, meanDays: Math.round(mean * 10) / 10, medianDays: Math.round(median * 10) / 10 };
+    },
+    leadIncentivesRecorded: async (window, scope) => total('leadIncentive', window, scope),
+    leadTopUpsRecorded: async (window, scope) => total('leadTopUp', window, scope),
+    leadsRecycled: async (window, scope) => count('leadRecycle', window, scope),
+    // A recycled lead converted since when a conversion fact for the same key follows the recycle.
+    leadsConvertedAfterRecycle: async (window, scope) =>
+      pick('leadRecycle', window, scope).filter((recycle) => facts('leadConversion').some((conversion) => conversion.key === recycle.key && conversion.at >= recycle.at)).length,
   });
 }

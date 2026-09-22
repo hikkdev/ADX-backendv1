@@ -39,7 +39,7 @@ export { findPrintPartnerLabels } from './print-partners.service';
  * doors — `createPartner` (the User, the wallet, the identifier) and
  * `updatePartner` (the blanks a merge fills) — never a row of its own.
  */
-export { createPartner, updatePartner } from './print-partners.service';
+export { createPartner, updatePartner, applyAsPartner } from './print-partners.service';
 export type { CreatePartnerInput, UpdatePartnerInput } from './print-partners.schema';
 
 /** Read by the console and by tests: the order-status gate and the ladder. */

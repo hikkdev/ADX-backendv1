@@ -17,6 +17,7 @@ import {
   getQrById,
   getScanForScanner,
   resolveQr,
+  describeIdentityByToken,
   listQrCodes,
   listQrScans,
   listScansByFiltered,
@@ -83,7 +84,7 @@ export async function resolveQrHandler(req: Request, res: Response): Promise<voi
     throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid request', parsed.error.flatten());
   }
 
-  const { token, role, latitude, longitude } = parsed.data;
+  const { token, role, latitude, longitude, ask } = parsed.data;
 
   let result;
   try {
@@ -92,6 +93,7 @@ export async function resolveQrHandler(req: Request, res: Response): Promise<voi
       req.user!.sub,
       (role as Role) ?? null,
       latitude !== undefined && longitude !== undefined ? { latitude, longitude } : undefined,
+      ask,
     );
   } catch (err: any) {
     const mapped = QR_ERROR_STATUS[err?.message];
@@ -101,6 +103,14 @@ export async function resolveQrHandler(req: Request, res: Response): Promise<voi
   }
 
   res.json({ success: true, data: result });
+}
+
+/** QR-27: `GET /qr/public/:token` — who an identity code belongs to, for the web landing; no session. */
+export async function describeIdentityHandler(req: Request, res: Response): Promise<void> {
+  const found = await describeIdentityByToken(String(req.params['token'] ?? ''));
+  if (!found) throw new ApiError(404, 'NOT_FOUND', 'That code is not one of ours, or it has been retired.');
+  res.set('Cache-Control', 'no-store');
+  res.json({ success: true, data: found });
 }
 
 /** K-B1: `GET /qr/:qrId/scans` — the list contract, each row with the scanner's name. */

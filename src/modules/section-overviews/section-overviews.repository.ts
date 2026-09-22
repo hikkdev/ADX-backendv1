@@ -188,9 +188,53 @@ export interface UsersOverviewRepository {
   usersByPartyCity(scope: Scope): Promise<CityCount[]>;
 }
 
+/** LH9: a city group of leads with how many of them converted. */
+export type LeadCityRow = CityGroup & { count: number; converted: number };
+/** LH9: the converted rows in the window and how long they took, in days — zeros when none converted (the service prints null). */
+export type LeadTimeToConvert = { converted: number; meanDays: number; medianDays: number };
+
+/**
+ * LH9 (the Lead Hunt): the Leads overview's aggregates. The funnel by
+ * stage, the conversion by source / agent / city / category / channel and
+ * the mean time to convert are `leads.funnel`'s own answer over the window's
+ * cohort, carried through that export; what is read here is what the
+ * funnel does not say — the day series, the previous-window figures, the
+ * median, the hunt's money and the recycle yield.
+ */
+export interface LeadsOverviewRepository {
+  /** Open leads now — neither converted nor lost. A state. */
+  leadsOpen(scope: Scope): Promise<number>;
+  leadsCreated(window: Window, scope: Scope): Promise<number>;
+  leadsCreatedByDay(window: Window, scope: Scope): Promise<DayCount[]>;
+  /** First contacts logged in the window (`firstContactedAt`, stamped once). */
+  leadsContacted(window: Window, scope: Scope): Promise<number>;
+  leadsConverted(window: Window, scope: Scope): Promise<number>;
+  leadsConvertedByDay(window: Window, scope: Scope): Promise<DayCount[]>;
+  /** The catch — `activatedAt` in the window. */
+  leadsActivated(window: Window, scope: Scope): Promise<number>;
+  leadsActivatedByDay(window: Window, scope: Scope): Promise<DayCount[]>;
+  /** Lost in the window — stage LOST reached inside it. */
+  leadsLost(window: Window, scope: Scope): Promise<number>;
+  /** Open leads by temperature now. A state. */
+  leadsByTemperature(scope: Scope): Promise<GroupCount[]>;
+  /** Leads created in the window by city key, with how many of them converted. */
+  leadsByCity(window: Window, scope: Scope): Promise<LeadCityRow[]>;
+  /** Days from creation to conversion over the rows converted in the window: the mean and the median. */
+  leadsTimeToConvert(window: Window, scope: Scope): Promise<LeadTimeToConvert>;
+  /** LEAD_CONVERTED / ACTIVATED / RETAINED recorded in the window (any status but REJECTED), the priority rows aside; scoped by the agent's city. */
+  leadIncentivesRecorded(window: Window, scope: Scope): Promise<Money>;
+  /** The priority-zone top-ups recorded in the window (LH5 keys them `priority:<zone>:<lead>`); scoped by the agent's city. */
+  leadTopUpsRecorded(window: Window, scope: Scope): Promise<Money>;
+  /** Leads that came back to the cold pool in the window (`recycledAt`). */
+  leadsRecycled(window: Window, scope: Scope): Promise<number>;
+  /** Of the leads recycled in the window, how many have converted since — the recycle yield's numerator. */
+  leadsConvertedAfterRecycle(window: Window, scope: Scope): Promise<number>;
+}
+
 export type SectionOverviewsRepository = PublishersOverviewRepository &
   AdvertisersOverviewRepository &
   AgentsOverviewRepository &
   PrintPartnersOverviewRepository &
   EmployeesOverviewRepository &
-  UsersOverviewRepository;
+  UsersOverviewRepository &
+  LeadsOverviewRepository;

@@ -24,7 +24,7 @@ const { repository, notify, listings, agents, logger } = vi.hoisted(() => ({
   },
   notify: { notifyAdmins: vi.fn(), notifyAgent: vi.fn(), shortId: (id: string) => id.slice(-6) },
   listings: { getListingWithPublisher: vi.fn() },
-  agents: { findAssignableAgent: vi.fn(), getAgentWithUser: vi.fn(), agentExists: vi.fn(), getAgentZone: vi.fn() },
+  agents: { findAssignableAgent: vi.fn(), getAgentWithUser: vi.fn(), agentExists: vi.fn(), getAgentZone: vi.fn(), dispatchAskFor: vi.fn(async () => ({})), isBelowRequiredGrade: vi.fn(async () => false), agentMeetsGrade: vi.fn(async () => true), getRoutingSettings: vi.fn(async () => ({ bands: { INDIVIDUAL: 'G1', SMALL_AGENCY: 'G2', LARGE_AGENCY: 'G3' }, leadBands: { STANDARD: 'G1', KEY: 'G3', ENTERPRISE: 'G4' }, enforce: true })), findAgentProfile: vi.fn() },
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 

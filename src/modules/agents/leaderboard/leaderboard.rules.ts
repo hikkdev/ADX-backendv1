@@ -28,6 +28,10 @@ export type Competitor = {
   name: string;
   locality: string | null;
   earnings: Decimal;
+  /** LH8: the share of `earnings` the hunt paid — LEAD_CONVERTED / ACTIVATED / RETAINED. */
+  fromLeads: Decimal;
+  /** LH8: leads held that converted in the window. */
+  conversions: number;
 };
 
 export type Ranked = Competitor & { rank: number };
@@ -44,12 +48,15 @@ export const PODIUM = 3;
 /** "Show ranks 4–10" — the disclosure's window. */
 export const WINDOW_TO = 10;
 
-export type PublicRow = { rank: number; agentId: string; name: string; locality: string | null; you: boolean };
-export type PodiumRow = PublicRow & { earnings: Money };
+/** LH8: `conversions` is a count, not a figure, so it may leave the server for every row (decision 9 is about money). */
+export type PublicRow = { rank: number; agentId: string; name: string; locality: string | null; you: boolean; conversions: number };
+export type PodiumRow = PublicRow & { earnings: Money; fromLeads: Money };
 
 export type MeRow = {
   rank: number;
   earnings: Money;
+  /** LH8: how much of `earnings` came from leads. */
+  fromLeads: Money;
   /** Places climbed since the previous window; negative is a fall; null on ALL or a newcomer. */
   delta: number | null;
   /** The neighbour above: how far behind them you are. */
@@ -72,9 +79,9 @@ export function viewFor(
   windowTo: number = WINDOW_TO,
 ) {
   const you = (row: Ranked): boolean => row.agentId === viewerAgentId;
-  const pub = (row: Ranked): PublicRow => ({ rank: row.rank, agentId: row.agentId, name: row.name, locality: row.locality, you: you(row) });
+  const pub = (row: Ranked): PublicRow => ({ rank: row.rank, agentId: row.agentId, name: row.name, locality: row.locality, you: you(row), conversions: row.conversions });
 
-  const top: PodiumRow[] = ranked.slice(0, PODIUM).map((row) => ({ ...pub(row), earnings: money(row.earnings) }));
+  const top: PodiumRow[] = ranked.slice(0, PODIUM).map((row) => ({ ...pub(row), earnings: money(row.earnings), fromLeads: money(row.fromLeads) }));
   const window: PublicRow[] = ranked.slice(PODIUM, windowTo).map(pub);
 
   const mine = viewerAgentId ? ranked.find(you) ?? null : null;
@@ -87,6 +94,7 @@ export function viewFor(
     me = {
       rank: mine.rank,
       earnings: money(mine.earnings),
+      fromLeads: money(mine.fromLeads),
       delta: previous === null ? null : before ? before.rank - mine.rank : null,
       behind: above ? { rank: above.rank, gap: money(above.earnings.minus(mine.earnings)) } : null,
       ahead: below ? { rank: below.rank, gap: money(mine.earnings.minus(below.earnings)) } : null,

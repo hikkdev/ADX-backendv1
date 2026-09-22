@@ -40,7 +40,13 @@ import {
   resolveQr,
 } from '../qr.service';
 
-const port = { prepareClaim: vi.fn(), commitClaim: vi.fn() };
+const port = {
+  prepareClaim: vi.fn(),
+  commitClaim: vi.fn(),
+  // QR-27: the account behind the code — not yet onboarded, so a scan is still the claim these tests exercise.
+  describe: vi.fn(async () => ({ id: 'pub_1', displayId: 'PUB-0001', name: 'Asha Rao', mobile: '+919999999999', type: 'INDIVIDUAL', city: 'Bengaluru', verified: false, onboarded: false })),
+  workingAgentId: vi.fn(async () => 'agent_1'),
+};
 registerPublisherOnboardingPort(port);
 
 const BENGALURU = { latitude: 12.9716, longitude: 77.5946 };
@@ -98,9 +104,9 @@ describe('a scan is refused, and the refusal is written down', () => {
     expect(scanned()).toEqual(['NOT_AN_AGENT']);
   });
 
-  it('when the role may not act on it at all', async () => {
-    await expect(resolveQr(token(), 'usr_adv', 'AGENT_ADVERTISER')).rejects.toThrow('QR_ACCESS_DENIED');
-    expect(scanned()).toEqual(['NOT_AN_AGENT']);
+  it('QR-27: a scanner who cannot claim it is shown the account instead of being refused', async () => {
+    const result = await resolveQr(token(), 'usr_adv', 'AGENT_ADVERTISER');
+    expect(result).toMatchObject({ action: 'VIEW_PUBLISHER', identity: { displayId: 'PUB-0001', name: 'Asha Rao', onboarded: false } });
     expect(port.prepareClaim).not.toHaveBeenCalled();
   });
 });

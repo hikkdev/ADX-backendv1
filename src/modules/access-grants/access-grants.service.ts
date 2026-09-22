@@ -2,7 +2,7 @@ import { ApiError } from '../../shared/errors';
 import { findActivityByMetadata, logActivity } from '../../shared/audit';
 import type { AccessGrantScope } from '../../shared/database';
 import { deactivateQr, generateQr, listScansFor } from '../qr';
-import { findAgentProfile } from '../agents';
+import { findAgentProfile, findWorkingAgentProfile } from '../agents';
 import { prismaAccessGrantsRepository as repository } from './prisma-access-grants.repository';
 import type { IssueGrantInput } from './access-grants.schema';
 import type { GrantSubject } from './access-grants.repository';
@@ -140,7 +140,8 @@ export async function prepareGrantClaim(
   const grant = await repository.findById(grantId);
   if (!grant) throw new Error('QR_NOT_FOUND');
 
-  const agent = await findAgentProfile(scannedByUserId);
+  // AG-1: an applicant, a held or an exited agent is not an agent to a scan.
+  const agent = await findWorkingAgentProfile(scannedByUserId);
   // Sentinels rather than ApiErrors: the QR controller maps these to statuses,
   // and a scan that fails should read the same whichever code type it was.
   if (!agent) throw new Error('QR_ACCESS_DENIED');
@@ -234,6 +235,18 @@ export async function listGrantsForAgent(userId: string) {
   return repository.listForAgent(agent.id);
 }
 
+/** AG-5: an exited agent's live grants — pending or active — are closed by ADX. Returns how many. */
+export async function revokeLiveGrantsForAgent(agentId: string, actorUserId: string): Promise<number> {
+  const grants = await repository.listForAgent(agentId);
+  let revoked = 0;
+  for (const grant of grants) {
+    if (grant.status !== 'PENDING' && grant.status !== 'ACTIVE') continue;
+    await revokeGrant(grant.id, { userId: actorUserId, isAdmin: true });
+    revoked += 1;
+  }
+  return revoked;
+}
+
 /** Ops view: every grant still open, so nobody has to ask who has access. */
 export async function listOpenGrants() {
   return repository.listOpen();
@@ -260,6 +273,40 @@ export async function openOnboardingGrant(input: {
     qrId: input.qrId,
     durationMinutes: ONBOARDING_GRANT_MINUTES,
   });
+}
+
+/**
+ * QR-27: the authority an approved access request opens — the owner said
+ * yes to the agent in front of them, for what that agent asked (listings or
+ * the profile) and for as long as they asked, a day at most. No ticket and
+ * no pre-assignment: the scan is the request and the approval is the
+ * assignment. Revocable like any grant, listed in the owner's access log.
+ */
+export async function openRequestedGrant(input: {
+  subject: GrantSubject;
+  agentId: string;
+  /** The agent's login, for the audit row. */
+  scannedByUserId: string;
+  ask: { scope: AccessGrantScope; reason: string; durationMinutes: number };
+}) {
+  const durationMinutes = Math.min(Math.max(input.ask.durationMinutes, 15), 24 * 60);
+  const grant = await repository.createRequested({
+    subject: input.subject,
+    assignedAgentId: input.agentId,
+    scope: input.ask.scope,
+    reason: input.ask.reason.trim() || 'Asked for at the door',
+    durationMinutes,
+  });
+  await logActivity(input.scannedByUserId, 'ACCESS_GRANT_ISSUED', undefined, {
+    grantId: grant.id,
+    publisherId: 'publisherId' in input.subject ? input.subject.publisherId : '',
+    advertiserId: 'advertiserId' in input.subject ? input.subject.advertiserId : '',
+    assignedAgentId: input.agentId,
+    scope: grant.scope,
+    durationMinutes,
+    requested: true,
+  });
+  return grant;
 }
 
 export async function closeOnboardingGrants(subject: GrantSubject): Promise<number> {

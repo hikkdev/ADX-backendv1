@@ -53,6 +53,11 @@ export const listPartnersQuerySchema = z.object({
     .enum(['true', 'false'])
     .optional()
     .transform((value) => (value === undefined ? undefined : value === 'true')),
+  /** PP-1: `applied=true` — the shops that applied from the app and await the desk. */
+  applied: z
+    .enum(['true', 'false'])
+    .optional()
+    .transform((value) => (value === undefined ? undefined : value === 'true')),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(MAX_LIST_PAGE_SIZE).default(DEFAULT_LIST_PAGE_SIZE),
 });
@@ -206,6 +211,31 @@ export const listQuoteRequestsQuerySchema = z.object({
 });
 
 export type UpdateMeInput = z.infer<typeof updateMeSchema>;
+
+/**
+ * PP-1: `POST /print-partners/me/application` — the details the desk's create
+ * form asks, supplied by the shop itself while its application is open. The
+ * legal identity (legal name, GSTIN, PAN) is writable here and only here:
+ * once the desk activates, those move the way they always did — at the desk.
+ */
+export const applicationDetailsSchema = z.object({
+  name: z.string().trim().min(2).max(120).optional(),
+  legalName: optionalText(200),
+  gstin: z.string().trim().toUpperCase().regex(GSTIN, 'That does not look like a GSTIN').nullable().optional(),
+  panNumber: z.string().trim().toUpperCase().regex(PAN, 'That does not look like a PAN').nullable().optional(),
+  contactName: optionalText(120),
+  email: z.string().trim().email().nullable().optional(),
+  address: optionalText(500),
+  city: optionalText(80),
+  latitude: z.number().min(-90).max(90).nullable().optional(),
+  longitude: z.number().min(-180).max(180).nullable().optional(),
+  capabilities: z.array(z.string().trim().min(1).max(60)).max(30).optional(),
+  maxWidthFt: amount.nullable().optional(),
+  turnaroundDays: z.number().int().min(0).max(365).nullable().optional(),
+  acceptsQuoteRequests: z.boolean().optional(),
+  notes: optionalText(2000),
+});
+export type ApplicationDetailsInput = z.infer<typeof applicationDetailsSchema>;
 export type RateCardInput = z.infer<typeof rateCardSchema>;
 export type RateCardRow = z.infer<typeof rateCardRowSchema>;
 export type MyJobsQuery = z.infer<typeof myJobsQuerySchema>;

@@ -12,6 +12,7 @@ import { tellJobAssigned, tellOps, tellQuoteCancelled, tellQuoteRejected, tellQu
 import type { JobWithPartner, OrderForPrint, PartnerRow, QuoteRequestListFilter, QuoteRequestWithQuotes, QuoteWithPartner } from './print-partners.repository';
 import type { AwardInput, QuoteInput, QuoteRequestInput } from './print-partners.schema';
 import { DEFAULT_QUOTE_WINDOW_HOURS } from './print-partners.schema';
+import { assertServiceAgreementSigned } from './service-agreement';
 
 /**
  * Quote requests — Lot H (Q147, the owner's 6 Sep mechanics).
@@ -311,6 +312,8 @@ async function requireInvitedOpenRequest(partner: PartnerRow, requestId: string,
  */
 export async function submitQuote(partner: PartnerRow, requestId: string, input: QuoteInput, now = new Date()): Promise<QuoteWithPartner> {
   if (!partner.isActive) throw new ApiError(409, 'CONFLICT', 'Your account is off the roster; ADX will be in touch.');
+  // DS-2: a quote is given under a signed service agreement, when the policy asks for one.
+  await assertServiceAgreementSigned(partner.id, 'Quoting');
   const request = await requireInvitedOpenRequest(partner, requestId, now);
   const mine = request.quotes.find((quote) => quote.printPartnerId === partner.id);
   const patch = { amount: new Decimal(input.amount), turnaroundDays: input.turnaroundDays, note: input.note ?? null };

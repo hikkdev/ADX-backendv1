@@ -245,8 +245,14 @@ export const prismaAgreementsRepository: AgreementsRepository = {
         ipAddress: data.ipAddress ?? null,
         userAgent: data.userAgent ?? null,
         renderedDocument: data.renderedDocument ?? null,
+        ...(data.signatureProvider ? { signatureProvider: data.signatureProvider } : {}),
+        ...(data.signatureRef !== undefined ? { signatureRef: data.signatureRef } : {}),
       },
     });
+  },
+
+  markAcceptanceSigned(id, signatureRef) {
+    return prisma.agreementAcceptance.update({ where: { id }, data: { signatureProvider: 'DIGIO', signatureRef } });
   },
 
   async partiesBehind(kind: AgreementKind, currentVersion: number) {

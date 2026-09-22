@@ -7,6 +7,7 @@ import { prismaAgentMilestonesRepository as repository } from './prisma-agent-mi
 import type {
   AgentMilestoneWithTemplate,
   MilestoneTemplatePatch,
+  NewMilestoneTemplate,
 } from './agent-milestones.repository';
 import type { CreateMilestoneTemplateInput, PatchMilestoneTemplateInput } from './agent-milestones.schema';
 import {
@@ -46,7 +47,33 @@ const LINK_FOR: Record<MilestoneType, MilestoneLink> = {
   ACTIVITY: 'VISITS',
   REVENUE: 'EARNINGS',
   QUALITY: 'RATING',
+  // LH8: both lead types land on the hunt.
+  LEAD_CONVERSIONS: 'LEADS',
+  LEAD_CONTACTS: 'LEADS',
 };
+
+/**
+ * LH8: the two lead milestones the brief names, seeded once per type when
+ * no template of that type exists (active or not — a desk that retired one
+ * is not handed it back). The rewards are defaults the desk edits: five
+ * conversions at ₹100 each (D1) is ₹500 of hunt pay, so the bonus is set at
+ * three times that; ten first contacts a week is the habit the funnel runs
+ * on, worth a small weekly bonus.
+ */
+export const LEAD_MILESTONE_TEMPLATES: ReadonlyArray<Omit<NewMilestoneTemplate, 'startsAt' | 'unlockAfter' | 'isActive'>> = [
+  { type: 'LEAD_CONVERSIONS', title: '5 lead conversions this month', description: 'Five leads you hold become accounts inside thirty days.', target: 5, rewardAmount: new Decimal('1500.00'), sortOrder: 5, windowDays: 30 },
+  { type: 'LEAD_CONTACTS', title: '10 first contacts this week', description: 'Log the first contact on ten leads you hold inside seven days.', target: 10, rewardAmount: new Decimal('300.00'), sortOrder: 6, windowDays: 7 },
+];
+
+export async function ensureLeadMilestoneTemplates(): Promise<number> {
+  let seeded = 0;
+  for (const template of LEAD_MILESTONE_TEMPLATES) {
+    if (await repository.hasTemplateOfType(template.type)) continue;
+    await repository.createTemplate({ ...template, isActive: true, startsAt: null, unlockAfter: null });
+    seeded += 1;
+  }
+  return seeded;
+}
 
 export type MilestoneCard = {
   id: string;
@@ -138,6 +165,10 @@ async function derive(
     }
     case 'QUALITY':
       return { progress: await repository.countOnTimeArrivals(agent.id, window), amount: null };
+    case 'LEAD_CONVERSIONS':
+      return { progress: await repository.countLeadConversions(agent.id, window), amount: null };
+    case 'LEAD_CONTACTS':
+      return { progress: await repository.countLeadContacts(agent.id, window), amount: null };
   }
 }
 

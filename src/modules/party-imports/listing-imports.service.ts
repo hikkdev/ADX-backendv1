@@ -4,7 +4,7 @@ import { auditDiff, logActivity } from '../../shared/audit';
 import { haversineMeters } from '../../shared/geo';
 import { geocodeAddress } from '../../shared/maps';
 import { Decimal, money } from '../../shared/money';
-import { findAgentProfile } from '../agents';
+import { findWorkingAgentProfile } from '../agents';
 import { assertCanCreateForPublisher, createListing, updateListing, type ListingActor, type ListingDraft } from '../listings';
 import { citySupport, resolveCity } from '../pricing';
 import { floorFor } from '../rate-cards';
@@ -434,7 +434,7 @@ export async function commitListingImport(id: string, actor: ListingActor, byUse
     await repository.setAttempt(id, attemptId);
   }
   // An agent's import stamps the agent on each spot, as the agent's own Create does; an admin's carries none.
-  const agentId = actor.isAdmin ? null : ((await findAgentProfile(byUserId))?.id ?? null);
+  const agentId = actor.isAdmin ? null : ((await findWorkingAgentProfile(byUserId))?.id ?? null);
 
   const [own, refs] = await Promise.all([repository.listPublisherListings(publisherId), repository.findExternalRefs(publisherId)]);
   const ownById = new Map(own.map((listing) => [listing.id, listing]));

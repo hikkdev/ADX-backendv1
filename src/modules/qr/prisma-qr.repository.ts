@@ -40,6 +40,10 @@ export const prismaQrRepository: QrRepository = {
     return prisma.qrCode.findFirst({ where: { type, refId, isActive: true } });
   },
 
+  setPosition(qrId: string, position: { latitude: number; longitude: number }) {
+    return prisma.qrCode.update({ where: { id: qrId }, data: { latitude: position.latitude, longitude: position.longitude } });
+  },
+
   deactivateForSubject(type, refId: string) {
     return prisma.qrCode.updateMany({
       where: { type, refId, isActive: true },
@@ -52,7 +56,8 @@ export const prismaQrRepository: QrRepository = {
   },
 
   logScan(data: NewQrScan) {
-    return prisma.qrScan.create({ data });
+    const { ask, ...rest } = data;
+    return prisma.qrScan.create({ data: { ...rest, ...(ask === undefined ? {} : { ask: ask as Prisma.InputJsonValue }) } });
   },
 
   findScanById(scanId: string) {

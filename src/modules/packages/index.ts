@@ -14,6 +14,8 @@ export { packageRouter, packageLinkRouter } from './packages.routes';
 
 /** Run by the scheduler: a term that has run out stops being active. */
 export { runPackageExpiry } from './packages.service';
+/** LH7: a package quote for a prospect (no term), and the catalogue the invite landing lists. */
+export { quote as quotePackage, listCatalogue } from './packages.service';
 /** Lot J2 (6): the daily renewal sweep — `jobs/package-renewal.job.ts`. */
 export { runPackageRenewals } from './packages.service';
 export type { RenewalSummary } from './packages.service';

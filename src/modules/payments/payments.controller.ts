@@ -3,7 +3,7 @@ import type { z } from 'zod';
 import { ApiError } from '../../shared/errors';
 import type { PaymentGateway } from '../../shared/database';
 import { assertMayActFor, getAdvertiserForUser } from '../advertisers';
-import { findAgentProfile } from '../agents';
+import { findWorkingAgentProfile } from '../agents';
 import { findPublisherForUser } from '../publishers';
 import {
   advertiserPaymentsQuerySchema,
@@ -43,7 +43,7 @@ function parse<T>(schema: { safeParse: (v: unknown) => any }, value: unknown): T
  */
 async function resolveActor(req: Request): Promise<PaymentActor> {
   const userId = req.user!.sub;
-  const [advertiser, agent, publisher] = await Promise.all([getAdvertiserForUser(userId), findAgentProfile(userId), findPublisherForUser(userId)]);
+  const [advertiser, agent, publisher] = await Promise.all([getAdvertiserForUser(userId), findWorkingAgentProfile(userId), findPublisherForUser(userId)]);
   return {
     userId,
     isAdmin: req.user!.roles.includes('ADMIN'),
