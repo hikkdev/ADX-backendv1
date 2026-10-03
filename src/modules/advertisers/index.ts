@@ -56,6 +56,7 @@ export {
   payForPackage,
   captureCampaignHold,
   releaseCampaignHold,
+  retainReservationFee,
 } from './advertisers.service';
 export type { BookingEligibility } from './advertisers.service';
 
@@ -122,6 +123,15 @@ export { findTopUp, findTopUpByUtr, findTopUpByPaymentId, markTopUpReconciled } 
  * `Advertiser.kycStatus`; only VERIFIED can activate.
  */
 export { applyKycDecision, applyKycDecisionByUserId } from './advertisers.service';
+
+/**
+ * Phase D (1 Oct 2026): the KYC start stores the advertiser's legal form
+ * through `setAdvertiserEntityType`; bootstrap registers the KYC module's
+ * upgrade (a verified individual's KYC reopened as a business) on the port
+ * the Edit-details PATCH calls.
+ */
+export { setAdvertiserEntityType, registerAdvertiserKycUpgradePort } from './advertisers.service';
+export type { AdvertiserKycUpgradePort } from './advertisers.service';
 
 /**
  * Lot B (Q13): `invoices` prints the advertiser as the recipient — name,

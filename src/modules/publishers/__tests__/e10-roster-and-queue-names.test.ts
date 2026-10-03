@@ -110,7 +110,8 @@ describe('GET /publishers — the roster', () => {
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.data)).toBe(true);
     expect(res.body.data[0]).toMatchObject({ id: 'pub_1' });
-    expect(repository.findAllForAdmin).toHaveBeenCalledWith('KYC', 'suraj');
+    // Account lifecycle (2 Oct 2026): the third argument is the status facet — absent here, so everyone.
+    expect(repository.findAllForAdmin).toHaveBeenCalledWith('KYC', 'suraj', undefined);
     expect(repository.findRosterPage).not.toHaveBeenCalled();
   });
 
@@ -140,12 +141,12 @@ describe('GET /publishers — the roster', () => {
     const res = await request(app()).get('/api/v1/publishers?q=&pageSize=abc&category=KYC').set('Authorization', `Bearer ${admin}`);
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.data)).toBe(true);
-    expect(repository.findAllForAdmin).toHaveBeenCalledWith('KYC', undefined);
+    expect(repository.findAllForAdmin).toHaveBeenCalledWith('KYC', undefined, undefined);
     expect(repository.findRosterPage).not.toHaveBeenCalled();
 
     const empty = await request(app()).get('/api/v1/publishers?q=&category=').set('Authorization', `Bearer ${admin}`);
     expect(empty.status).toBe(200);
-    expect(repository.findAllForAdmin).toHaveBeenLastCalledWith(undefined, undefined);
+    expect(repository.findAllForAdmin).toHaveBeenLastCalledWith(undefined, undefined, undefined);
 
     expect(publisherBareQuerySchema.parse({ q: '', pageSize: 'abc', page: '', category: '' })).toEqual({});
     expect(publisherBareQuerySchema.parse({ q: ' suraj ' })).toEqual({ q: 'suraj' });

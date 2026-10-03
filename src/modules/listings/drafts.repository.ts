@@ -12,5 +12,7 @@ export interface DraftsRepository {
   create(publisherId: string, displayId: string, input: SaveDraftInput): Promise<ListingDraft>;
   update(id: string, input: SaveDraftInput): Promise<ListingDraft>;
   remove(id: string): Promise<unknown>;
+  /** 2 Oct 2026: one draft with its publisher, whoever's it is — the desk's read. */
+  findForDesk(id: string): Promise<DeskDraft | null>;
   desk(query: DeskDraftsQuery, idleBefore: Date | null): Promise<{ items: DeskDraft[]; total: number }>;
 }

@@ -35,26 +35,32 @@ const { repository, identifiers, pricing, notifications, agreements, audit, port
     findDocument: vi.fn(),
     agentsForPurge: vi.fn(),
     purgeDocuments: vi.fn(),
+    // Account lifecycle (2 Oct 2026): the exited agent's sign-in decision.
+    otherWorkingRoles: vi.fn(async (): Promise<string[]> => []),
+    switchOffSignIn: vi.fn(),
   },
   identifiers: { allocateIdentifier: vi.fn(async () => 'AGT-2009-2601') },
   pricing: { assertCityAllows: vi.fn(), withCityKey: vi.fn(async (d: object) => d) },
   notifications: { notify: vi.fn(async () => ({ notificationId: null })) },
   agreements: { platformStanding: vi.fn(), recordAcceptance: vi.fn() },
   audit: { logActivity: vi.fn(async () => undefined) },
-  port: { hasPayoutMethod: vi.fn(), certificationState: vi.fn(), assessmentState: vi.fn(async () => ({ required: false, passed: false, modules: [] })), mirrorIdentityDocument: vi.fn(async () => undefined), adminUserIds: vi.fn(async () => ['adm_1']), settleExit: vi.fn(async () => ({ sessionsEnded: true, grantsRevoked: 1, qrDeactivated: true, payout: { amount: '1250.00', reference: 'WD-1', outcome: 'REQUESTED' }, notes: [] })), purgeFile: vi.fn(async () => true) },
+  port: { hasPayoutMethod: vi.fn(), certificationState: vi.fn(), assessmentState: vi.fn(async () => ({ required: false, passed: false, modules: [] })), mirrorIdentityDocument: vi.fn(async () => undefined), adminUserIds: vi.fn(async () => ['adm_1']), settleExit: vi.fn(async (): Promise<import('../application/application.port').ExitSettlement> => ({ sessionsEnded: false, grantsRevoked: 1, qrDeactivated: true, payout: { amount: '1250.00', reference: 'WD-1', outcome: 'REQUESTED' }, notes: [], balanceRemains: true })), purgeFile: vi.fn(async () => true) },
 }));
 
 vi.mock('../application/prisma-application.repository', () => ({ prismaApplicationRepository: repository }));
+const { auth } = vi.hoisted(() => ({ auth: { revokeSessions: vi.fn(), reissueAccessToken: vi.fn() } }));
+vi.mock('../../auth', () => auth);
 vi.mock('../../identifiers', () => identifiers);
 vi.mock('../../pricing', () => pricing);
 vi.mock('../../notifications', () => notifications);
 vi.mock('../../agreements', () => agreements);
 vi.mock('../../../shared/audit', () => audit);
 vi.mock('../application/fleet.service', () => fleet);
-vi.mock('../../../shared/integrations', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../../shared/integrations')>()), lookupVehicleRc: cashfree.lookupVehicleRc }));
+// Cashfree Phase 1: the RC check goes through the verification router; the vendor's answer is mocked at that door.
+vi.mock('../../../shared/verification', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../../shared/verification')>()), routedVehicleRc: cashfree.lookupVehicleRc }));
 
 import { registerApplicationPort } from '../application/application.port';
-import { acceptAgreementAtDesk, apply, decideApplication, exitAgent, fileMyDocument, listApplications, reviewDocument, submitAtDesk, submitMyApplication, updateProfileAtDesk } from '../application/application.service';
+import { acceptAgreementAtDesk, apply, decideApplication, exitAgent, fileMyDocument, getApplication, getMyApplication, listApplications, reviewDocument, submitAtDesk, submitMyApplication, updateMyApplicationProfile, updateProfileAtDesk } from '../application/application.service';
 import { IDENTITY_KINDS, requiredDocuments } from '../application/application.rules';
 
 registerApplicationPort(port);
@@ -79,6 +85,7 @@ function record(over: Record<string, unknown> = {}) {
     currentAddress: '12, 4th Cross',
     currentLatitude: null,
     currentLongitude: null,
+    currentPostalCode: '560034',
     permanentAddress: 'Kochi',
     emergencyContactName: 'Priya',
     emergencyContactRelation: 'Sister',
@@ -283,6 +290,32 @@ describe('the desk', () => {
 });
 
 /**
+ * Onboarding addresses (1 Oct 2026): the current address's PIN code rides
+ * the applicant's own profile step and the desk's edit, and comes back on
+ * the application read beside the address and its silent coordinates.
+ */
+describe('onboarding addresses: the current address PIN', () => {
+  it("the applicant's profile step writes it beside the address and its pin", async () => {
+    repository.findByUserId.mockResolvedValue(record({ stage: 'PROFILE' }));
+    await updateMyApplicationProfile('usr_1', { currentAddress: '14, 5th Cross, Koramangala', currentLatitude: 12.93, currentLongitude: 77.62, currentPostalCode: '560095' });
+    expect(repository.patch).toHaveBeenCalledWith('agt_1', { currentAddress: '14, 5th Cross, Koramangala', currentLatitude: 12.93, currentLongitude: 77.62, currentPostalCode: '560095' });
+  });
+
+  it("the desk's edit writes it, null clearing", async () => {
+    repository.findById.mockResolvedValue(record({ stage: 'PROFILE' }));
+    await updateProfileAtDesk('agt_1', { currentPostalCode: null }, 'adm_1');
+    expect(repository.patch).toHaveBeenCalledWith('agt_1', { currentPostalCode: null });
+  });
+
+  it('both application reads answer it in the profile', async () => {
+    repository.findByUserId.mockResolvedValue(record({ stage: 'PROFILE' }));
+    repository.findById.mockResolvedValue(record({ stage: 'PROFILE' }));
+    expect((await getMyApplication('usr_1')).profile).toMatchObject({ currentAddress: '12, 4th Cross', currentPostalCode: '560034' });
+    expect((await getApplication('agt_1')).profile).toMatchObject({ currentPostalCode: '560034' });
+  });
+});
+
+/**
  * AG-3: the desk runs the same ladder for someone standing in front of it.
  */
 describe("the desk, on the applicant's behalf", () => {
@@ -480,6 +513,44 @@ describe('AG-5: fleets, the exit, the purge', () => {
     expect(result.settlement).toMatchObject({ grantsRevoked: 1, payout: { amount: '1250.00' } });
     expect(notifications.notify).toHaveBeenCalledWith('AGENT_APPLICATION_DECISION', 'usr_1', expect.objectContaining({ decision: 'ended' }), expect.objectContaining({ inApp: expect.objectContaining({ title: 'Your ADX engagement has ended' }) }));
     expect(audit.logActivity).toHaveBeenCalledWith('adm_1', 'AGENT_EXITED', expect.objectContaining({ metadata: expect.objectContaining({ grantsRevoked: 1 }) }));
+  });
+
+  it('account lifecycle (2 Oct 2026): money still owed keeps sign-in until the final payout is paid', async () => {
+    repository.findById.mockResolvedValueOnce(record({ stage: 'ACTIVE', activatedAt: new Date() }));
+    repository.findById.mockResolvedValueOnce(record({ stage: 'EXITED', exitReason: 'RESIGNED' }));
+    const result = await exitAgent('agt_1', { reason: 'RESIGNED', rehireEligible: true, blacklist: false }, 'adm_1');
+    expect(result.settlement.signIn).toBe('KEPT_UNTIL_PAID');
+    expect(repository.switchOffSignIn).not.toHaveBeenCalled();
+    expect(auth.revokeSessions).not.toHaveBeenCalled();
+    expect(audit.logActivity).toHaveBeenCalledWith('adm_1', 'AGENT_EXIT_SIGNIN_KEPT', expect.objectContaining({ metadata: expect.objectContaining({ until: 'FINAL_PAYOUT_PAID' }) }));
+  });
+
+  it('account lifecycle: nothing owed ends sign-in at the exit — the switch off, the sessions revoked, audited', async () => {
+    port.settleExit.mockResolvedValueOnce({ sessionsEnded: false, grantsRevoked: 0, qrDeactivated: true, payout: null, notes: [], balanceRemains: false });
+    repository.findById.mockResolvedValueOnce(record({ stage: 'ACTIVE', activatedAt: new Date() }));
+    repository.findById.mockResolvedValueOnce(record({ stage: 'EXITED', exitReason: 'RESIGNED' }));
+    repository.findById.mockResolvedValueOnce(record({ stage: 'EXITED', exitReason: 'RESIGNED' }));
+    const result = await exitAgent('agt_1', { reason: 'RESIGNED', rehireEligible: true, blacklist: false }, 'adm_1');
+    expect(result.settlement).toMatchObject({ signIn: 'ENDED', sessionsEnded: true });
+    expect(repository.switchOffSignIn).toHaveBeenCalledWith('usr_1');
+    expect(auth.revokeSessions).toHaveBeenCalledWith('usr_1', 'AGENT_EXITED');
+    expect(audit.logActivity).toHaveBeenCalledWith('adm_1', 'AGENT_EXIT_SIGNIN_ENDED', expect.objectContaining({ metadata: { agentId: 'agt_1', cause: 'NO_BALANCE' } }));
+  });
+
+  it('account lifecycle: a person who also works as something else keeps signing in, and it is logged', async () => {
+    const { endExitedAgentSignIn } = await import('../application/application.service');
+    repository.findById.mockResolvedValueOnce(record({ stage: 'EXITED' }));
+    repository.otherWorkingRoles.mockResolvedValueOnce(['PUBLISHER']);
+    expect(await endExitedAgentSignIn('agt_1', 'usr_fin', 'FINAL_PAYOUT_PAID')).toBe('KEPT_OTHER_ROLE');
+    expect(repository.switchOffSignIn).not.toHaveBeenCalled();
+    expect(audit.logActivity).toHaveBeenCalledWith('usr_fin', 'AGENT_EXIT_SIGNIN_KEPT', expect.objectContaining({ metadata: { cause: 'FINAL_PAYOUT_PAID', otherRoles: ['PUBLISHER'] } }));
+  });
+
+  it('account lifecycle: an agent not (or no longer) exited is left alone when the payout lands', async () => {
+    const { endExitedAgentSignIn } = await import('../application/application.service');
+    repository.findById.mockResolvedValueOnce(record({ stage: 'ACTIVE' }));
+    expect(await endExitedAgentSignIn('agt_1', 'usr_fin', 'FINAL_PAYOUT_PAID')).toBe('NOT_EXITED');
+    expect(repository.switchOffSignIn).not.toHaveBeenCalled();
   });
 
   it('ninety days after an exit the papers are purged — the files through the port, the rows deleted, the profile stamped', async () => {

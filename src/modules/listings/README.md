@@ -22,6 +22,13 @@ the same read (`findOneForAdmin`) rather than looked up again.
 | GET | `/api/v1/listings/:listingId/content-rules` | any signed-in caller |
 | GET | `/api/v1/listings/:listingId/audience?period=YYYY-MM&advertiserId=` | any role through the door; the service admits ADMIN, the publisher's side of the listing (the same door as an edit — the publisher, their onboarding agent, an agent under a live LISTINGS grant), or an advertiser who has the spot in a non-draft campaign of theirs (in person, or through their agent naming `advertiserId` under the demand-side policy) — G7 (Q109) / Y-B: `{ listingId, period, provider, providers, audience: BlendedAudienceCatchment \| null, basis, cached, unavailable }`. `audience` is the vendors' panels for the `catchmentRadiusM` circle around the spot, **blended by the policy on the integrations row** — `footfall { daily, byHour[24], byWeekday[7] }`, `demographics { ageBands, gender, incomeBands, affinities }` (each a list of `{ label, share }` or null where no vendor has anything), `provenance: 'PANEL'`, `provenanceByField { footfall, demographics, affinities }` (`GEOIQ \| AZIRA \| BLENDED \| null`), `vendors` (who answered), `agreement { footfall }` (0–1 when both gave a daily figure), `rawByVendor { GEOIQ?, AZIRA? }` (each vendor's own answer, for the desk), the legacy `vendor`, `radiusM`, `fetchedAt`. **One `AudienceSnapshot` row per (listing, vendor, period)** — exactly the unique key: each enabled vendor's RAW answer is stored with `expiresAt` = end of the month + 7 days and only the vendors lacking a fresh row are asked, so the blend is made from the rows at read time — switching the policy re-blends with no vendor call, a vendor enabled later fills in on the next read, a vendor disabled later is left out though its row stays; "nothing there" is not stored. One vendor's 429 / 502 keeps the other's answer and is named in `unavailable` (`{ vendor, reason }`; a credential-less vendor is `not configured`). `providers` is the enabled set and `provider` the one name an old reader prints (the footfall primary in force). `period` defaults to this month. Null `audience` with the reason in `basis` when no vendor is enabled or the spot has no coordinates; a vendor's own 503/429/502 only when no vendor answered at all |
 | POST | `/api/v1/listings/:listingId/submit` | PUBLISHER \| AGENT_PUBLISHER (ownership in the handler) |
+| GET | `/api/v1/listings/:listingId/blocked-dates` | PUBLISHER \| AGENT_PUBLISHER \| ADMIN (`supply.view`; ownership in the service) — BD-1: `{ blocks: [{ id, listingId, from, to, reason, createdAt }] }`, calendar days inclusive |
+| POST | `/api/v1/listings/:listingId/blocked-dates` | same, `supply.edit` — `{ from, to, reason? }` → **201** the block. A block holds every slot over its range (`slot-holds.blockedDatesWhere`, counted beside the orders and reservations), so browse shows none left and checkout calls it a clash. 400 `DATES_REVERSED` / `DATES_PAST` / `DATES_TOO_LONG` (a year at most); 409 `DATES_BLOCKED` (overlaps a block) / `DATES_BOOKED` (a booking or a hold sits on the days). Audited `LISTING_DATES_BLOCKED` |
+| DELETE | `/api/v1/listings/:listingId/blocked-dates/:blockId` | same — the publisher's own record (no delete power; ownership decides). Audited `LISTING_DATES_UNBLOCKED` |
+| POST | `/api/v1/listings/:listingId/photos` | PUBLISHER \| AGENT_PUBLISHER \| ADMIN (`supply.edit`; ownership as an edit) — WG-1 (DR 12 board 09): `{ url, type? }`, the URL an upload of purpose LISTING_PHOTO answered → **201** the photograph. Audited `LISTING_PHOTO_ADDED` |
+| DELETE | `/api/v1/listings/:listingId/photos/:photoId` | same — the publisher's own record. Audited `LISTING_PHOTO_REMOVED` |
+| POST | `/api/v1/listings/:listingId/clarification` | PUBLISHER \| AGENT_PUBLISHER (ownership) — WG-1 (board 08 · 26): `{ message }`, the publisher's word back on a send-back; audited `LISTING_CLARIFICATION_SENT` on the listing (the review case reads the activity) and every admin is told. **201** |
+| — | `POST /api/v1/listings`, `PATCH /api/v1/listings/:listingId` | WG-1: both take the website wizard's extra claims (`listingExtras` in the schema: installationByAdx, vehicleType/Model, broadcastLanguage, contentFormat, audienceDemographics, max/advance booking days, cancellationNoticeDays, rateCardValidFrom/To, seasonalVariationNote, widthPx/heightPx) — stored as stated, shown on `GET /listings/browse/:id`; nothing prices on them |
 | GET | `/api/v1/listings/me/:listingId/suggested-rate` | PUBLISHER \| AGENT_PUBLISHER (ownership in the handler — the publisher, their agent, or an agent under a live LISTINGS grant) — Lot E: `{ currentRatePerDay, offer, differs }`, the offer being `pricing.suggestedRate` with each applied factor's `mode` |
 | POST | `/api/v1/listings/me/:listingId/accept-suggested-rate` | same — Lot E: writes the offer's rate through `updateListing` as the publisher's own decision; audited `LISTING_SUGGESTED_RATE_ACCEPTED`; 409 when already at the offer |
 | GET | `/api/v1/listings/:listingId/reprice-log` | ADMIN — E10-2: the Pricing tab's history as a first-class read — `pricing`'s `LISTING_REPRICED_BY_FACTOR` audit rows on the listing, newest first (200 at most), shaped `[{ at, factor: { id, name, applied, mode, surgeId }, from, to, by: { id, name } }]`; a read over the shared audit trail (`shared/audit.findActivityRows`), not a second record; 404 for a listing that does not exist |
@@ -54,9 +61,11 @@ this module's `getListingsForPublisher`.
 **QR-3 (17 Sep 2026): the listing door.** A publisher on their own phone
 may not START a listing until ADX has their basics — a name (one that is
 not still the mobile number the self-registration wrote), an email, an
-address and (QR-5) a date of birth. `POST /listings` as a self-serve
-PUBLISHER refuses 409 `PROFILE_INCOMPLETE` with `details.missing` (`name` /
-`email` / `address` / `dateOfBirth`, in the ladder's order) and a sentence
+address (QR-5 added a date of birth; AGE-1, 29 Sep 2026, took it out again —
+"you don't need to be over 18 to use ADX, but you do need to be over 18 to
+place orders", and listing a space is using ADX). `POST /listings` as a
+self-serve PUBLISHER refuses 409 `PROFILE_INCOMPLETE` with `details.missing`
+(`name` / `email` / `address`, in the ladder's order) and a sentence
 that names them and says what the identity check is for. The rule is
 `shared/kyc-state`'s `profileBasicsMissing`, the same one `GET
 /publishers/me` folds into `readiness` so the app's locked "+" and this
@@ -71,8 +80,8 @@ publisher uses the account unverified and lists once the basics are in —
 and be pushed below verified listings or profiles when an advertiser checks
 out listings". `publishListing` now runs `assertPublisherBasics` after the
 rate-card and city gates: 409 `PROFILE_INCOMPLETE` with `details.missing`
-when a basic is missing (a VERIFIED publisher with no date of birth is
-refused too), nothing when they are all in, whatever `kycStatus` says. A
+when a basic is missing (a VERIFIED publisher with no address is refused
+too), nothing when they are all in, whatever `kycStatus` says. A
 listing with no publisher (an ADX-owned row) is not gated. `readiness.
 canGoLive` follows the same rule. Gate 2 of
 `docs/publisher-supply-lifecycle.md` is therefore the basics, not the check.
@@ -105,7 +114,13 @@ any still without — the old row-count allocator is retired). Routes:
 (PUBLISHER, their own); `GET /listings/drafts/desk?idleDays=&q=&category=&sort=IDLE|NEWEST`
 (ADMIN): every publisher's drafts with the publisher's name, number and city
 beside each and `idleDays` since the last save — the sales and onboarding
-teams' call list. Registered before `/:listingId`.
+teams' call list. Registered before `/:listingId`. Since 2 Oct 2026 the
+console lists them inside the Listings table (its Status dropdown's
+"Drafts"), and each row opens or deletes the draft:
+`GET /listings/drafts/desk/:draftId` (ADMIN, `supply.view`) — the row with
+the wizard's `answers` — and `DELETE /listings/drafts/desk/:draftId` (ADMIN,
+`marketplace.delete`, audited `LISTING_DRAFT_DELETED` with the reference and
+whose it was).
 
 **QR-5: verified first on browse.** `findActive` reads two partitions — the
 spots of VERIFIED publishers (and ADX's own, which carry no publisher), then
@@ -446,6 +461,64 @@ publisher, twenty live listings (five a category, one per venue) with
 pictures, and five campaigns with spots, orders and daily metrics for the
 advertiser named (default +919000000101).
 
+## A vehicle as a spot, and who may check it (AG-4; VH-1, 23 Sep 2026)
+
+A listing may be a vehicle: `vehicleNumber` with `vehicleRcVerifiedAt` and
+`vehicleRcPayload` beside it. `POST /listings/:listingId/vehicle-rc/verify`
+runs Cashfree's RC lookup, stores the answer, and scores the registered
+owner's name against the publisher's (`nameMatchScore`) — which is the part
+that matters: it says whether the person listing the auto actually owns it.
+Audited as `LISTING_VEHICLE_RC_VERIFIED`.
+
+**VH-1 opened it past the desk.** The route now admits ADMIN, PUBLISHER and
+AGENT_PUBLISHER, because the registration is typed while the spot is being
+registered, not afterwards at a desk. The role is only the outer fence:
+`verifyListingVehicleRc` calls `assertCanEditListing` **before the lookup
+runs**, so the spot's own publisher and the agent holding them may check it
+and nobody else can. That ordering is the point — an RC answer carries the
+owner's name and address, and a check any account could run on any number
+would be a lookup service rather than a verification.
+`listings.access.test.ts` pins the refusal happening before the vendor call.
+
+The vendor sits behind Cashfree's IP whitelist. Until that clears every check
+answers `VERIFICATION_UNAVAILABLE` with the reason, and nothing is stored.
+
+**VH-3 moved it earlier still, to where the number is typed.**
+`POST /listings/vehicle-rc/check` answers the same question while the spot is
+still being registered — at which point there is no listing, so the route
+above has nothing to be called with. It is the same lookup, deliberately
+answering **less**:
+
+| | `/:listingId/vehicle-rc/verify` | `/vehicle-rc/check` |
+| --- | --- | --- |
+| When | The spot exists | While it is being registered |
+| Stores | Number, stamp, full payload | Nothing — there is nowhere to put it |
+| Answers | The RC's facts, owner included | The vehicle, its papers, and a **match score** |
+| Audited | `LISTING_VEHICLE_RC_VERIFIED` | No — nothing changed |
+
+The owner's name never leaves the check. Neither does the address or the
+father's name the register carries. A route that returned the registered
+owner of any number anybody typed would be a people-finder with a Verify
+button on it, whatever it was built for — so the answer is *how closely the
+owner matches this publisher*, which is the only thing the screen is asking.
+
+Who may ask is settled before the vendor is called: your own publisher
+record, or one you may add a spot to (`assertCanCreateForPublisher` — the
+same right the create a moment later will demand). A refusal therefore costs
+no vendor call.
+
+The field itself is the flow config's, on the **transit** branch and optional
+there: that branch covers a metro platform as well as a taxi wrap, and a
+publisher who cannot find the RC book in the moment must still be able to
+finish the listing. The app draws the Verify button under whatever field
+carries id `vehicle_number`, so which categories ask for one can change
+without a release.
+
+Routes: `POST /listings/vehicle-rc/check` — ADMIN, PUBLISHER,
+AGENT_PUBLISHER. Declared **above** every `/:listingId` route, or Express
+reads `vehicle-rc` as a listing id and the route never runs.
+Tests: `listings.access.test.ts`.
+
 ## QR-23 (20 Sep 2026): the platform demo — `npm run seed:demo`
 
 `seed:demo` = `seed:demo-listings` (the demo publisher, its twenty spots,
@@ -474,3 +547,39 @@ base seeds in this order — `seed:cities`, `seed:geo`, `seed:venues`,
 remote database a day's accrual can outlive Prisma's 5 s transaction
 window; the run is idempotent per spot and day, so the script makes up to
 three passes.
+
+## 26 Sep 2026 — similar spaces as cards, and the illumination facet
+
+`GET /listings/:id/similar` (public) answered raw listing rows — every column,
+on a route with no session. It now answers browse cards, the shape
+`GET /listings/browse` answers (`browse.service.similarListings`: photos,
+publisher, slots left), live spots with their rights in force only; `:id` may
+be the display id. No app called it; the website's "similar spaces" grid draws
+the cards directly.
+
+`GET /listings/browse?illumination=FRONTLIT,BACKLIT,DIGITAL,NONE` — how the
+face is lit. The listing flow stores "Front-lit"/"Back-lit"/"Digital"/"Non-lit",
+the seed the upper-case words; both match, case-insensitively, and a spot with
+nothing recorded counts as NONE. In the AND list so `q`'s OR keeps its seat.
+Pinned in `__tests__/similar-cards.test.ts`, `__tests__/illumination-facet.test.ts`.
+
+## AV-1: availability counted per day (27 Sep 2026)
+
+The owner asked how a space looks when some dates are booked and the rest
+are free. Before AV-1 every hold touching a window was summed, so a
+billboard booked 1–10 Oct read "no slot left" for all of October, and two
+bookings on a loop that never ran together read as full.
+
+- **The count is the busiest day** (`slot-holds.dailyHolds` / `peakSlotHolds`):
+  holds are whole UTC days (a flight's `startDate`/`endDate` are its first
+  and last day; a block's `from`/`to` are dates); a hold without a start or
+  end runs to that edge of the window. `slotsHeldWith` (browse, checkout,
+  placement, reservations — every count) now answers the peak.
+- **Browse cards** carry `freeDays` and `windowDays` for the asked window,
+  so a card can say "Partly booked · 21 of 31 days free".
+- **`GET /listings/browse/:listingId/availability?from&to&length&quantity`**
+  (public, `publicReadLimiter`; 90 days from today by default; at most 186):
+  `{ listingId, slotsTotal, from, to, days: [{ date, held, left, blocked }],
+  nextFreeDate, nextFit: { from, to } | null, freeDays }` — `nextFit` is the
+  earliest run of `length` days all with room for `quantity`. Counts only;
+  never who booked.

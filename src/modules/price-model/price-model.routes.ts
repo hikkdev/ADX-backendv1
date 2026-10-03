@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { asyncHandler } from '../../shared/http';
-import { authenticate, requireRole } from '../../shared/auth';
+import { authenticate, requireRole, requirePermission } from '../../shared/auth';
 import {
   createCategoryRuleHandler,
   createDimensionHandler,
@@ -35,33 +35,33 @@ priceModelRouter.use(authenticate);
  * offer made in ADX's name. Ops work throughout. */
 priceModelRouter.use(requireRole('ADMIN'));
 
-priceModelRouter.get('/settings', asyncHandler(getSettingsHandler));
-priceModelRouter.put('/settings', asyncHandler(updateSettingsHandler));
-priceModelRouter.post('/simulate', asyncHandler(simulateHandler));
+priceModelRouter.get('/settings', requirePermission('pricing.view'), asyncHandler(getSettingsHandler));
+priceModelRouter.put('/settings', requirePermission('pricing.edit'), asyncHandler(updateSettingsHandler));
+priceModelRouter.post('/simulate', requirePermission('pricing.view'), asyncHandler(simulateHandler));
 
-priceModelRouter.get('/dimensions', asyncHandler(listDimensionsHandler));
-priceModelRouter.post('/dimensions', asyncHandler(createDimensionHandler));
-priceModelRouter.get('/dimensions/:id', asyncHandler(getDimensionHandler));
-priceModelRouter.patch('/dimensions/:id', asyncHandler(updateDimensionHandler));
-priceModelRouter.delete('/dimensions/:id', asyncHandler(deleteDimensionHandler));
-priceModelRouter.put('/dimensions/:id/values', asyncHandler(setDimensionValuesHandler));
+priceModelRouter.get('/dimensions', requirePermission('pricing.view'), asyncHandler(listDimensionsHandler));
+priceModelRouter.post('/dimensions', requirePermission('pricing.edit'), asyncHandler(createDimensionHandler));
+priceModelRouter.get('/dimensions/:id', requirePermission('pricing.view'), asyncHandler(getDimensionHandler));
+priceModelRouter.patch('/dimensions/:id', requirePermission('pricing.edit'), asyncHandler(updateDimensionHandler));
+priceModelRouter.delete('/dimensions/:id', requirePermission('pricing.delete'), asyncHandler(deleteDimensionHandler));
+priceModelRouter.put('/dimensions/:id/values', requirePermission('pricing.edit'), asyncHandler(setDimensionValuesHandler));
 
-priceModelRouter.get('/category-rules', asyncHandler(listCategoryRulesHandler));
-priceModelRouter.post('/category-rules', asyncHandler(createCategoryRuleHandler));
-priceModelRouter.patch('/category-rules/:id', asyncHandler(updateCategoryRuleHandler));
-priceModelRouter.delete('/category-rules/:id', asyncHandler(deleteCategoryRuleHandler));
+priceModelRouter.get('/category-rules', requirePermission('pricing.view'), asyncHandler(listCategoryRulesHandler));
+priceModelRouter.post('/category-rules', requirePermission('pricing.edit'), asyncHandler(createCategoryRuleHandler));
+priceModelRouter.patch('/category-rules/:id', requirePermission('pricing.edit'), asyncHandler(updateCategoryRuleHandler));
+priceModelRouter.delete('/category-rules/:id', requirePermission('pricing.delete'), asyncHandler(deleteCategoryRuleHandler));
 
-priceModelRouter.get('/rules', asyncHandler(listRulesHandler));
-priceModelRouter.post('/rules', asyncHandler(createRuleHandler));
-priceModelRouter.get('/rules/:id', asyncHandler(getRuleHandler));
-priceModelRouter.patch('/rules/:id', asyncHandler(updateRuleHandler));
-priceModelRouter.delete('/rules/:id', asyncHandler(deleteRuleHandler));
-priceModelRouter.put('/rules/:id/conditions', asyncHandler(setConditionsHandler));
+priceModelRouter.get('/rules', requirePermission('pricing.view'), asyncHandler(listRulesHandler));
+priceModelRouter.post('/rules', requirePermission('pricing.edit'), asyncHandler(createRuleHandler));
+priceModelRouter.get('/rules/:id', requirePermission('pricing.view'), asyncHandler(getRuleHandler));
+priceModelRouter.patch('/rules/:id', requirePermission('pricing.edit'), asyncHandler(updateRuleHandler));
+priceModelRouter.delete('/rules/:id', requirePermission('pricing.delete'), asyncHandler(deleteRuleHandler));
+priceModelRouter.put('/rules/:id/conditions', requirePermission('pricing.edit'), asyncHandler(setConditionsHandler));
 
 /* `price` computes and returns; `quotes` writes one down. Kept apart because
  * negotiation is iterative and only the last version is worth keeping. */
-priceModelRouter.post('/quotes/price', asyncHandler(priceQuoteHandler));
-priceModelRouter.get('/quotes', asyncHandler(listQuotesHandler));
-priceModelRouter.post('/quotes', asyncHandler(saveQuoteHandler));
-priceModelRouter.get('/quotes/:id', asyncHandler(getQuoteHandler));
-priceModelRouter.patch('/quotes/:id/status', asyncHandler(setQuoteStatusHandler));
+priceModelRouter.post('/quotes/price', requirePermission('pricing.view'), asyncHandler(priceQuoteHandler));
+priceModelRouter.get('/quotes', requirePermission('pricing.view'), asyncHandler(listQuotesHandler));
+priceModelRouter.post('/quotes', requirePermission('pricing.edit'), asyncHandler(saveQuoteHandler));
+priceModelRouter.get('/quotes/:id', requirePermission('pricing.view'), asyncHandler(getQuoteHandler));
+priceModelRouter.patch('/quotes/:id/status', requirePermission('pricing.edit'), asyncHandler(setQuoteStatusHandler));

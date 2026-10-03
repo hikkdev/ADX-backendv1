@@ -194,6 +194,9 @@ vi.mock('../../../shared/integrations', () => ({ getEffectiveLeadChannelsConfig:
 vi.mock('../../../shared/integrations/integration-config', () => ({ getEffectiveLeadChannelsConfig: vi.fn(async () => ({})) }));
 vi.mock('../../../shared/cache', () => ({ redis: { set: vi.fn(async () => 'OK'), get: vi.fn(async () => null), del: vi.fn(async () => 1) } }));
 vi.mock('../../../config/env', () => mocks.env);
+// Account lifecycle (2 Oct 2026): the account the code proved — open unless a test says so.
+const { accountFacts } = vi.hoisted(() => ({ accountFacts: { findAccountFacts: vi.fn(async (): Promise<{ isActive: boolean; closedAt: Date | null } | null> => null), accountClosedAt: vi.fn(async () => null) } }));
+vi.mock('../../../shared/party-status/account-facts', () => accountFacts);
 
 import { CODE_LEAD_LANDING_LADDER } from '../../app-config';
 import { inviteState, inviteUrl, inviteView, mintInviteCode, openedAgo, withOpen, INVITE_DAYS, OPENS_KEPT } from '../invites.rules';
@@ -368,6 +371,16 @@ describe('LH7: the OTP door and the two asks', () => {
     const again = await verifyInviteOtp(invite.code, { mobile: '9876543210', otp: '123456' }, {} as never, state.now);
     expect(again.lead.converted).toBe(true);
     expect(mocks.users.chooseParty).toHaveBeenCalledTimes(2);
+  });
+
+  it('account lifecycle (2 Oct 2026): a closed or deactivated account is not signed in by the invite', async () => {
+    const invite = await issueInvite('lead_1', 'usr_agent', { now: state.now });
+    accountFacts.findAccountFacts.mockResolvedValueOnce({ isActive: true, closedAt: new Date() });
+    await expect(verifyInviteOtp(invite.code, { mobile: '9876543210', otp: '123456' }, {} as never, state.now)).rejects.toMatchObject({ statusCode: 401 });
+    accountFacts.findAccountFacts.mockResolvedValueOnce({ isActive: false, closedAt: null });
+    await expect(verifyInviteOtp(invite.code, { mobile: '9876543210', otp: '123456' }, {} as never, state.now)).rejects.toMatchObject({ statusCode: 401 });
+    expect(mocks.users.chooseParty).not.toHaveBeenCalled();
+    expect(mocks.auth.startSession).not.toHaveBeenCalled();
   });
 
   it('a callback lands on the holder’s day through the hub and engages the lead through the link', async () => {

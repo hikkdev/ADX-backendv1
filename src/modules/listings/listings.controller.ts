@@ -1,7 +1,9 @@
 import type { Request, Response } from 'express';
+import { listingAvailability } from './availability.service';
+import { availabilityQuerySchema, similarLimitSchema } from './listings.schema';
 import { ApiError } from '../../shared/errors';
 import { platformStanding } from '../agreements';
-import { deskDrafts, listMyDrafts, removeDraft, saveDraft, takeDraft } from './drafts.service';
+import { deskDraft, deskDrafts, deskRemoveDraft, listMyDrafts, removeDraft, saveDraft, takeDraft } from './drafts.service';
 import { deskDraftsQuerySchema, saveDraftSchema } from './drafts.schema';
 import { profileBasicsMissing, profileIncompleteMessage } from '../../shared/kyc-state';
 import { logActivity } from '../../shared/audit';
@@ -9,17 +11,16 @@ import { assertMayActFor, getAdvertiserForUser } from '../advertisers';
 import { requireAgentProfile } from '../agents';
 import { translateListings } from '../ai';
 import type { ListingCategory } from '../../shared/database';
-import {
-  adminListingsQuerySchema,
+import { adminListingsQuerySchema,
   reviewQueueQuerySchema,
   browseCategoriesQuerySchema,
   browseQuerySchema,
   browseWindowSchema,
+  checkVehicleRcSchema,
   createListingSchema,
   savedSpacesQuerySchema,
   sendBackListingSchema,
-  updateListingSchema,
-} from './listings.schema';
+  updateListingSchema, addPhotoSchema, clarificationSchema } from './listings.schema';
 import {
   browseCategories,
   browseVenues,
@@ -27,12 +28,16 @@ import {
   getBrowseListing,
   listSavedListings,
   saveListing,
+  similarListings,
   unsaveListing,
   type BrowseViewer,
 } from './browse.service';
 import { getSpotPage, renderSpotPage, spotPageLinks } from './spot-page.service';
 import { listingAudience } from './audience.service';
-import { audienceQuerySchema } from './listings.schema';
+import { audienceQuerySchema, listingInsightsQuerySchema } from './listings.schema';
+import { getListingRecordForAdmin, listingInsights } from './listing-desk.service';
+import { recordListingView } from './listing-views.service';
+import { listingViewSchema } from './listings.schema';
 
 /* ── DR 01 browse — the advertiser's discovery ─────────────────────── */
 
@@ -46,11 +51,16 @@ import { audienceQuerySchema } from './listings.schema';
  * is a 403, because there is no book to save into.
  */
 async function resolveViewer(req: Request, requested: string | undefined, mode: 'READ' | 'WRITE'): Promise<BrowseViewer> {
+  /* W1: a public read with no session — nobody's saved spaces, nobody's advertiser. */
+  if (!req.user) {
+    if (requested) throw new ApiError(401, 'UNAUTHORIZED', 'Sign in to act for an advertiser');
+    return { advertiserId: null };
+  }
   if (requested) {
     await assertMayActFor(req, requested, mode);
     return { advertiserId: requested };
   }
-  const own = await getAdvertiserForUser(req.user!.sub);
+  const own = await getAdvertiserForUser(req.user.sub);
   return { advertiserId: own?.id ?? null };
 }
 
@@ -68,11 +78,12 @@ const optionalId = (value: unknown): string | undefined =>
 export async function browseListingsHandler(req: Request, res: Response): Promise<void> {
   const parsed = browseQuerySchema.safeParse(req.query);
   if (!parsed.success) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid query', parsed.error.flatten());
-  const { lat, lng, radiusKm, from, to, page, pageSize, advertiserId, ...facets } = parsed.data;
+  const { lat, lng, radiusKm, from, to, page, pageSize, advertiserId, similarTo, ...facets } = parsed.data;
   const viewer = await resolveViewer(req, advertiserId, 'READ');
   const result = await browseListings(
     {
       ...facets,
+      ...(similarTo ? { similarToId: similarTo } : {}),
       ...(from ? { from: new Date(from) } : {}),
       ...(to ? { to: new Date(to) } : {}),
       ...(lat !== undefined && lng !== undefined ? { near: { latitude: lat, longitude: lng, radiusKm } } : {}),
@@ -139,6 +150,27 @@ export async function spotPageHandler(req: Request, res: Response): Promise<void
   res.status(200).type('text/html').send(renderSpotPage(spot, spotPageLinks(spot.displayId || displayId)));
 }
 
+/**
+ * LD-1: `POST /listings/:displayIdOrId/view` — the spot page, the
+ * marketplace detail or the app's listing screen was opened. Public; the
+ * service decides whether it counts. Answers `{ counted }` alone — nothing
+ * about the spot, its owner or the caller.
+ */
+export async function listingViewHandler(req: Request, res: Response): Promise<void> {
+  const parsed = listingViewSchema.safeParse(req.body ?? {});
+  if (!parsed.success) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid request', parsed.error.flatten());
+  const userAgent = req.get('user-agent') ?? null;
+  const data = await recordListingView({
+    idOrDisplayId: String(req.params['displayIdOrId'] ?? ''),
+    source: parsed.data.source,
+    user: req.user ? { id: req.user.sub, roles: req.user.roles ?? [] } : null,
+    ip: req.ip ?? null,
+    userAgent,
+  });
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ success: true, data });
+}
+
 /* ── Audience — G7 (Q109) ──────────────────────────────────────────── */
 
 /**
@@ -182,8 +214,7 @@ export async function savedListingsHandler(req: Request, res: Response): Promise
   await assertMayActFor(req, advertiserId, 'READ');
   res.json({ success: true, data: await listSavedListings(advertiserId, parsed.data) });
 }
-import {
-  acceptSuggestedRate,
+import { acceptSuggestedRate,
   assertAgentAssignable,
   assertCanCreateForPublisher,
   assertCanEditListing,
@@ -195,15 +226,15 @@ import {
   listContentCategories,
   getAllListings,
   getListingForAdmin,
-  getSimilarListings,
   publishListing,
   repriceLog,
   sendBackListing,
   submitListingForReview,
   suggestedRateOffer,
   updateListing,
-  verifyListingVehicleRc,
-} from './listings.service';
+  checkVehicleRcForPublisher,
+  verifyListingVehicleRc, addListingPhoto, removeListingPhoto, sendListingClarification } from './listings.service';
+import type { ListingActor } from './listings.service';
 
 export async function createListingHandler(req: Request, res: Response): Promise<void> {
   const parsed = createListingSchema.safeParse(req.body);
@@ -250,7 +281,8 @@ export async function createListingHandler(req: Request, res: Response): Promise
       ...rest,
       publisherId: own.id,
       category: rest.category as ListingCategory,
-      ...(draft ? { displayId: draft.displayId } : {}),
+      // LD-1: the draft's answers no column takes, and its terms tick, are kept on the listing.
+      ...(draft ? { displayId: draft.displayId, draftAnswers: draft.answers } : {}),
     });
     if (draft) await removeDraft(own.id, draft.id);
     res.status(201).json({ success: true, data: listing });
@@ -300,14 +332,29 @@ export async function getAllListingsHandler(req: Request, res: Response): Promis
  * what a patch answers: the listing with its publisher, agent, photos and
  * media type (`getListingForAdmin`), translated for the reader.
  */
-async function listingDetailView(listingId: string, userId: string) {
-  const listing = await getListingForAdmin(listingId);
-  const [translated] = await translateListings([listing], userId);
+async function listingDetailView(listingId: string, userId: string, isAdmin: boolean) {
+  // 3 Oct 2026: the desk reads the whole record (every column, every row
+  // hanging off it); a publisher's or agent's PATCH still answers the
+  // narrow view it always has, so nothing private crosses to them.
+  const listing = isAdmin ? await getListingRecordForAdmin(listingId) : await getListingForAdmin(listingId);
+  const [translated] = await translateListings([listing as Record<string, unknown>], userId);
   return translated ?? listing;
 }
 
+const callerIsAdmin = (req: Request): boolean => (req.user?.roles ?? []).includes('ADMIN');
+
 export async function getListingHandler(req: Request, res: Response): Promise<void> {
-  res.json({ success: true, data: await listingDetailView(req.params['listingId'] as string, req.user!.sub) });
+  res.json({ success: true, data: await listingDetailView(req.params['listingId'] as string, req.user!.sub, callerIsAdmin(req)) });
+}
+
+/**
+ * 3 Oct 2026: the listing page's Performance — the window against the days
+ * before it, the whole life, and the day series. ADMIN, `supply.view`.
+ */
+export async function listingInsightsHandler(req: Request, res: Response): Promise<void> {
+  const parsed = listingInsightsQuerySchema.safeParse(req.query);
+  if (!parsed.success) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid query', parsed.error.flatten());
+  res.json({ success: true, data: await listingInsights(req.params['listingId'] as string, parsed.data) });
 }
 
 /** E10-2: the Pricing tab's history — the factor reprices on this listing, newest first. */
@@ -325,8 +372,8 @@ export async function updateListingHandler(req: Request, res: Response): Promise
     isAdmin: (req.user?.roles ?? []).includes('ADMIN'),
   });
   await updateListing(listingId, parsed.data);
-  // T-B: the patch answers the detail view the GET answers, one read after the write.
-  res.json({ success: true, data: await listingDetailView(listingId, req.user!.sub) });
+  // T-B: the patch answers the detail view the GET answers, one read after the write — the desk's whole record for ADX, the narrow view for anyone else.
+  res.json({ success: true, data: await listingDetailView(listingId, req.user!.sub, callerIsAdmin(req)) });
 }
 
 /**
@@ -395,12 +442,32 @@ export async function acceptSuggestedRateHandler(req: Request, res: Response): P
  * The decision is written to the activity log because a listing going live is
  * exactly the kind of act somebody asks "who did that?" about later.
  */
-/** AG-4: the desk checks a vehicle-spot's RC with Cashfree; `vehicleNumber` in the body sets or corrects the registration first. */
+/**
+ * AG-4: a vehicle-spot's RC, checked with Cashfree. `vehicleNumber` in the
+ * body sets or corrects the registration first.
+ *
+ * VH-1: the desk, the spot's publisher and the agent registering it — the
+ * service refuses anybody else before the lookup runs.
+ */
+/**
+ * VH-3: `POST /listings/vehicle-rc/check` — the Verify button on the
+ * registration field, while the spot is still being registered and has no
+ * listing to hang an answer on. Nothing is stored and no owner's name comes
+ * back; see `checkVehicleRcForPublisher`.
+ */
+export async function checkVehicleRcHandler(req: Request, res: Response): Promise<void> {
+  const parsed = checkVehicleRcSchema.safeParse(req.body ?? {});
+  if (!parsed.success) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid request', parsed.error.flatten());
+  const actor = { userId: req.user!.sub, isAdmin: req.user!.roles.includes('ADMIN') };
+  res.json({ success: true, data: await checkVehicleRcForPublisher(parsed.data, actor) });
+}
+
 export async function verifyListingVehicleRcHandler(req: Request, res: Response): Promise<void> {
   const listingId = req.params['listingId'] as string;
   const raw = (req.body ?? {}) as { vehicleNumber?: unknown };
   const vehicleNumber = typeof raw.vehicleNumber === 'string' && raw.vehicleNumber.trim() ? raw.vehicleNumber.trim() : undefined;
-  res.json({ success: true, data: await verifyListingVehicleRc(listingId, { vehicleNumber }, req.user!.sub) });
+  const actor = { userId: req.user!.sub, isAdmin: req.user!.roles.includes('ADMIN') };
+  res.json({ success: true, data: await verifyListingVehicleRc(listingId, { vehicleNumber }, req.user!.sub, actor) });
 }
 
 export async function publishListingHandler(req: Request, res: Response): Promise<void> {
@@ -459,7 +526,10 @@ export async function listingContentRulesHandler(req: Request, res: Response): P
 }
 
 export async function similarListingsHandler(req: Request, res: Response): Promise<void> {
-  res.json({ success: true, data: await getSimilarListings(req.params['id'] as string) });
+  // 26 Sep 2026: browse cards, the shape `GET /listings/browse` answers. SIM-1: `?limit=` up to 24.
+  const parsed = similarLimitSchema.safeParse(req.query);
+  if (!parsed.success) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid query', parsed.error.flatten());
+  res.json({ success: true, data: await similarListings(req.params['id'] as string, parsed.data.limit ?? 5) });
 }
 
 
@@ -491,9 +561,57 @@ export async function deleteListingDraftHandler(req: Request, res: Response): Pr
   res.json({ success: true, data: { deleted: true } });
 }
 
+/** GET /listings/drafts/desk/:draftId — ADMIN: one draft with its answers, whoever's it is. */
+export async function deskListingDraftHandler(req: Request, res: Response): Promise<void> {
+  res.json({ success: true, data: await deskDraft(req.params['draftId'] as string) });
+}
+
+/** DELETE /listings/drafts/desk/:draftId — ADMIN: throw a publisher's draft away, audited. */
+export async function deleteDeskListingDraftHandler(req: Request, res: Response): Promise<void> {
+  await deskRemoveDraft(req.params['draftId'] as string, req.user!.sub, req);
+  res.json({ success: true, data: { deleted: true } });
+}
+
 /** GET /listings/drafts/desk — ADMIN: every publisher's half-written spot, for the sales and onboarding teams. */
 export async function deskListingDraftsHandler(req: Request, res: Response): Promise<void> {
   const parsed = deskDraftsQuerySchema.safeParse(req.query);
   if (!parsed.success) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid request', parsed.error.flatten());
   res.json({ success: true, data: await deskDrafts(parsed.data) });
+}
+
+/* ── WG-1: photographs and the publisher's word on a send-back ───────── */
+
+const editActor = (req: Request): ListingActor => ({ userId: req.user!.sub, isAdmin: (req.user?.roles ?? []).includes('ADMIN') });
+
+/** POST /listings/:listingId/photos — 201 the photograph. */
+export async function addListingPhotoHandler(req: Request, res: Response): Promise<void> {
+  const parsed = addPhotoSchema.safeParse(req.body);
+  if (!parsed.success) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid request', parsed.error.flatten());
+  res.status(201).json({ success: true, data: await addListingPhoto(req.params['listingId'] as string, parsed.data, editActor(req)) });
+}
+
+/** DELETE /listings/:listingId/photos/:photoId */
+export async function removeListingPhotoHandler(req: Request, res: Response): Promise<void> {
+  res.json({ success: true, data: await removeListingPhoto(req.params['listingId'] as string, req.params['photoId'] as string, editActor(req)) });
+}
+
+/** POST /listings/:listingId/clarification — { message }. */
+export async function listingClarificationHandler(req: Request, res: Response): Promise<void> {
+  const parsed = clarificationSchema.safeParse(req.body);
+  if (!parsed.success) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid request', parsed.error.flatten());
+  res.status(201).json({ success: true, data: await sendListingClarification(req.params['listingId'] as string, parsed.data.message, editActor(req)) });
+}
+
+/**
+ * AV-1: `GET /listings/:listingId/availability?from=YYYY-MM-DD&to=YYYY-MM-DD&length=&quantity=`
+ * — every day of the range with slots held and left and whether it is
+ * blocked, the first free day, and the earliest run of `length` days with
+ * room. Public; 90 days from today when no range is asked for.
+ */
+
+export async function listingAvailabilityHandler(req: Request, res: Response): Promise<void> {
+  const parsed = availabilityQuerySchema.safeParse(req.query);
+  if (!parsed.success) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid query', parsed.error.flatten());
+  res.set('Cache-Control', 'no-store');
+  res.json({ success: true, data: await listingAvailability(req.params['listingId'] as string, parsed.data) });
 }

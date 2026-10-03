@@ -410,3 +410,62 @@ called from `suspension` leaves `cancelledByUserId` null: the platform did it.
 `ORDER_CANCELLED` and `ORDER_CAMPAIGN_ENDED` are audited by hand beside the
 three that already were. `agentOfferHistory` counts `reassigned` separately
 and leaves those rows out of the priority window.
+
+## 26 Sep 2026 — the self-install note, and the completion code
+
+**SI-N.** `selfInstallCaptureInstallation` parsed `note` and dropped it; it now
+lands on `Order.selfInstallNotes` beside the condition note (a later note goes
+under the earlier one, never over it, and a note already there is not written
+twice — `joinSelfInstallNote`). `POST …/self-install/capture-condition` takes a
+note with no new photographs (the photographs on file stay); a body with
+neither is still 400.
+
+**The completion code.** `GET /orders/my` answered `completionOtpPlain` (and
+the hash) on every row — to the publisher, the advertiser and the agent, who
+is meant to hear it from the publisher. The persona lists drop both
+(`orders.redact.ts`), and `GET /orders/:id` answers them to ADMIN only (support
+reads the code back); the publisher is given it by notification, as before.
+Pinned in `self-install.test.ts`, `my-orders.test.ts`,
+`my-orders-redaction.test.ts`.
+
+## Order fraud screening — the hold (2 Oct 2026)
+
+The order owns its risk and hold columns (`riskScore`, `riskSignals`,
+`riskBand`, `riskScoredAt`, `riskReviewStatus`, `riskReviewedById/At`,
+`riskReviewNote`, `riskClearedSignalKeys`, `heldAt`, `heldById`,
+`holdReason`, `fraudCaseId`) and what a hold stops; `fraud` scores orders and
+runs the review desk (`/orders/fraud-review`, `/orders/:id/hold|release|clear|
+confirm-fraud|cancel-impact|fraud-case|rescore` — mounted by bootstrap ahead
+of this router; see `fraud`'s README) and writes through
+`risk/order-risk.service.ts`.
+
+- **ADMIN only.** The thirteen columns are in the client's `GLOBAL_OMIT`, so
+  no default read carries them; `orderDetailFor` and `withoutRisk`
+  (`orders.redact.ts`) are the belt on every party answer. `GET /orders/:id`
+  for ADX spreads `getOrderRiskView` (every column, plus `riskReviewedBy` and
+  `heldBy` as `{ id, name }`, and the party's `reviewNotice`); `GET /orders`
+  (the board) carries `heldAt`, `holdReason`, `riskScore`, `riskBand`,
+  `riskReviewStatus` (not the signals).
+  `tests/contract/no-secrets-in-responses.test.ts` pins both layers.
+- **Parties see one line.** A party's `GET /orders/:id` and every row of
+  `GET /orders/my` carry `reviewNotice`: "Your order is being reviewed —
+  we'll update you shortly." on a held order, null otherwise. Never "fraud".
+- **What a hold stops** (`risk/order-hold.ts`): `autoAssignAgent` offers a
+  held order to nobody; `agentAcceptOrder` refuses it (409 `ORDER_ON_HOLD`,
+  the neutral line); `adminAssignAgent`, `reassignAgent` and `approveOrder`
+  (the sign-off that records the agent's commission) answer 409
+  `ORDER_ON_HOLD` with the desk's sentence; `payouts`' daily accrual skips the
+  spot (its own query reads `order.heldAt`) and catches the days up after the
+  release. The wallet is never frozen for it. A hold never changes the
+  order's status. An offer already out when the hold lands lapses on its own
+  timer (the re-offer waits for the release).
+- **Holding** is `holdOrder` — one conditional write (`heldAt: null`, not
+  COMPLETED/CANCELLED), 409 when already held or finished; `heldById` null is
+  the screening's automatic hold. **Releasing** (`releaseOrderHold`) lets the
+  order walk on: at PENDING_AGENT with no offer out it is offered then.
+- **When it is scored**: a direct booking's placement tells
+  `screening.port.ts` (bootstrap fills it with
+  `fraud.screenOrderInBackground`); an order raised for a campaign is scored
+  when `campaigns` calls `announceOrdersPaid` — at authorisation, once every
+  spot names its order, and again when the hold is captured at launch. Both fire-and-forget; a failure is logged and
+  the order stands.

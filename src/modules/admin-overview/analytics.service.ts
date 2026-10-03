@@ -207,11 +207,11 @@ const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const ISO_DAY = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 
-const dayIndexOfInstant = (instant: Date) => Math.floor((instant.getTime() + IST_OFFSET_MS) / DAY_MS);
-const dayIndexOfDate = (date: Date) => Math.floor(date.getTime() / DAY_MS);
-const isoOfDayIndex = (index: number) => new Date(index * DAY_MS).toISOString().slice(0, 10);
+export const dayIndexOfInstant = (instant: Date) => Math.floor((instant.getTime() + IST_OFFSET_MS) / DAY_MS);
+export const dayIndexOfDate = (date: Date) => Math.floor(date.getTime() / DAY_MS);
+export const isoOfDayIndex = (index: number) => new Date(index * DAY_MS).toISOString().slice(0, 10);
 /** The IST midnight that opens the day. */
-const instantOfDayIndex = (index: number) => new Date(index * DAY_MS - IST_OFFSET_MS);
+export const instantOfDayIndex = (index: number) => new Date(index * DAY_MS - IST_OFFSET_MS);
 
 function dayIndexOfIso(iso: string): number {
   if (!ISO_DAY.test(iso)) throw new ApiError(400, 'VALIDATION_ERROR', 'Dates must be YYYY-MM-DD');
@@ -220,14 +220,14 @@ function dayIndexOfIso(iso: string): number {
 }
 
 /** The first day of the bucket a day falls in. 1970-01-01 was a Thursday, hence the +3 to land Monday on 0. */
-function bucketStartDayIndex(index: number, granularity: Granularity): number {
+export function bucketStartDayIndex(index: number, granularity: Granularity): number {
   if (granularity === 'day') return index;
   if (granularity === 'week') return index - ((((index + 3) % 7) + 7) % 7);
   const date = new Date(index * DAY_MS);
   return Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1) / DAY_MS;
 }
 
-function nextBucketStartDayIndex(start: number, granularity: Granularity): number {
+export function nextBucketStartDayIndex(start: number, granularity: Granularity): number {
   if (granularity === 'day') return start + 1;
   if (granularity === 'week') return start + 7;
   const date = new Date(start * DAY_MS);
@@ -370,7 +370,7 @@ class Span {
  * town) is in it when the spelling matches, case-insensitively — which is
  * also all a facet that resolved to no key can ever match.
  */
-const inCity = (fact: { city: string | null | undefined; cityId: string | null | undefined }, filter: AnalyticsFilter): boolean => {
+export const inCity = (fact: { city: string | null | undefined; cityId: string | null | undefined }, filter: AnalyticsFilter): boolean => {
   if (filter.city === undefined) return true;
   if (fact.cityId) return fact.cityId === filter.cityId;
   return (fact.city ?? '').trim().toLowerCase() === filter.city.trim().toLowerCase();
@@ -385,7 +385,7 @@ const spotMatches = (spot: SpotFact, filter: AnalyticsFilter) =>
  * otherwise the matching spots' line totals over all of them. A booking with
  * no priced spots is shared by count instead of by value.
  */
-function shareOf(campaign: CampaignFact | undefined, filter: AnalyticsFilter): Decimal {
+export function shareOf(campaign: CampaignFact | undefined, filter: AnalyticsFilter): Decimal {
   if (filter.agentAssisted && !campaign?.agentId) return ZERO;
   if (filter.category === undefined && filter.city === undefined) return new Decimal(1);
   if (!campaign) return ZERO;
@@ -396,9 +396,9 @@ function shareOf(campaign: CampaignFact | undefined, filter: AnalyticsFilter): D
   return matching.reduce((sum, spot) => sum.plus(spot.lineTotal), ZERO).dividedBy(total);
 }
 
-const hasListingFilter = (filter: AnalyticsFilter) => filter.category !== undefined || filter.city !== undefined;
+export const hasListingFilter = (filter: AnalyticsFilter) => filter.category !== undefined || filter.city !== undefined;
 
-async function filterFor(query: SeriesQuery): Promise<AnalyticsFilter> {
+export async function filterFor(query: SeriesQuery): Promise<AnalyticsFilter> {
   return {
     category: query.category,
     city: query.city,

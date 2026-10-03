@@ -20,9 +20,10 @@ import {
  * with `--check`) and `GET /flags/registry`, whose `check` field carries the
  * same verdict so the console can say "the committed registry is behind the
  * code" without anyone opening a terminal. Both compare the committed
- * document against a fresh fold of the backend declarations and the three
- * package manifests — the script after loading every `features.ts`, the
- * read over the declarations the running process already loaded.
+ * document against a fresh fold of the backend declarations and the four
+ * package manifests (console, user app, agent app, website) — the script
+ * after loading every `features.ts`, the read over the declarations the
+ * running process already loaded.
  *
  * The verdict is per surface, because the fix is per surface: a BACKEND
  * drift means a module's `features.ts` changed and nobody re-ran the sync;
@@ -35,18 +36,25 @@ import {
  * architecture test treats it, rather than reporting every feature behind.
  *
  * No Prisma, no cache: the document is a file and the declarations are a
- * Map. Reading three small manifests per request is cheaper than caching
+ * Map. Reading four small manifests per request is cheaper than caching
  * a verdict that must change the moment somebody edits a file.
  */
 
 /** The package root — one level above `src/`, beside `docs/`; found from this file so `dist/` resolves the same. */
 export const PACKAGE_ROOT = path.resolve(__dirname, '../../..');
 
-/** Where each surface's manifest lives, relative to the monorepo root. */
-export const MANIFEST_FILES: Readonly<Record<Exclude<ManifestSurface, 'WEBSITE'>, string>> = {
+/**
+ * Where each surface's manifest lives, relative to the monorepo root — in
+ * fold order: a manifest may name a key an earlier one introduced (the
+ * website names the user app's `onboarding.ladder` with its paths only),
+ * so the website, the newest surface, folds last.
+ */
+export const MANIFEST_FILES: Readonly<Record<ManifestSurface, string>> = {
   CONSOLE: path.resolve(PACKAGE_ROOT, '..', 'adx-adminUI-sai', 'features.manifest.json'),
   APP_USER: path.resolve(PACKAGE_ROOT, '..', 'mobile', 'user-app', 'features.manifest.json'),
   APP_AGENT: path.resolve(PACKAGE_ROOT, '..', 'mobile', 'agent-app', 'features.manifest.json'),
+  // 28 Sep 2026: adx.in is a surface like the apps — every folder under its src/app and src/components belongs to a feature.
+  WEBSITE: path.resolve(PACKAGE_ROOT, '..', 'website', 'features.manifest.json'),
 };
 
 export interface ManifestRead {
@@ -59,7 +67,7 @@ export interface ManifestRead {
   invalid: { surface: ManifestSurface; file: string; error: string }[];
 }
 
-/** Reads the three package manifests. Never throws: what could not be read is named in `missing` / `invalid`. */
+/** Reads the four package manifests, in fold order. Never throws: what could not be read is named in `missing` / `invalid`. */
 export function readManifests(): ManifestRead {
   const out: ManifestRead = { manifests: [], missing: [], missingSurfaces: [], invalid: [] };
   for (const [surface, file] of Object.entries(MANIFEST_FILES) as [ManifestSurface, string][]) {
@@ -184,19 +192,34 @@ export function compareRegistryDocuments(
  */
 export function checkRegistry(committed: RegistryDocument | null, declarations: readonly FeatureDeclaration[] = declaredFeatures()): RegistryCheck {
   const read = readManifests();
-  // A manifest that names a key the backend no longer declares, without
-  // the metadata a manifest-only feature must carry, cannot be folded: that
-  // is that surface behind, not a 500 on the read.
+  const folded = foldManifests(declarations, read.manifests);
+  const fresh = buildRegistryDocument(declarations, folded.foldable);
+  return compareRegistryDocuments(committed, fresh, { missingSurfaces: read.missingSurfaces, invalid: [...read.invalid, ...folded.invalid] });
+}
+
+/**
+ * Which manifests fold. A manifest that names a key the backend no longer
+ * declares, without the metadata a manifest-only feature must carry,
+ * cannot be folded: that is that surface behind, not a 500 on the read.
+ * Each is folded in order onto the manifests already accepted, exactly as
+ * the sync folds them all at once, so a key an earlier manifest introduced
+ * (the user app's `onboarding.ladder`, which the website names with its
+ * paths only) is known to the later one — and the runtime verdict agrees
+ * with `npm run features:check`.
+ */
+export function foldManifests(
+  declarations: readonly FeatureDeclaration[],
+  manifests: readonly FeatureManifest[],
+): { foldable: FeatureManifest[]; invalid: { surface: ManifestSurface; file: string; error: string }[] } {
   const foldable: FeatureManifest[] = [];
-  const invalid = [...read.invalid];
-  for (const manifest of read.manifests) {
+  const invalid: { surface: ManifestSurface; file: string; error: string }[] = [];
+  for (const manifest of manifests) {
     try {
-      buildRegistryDocument(declarations, [manifest]);
+      buildRegistryDocument(declarations, [...foldable, manifest]);
       foldable.push(manifest);
     } catch (err) {
-      invalid.push({ surface: manifest.surface, file: MANIFEST_FILES[manifest.surface as keyof typeof MANIFEST_FILES] ?? '', error: err instanceof Error ? err.message : String(err) });
+      invalid.push({ surface: manifest.surface, file: MANIFEST_FILES[manifest.surface], error: err instanceof Error ? err.message : String(err) });
     }
   }
-  const fresh = buildRegistryDocument(declarations, foldable);
-  return compareRegistryDocuments(committed, fresh, { missingSurfaces: read.missingSurfaces, invalid });
+  return { foldable, invalid };
 }

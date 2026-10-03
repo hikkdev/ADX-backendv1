@@ -60,6 +60,8 @@ describe('the basics mirrored onto the party rows', () => {
       firstName: 'Asha',
       lastName: 'Rao',
       email: 'asha@example.com',
+      // ED-1: a new address is unproven until a code is answered at it.
+      emailVerifiedAt: null,
       dateOfBirth: expect.any(Date),
       name: 'Asha Rao',
     });
@@ -78,6 +80,47 @@ describe('the basics mirrored onto the party rows', () => {
 
     expect(advertisers.updateProfile).toHaveBeenCalledWith('adv_1', { name: 'Asha Rao' });
     expect(publishers.updateMyPublisherProfile).not.toHaveBeenCalled();
+  });
+
+  /*
+   * 28 Sep 2026 (the owner's test): a business publisher typed "Acme
+   * Outdoor", the publisher door copied it onto the person, and the basics
+   * then renamed the business after the person — the old display name was
+   * read as a placeholder. On a business or organisation row it never is.
+   */
+  it('never renames a business or organisation row that carries the old display name', async () => {
+    repository.findById.mockResolvedValue(before({ name: 'Acme Outdoor' }));
+    repository.updateProfile.mockResolvedValue({
+      id: 'usr_1',
+      publisherProfile: { id: 'pub_1', name: 'Acme Outdoor', email: null, type: 'BUSINESS' },
+      advertiserProfile: { id: 'adv_1', name: 'Acme Outdoor', email: null, type: 'NGO' },
+    });
+    await updateProfile('usr_1', { firstName: 'Asha', lastName: 'Rao', email: 'asha@example.com' });
+
+    // The email still lands where there is none; the business keeps its name.
+    expect(publishers.updateMyPublisherProfile).toHaveBeenCalledWith('usr_1', { email: 'asha@example.com' });
+    expect(advertisers.updateProfile).toHaveBeenCalledWith('adv_1', { email: 'asha@example.com' });
+  });
+
+  it('still names a business row that carries only the number', async () => {
+    repository.updateProfile.mockResolvedValue({
+      id: 'usr_1',
+      publisherProfile: { id: 'pub_1', name: '+919876543210', email: 'desk@acme.in', type: 'BUSINESS' },
+      advertiserProfile: null,
+    });
+    await updateProfile('usr_1', { firstName: 'Asha', lastName: 'Rao' });
+    expect(publishers.updateMyPublisherProfile).toHaveBeenCalledWith('usr_1', { name: 'Asha Rao' });
+  });
+
+  it('renames an individual row that carries the old display name', async () => {
+    repository.findById.mockResolvedValue(before({ name: 'Satya Raj' }));
+    repository.updateProfile.mockResolvedValue({
+      id: 'usr_1',
+      publisherProfile: null,
+      advertiserProfile: { id: 'adv_1', name: 'Satya Raj', email: 'raj@example.com', type: 'INDIVIDUAL' },
+    });
+    await updateProfile('usr_1', { firstName: 'Satyapal', lastName: 'Raj' });
+    expect(advertisers.updateProfile).toHaveBeenCalledWith('adv_1', { name: 'Satyapal Raj' });
   });
 
   it('a patch without names or email neither reads the row first nor mirrors', async () => {

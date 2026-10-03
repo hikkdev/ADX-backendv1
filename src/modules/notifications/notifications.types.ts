@@ -2,7 +2,8 @@ import type { NotificationChannel, NotificationType } from '../../shared/databas
 
 /** ANNOUNCEMENT is Lot E (Q64): a broadcast from ops, delivered through `announcements`. */
 /** WORK is Lot AA: a task assigned, due, sent back or awaiting review. */
-export const NOTIFICATION_TYPES = ['ORDER', 'BOOKING', 'PAYOUT', 'KYC', 'MESSAGE', 'SYSTEM', 'DISPUTE', 'ANNOUNCEMENT', 'WORK'] as const;
+/** WEEKLY_SUMMARY is WS-1 (DR 12): the Monday digest of an advertiser's campaigns. */
+export const NOTIFICATION_TYPES = ['ORDER', 'BOOKING', 'PAYOUT', 'KYC', 'MESSAGE', 'SYSTEM', 'DISPUTE', 'ANNOUNCEMENT', 'WORK', 'WEEKLY_SUMMARY'] as const;
 
 /**
  * Where a notification can be delivered — DR 07 wave 5, decision 5.
@@ -62,7 +63,8 @@ export function defaultEnabled(type: NotificationType, channel: NotificationChan
       return true;
     case 'EMAIL':
       // Announcements carry their own unsubscribe link (User.emailUnsubscribedAt).
-      return type === 'PAYOUT' || type === 'ANNOUNCEMENT';
+      // WS-1: the weekly digest is an email by nature — on until switched off.
+      return type === 'PAYOUT' || type === 'ANNOUNCEMENT' || type === 'WEEKLY_SUMMARY';
     default:
       return false;
   }
@@ -98,6 +100,8 @@ export const RELATED_TYPES = [
   'WORK',
   /** LH5: a lead — the hunting map's three pushes, so a tap opens the lead in the agent app. */
   'LEAD',
+  /** Cashfree Phase 2: an identity check of ADX's own the person is to finish — a tap opens the session (app or website). */
+  'VERIFICATION_SESSION',
 ] as const;
 
 export type RelatedType = (typeof RELATED_TYPES)[number];

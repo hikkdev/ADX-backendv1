@@ -27,6 +27,8 @@ export const DEFAULT_INCENTIVE_RATES: {
   event: IncentiveEvent;
   tier: string;
   amount: Money;
+  /** CP-4: seeded as switched off rather than priced at zero. */
+  paysNothing?: boolean;
 }[] = [
   { event: 'PUBLISHER_ONBOARDED', tier: '*', amount: '2000.00' },
   { event: 'SITE_VISIT', tier: '*', amount: '500.00' },
@@ -40,13 +42,29 @@ export const DEFAULT_INCENTIVE_RATES: {
   // Lot B (Q101): the advertiser-side twin of PUBLISHER_ONBOARDED, at the
   // same figure.
   { event: 'ADVERTISER_ONBOARDED', tier: '*', amount: '2000.00' },
-  // LH2/LH8 (the Lead Hunt, D1): the hunt's own events, stacked on the
-  // onboarding incentives. A rate may be qualified by the lead's side as
-  // `TIER:SIDE` — `*:ADVERTISER` is every tier's advertiser figure.
-  { event: 'LEAD_CONVERTED', tier: '*', amount: '100.00' },
-  { event: 'LEAD_ACTIVATED', tier: '*', amount: '500.00' },
+  /*
+   * LH2/LH8 (the Lead Hunt, D1): the hunt's own events, stacked on the
+   * onboarding incentives. A rate is qualified by the lead's side as
+   * `TIER:SIDE` — `*:ADVERTISER` is every tier's advertiser figure.
+   *
+   * CP-4 (23 Sep 2026): **lead rewards are advertiser-side.** The owner pays
+   * them because an advertiser agent brings revenue — a publisher agent is
+   * paid to onboard, and the salary-and-quota model is what pays them for
+   * it. So each lead event is seeded twice: the advertiser's figure, and a
+   * `*:PUBLISHER` row that exists to pay nothing.
+   *
+   * The off row is a row on purpose. Resolution runs `TIER:SIDE` → `TIER` →
+   * `*:SIDE` → `*`, so only a row can stop a broader one, and an amount of
+   * zero would be indistinguishable from a price nobody has set. A desk that
+   * decides otherwise re-prices `*:PUBLISHER` and the hunt pays on both
+   * sides again, with no deploy.
+   */
+  { event: 'LEAD_CONVERTED', tier: '*:ADVERTISER', amount: '100.00' },
+  { event: 'LEAD_CONVERTED', tier: '*:PUBLISHER', amount: '0.00', paysNothing: true },
   { event: 'LEAD_ACTIVATED', tier: '*:ADVERTISER', amount: '750.00' },
-  { event: 'LEAD_RETAINED', tier: '*', amount: '100.00' },
+  { event: 'LEAD_ACTIVATED', tier: '*:PUBLISHER', amount: '0.00', paysNothing: true },
+  { event: 'LEAD_RETAINED', tier: '*:ADVERTISER', amount: '100.00' },
+  { event: 'LEAD_RETAINED', tier: '*:PUBLISHER', amount: '0.00', paysNothing: true },
 ];
 
 let seeded: Promise<void> | null = null;
@@ -54,15 +72,25 @@ let seeded: Promise<void> | null = null;
 export async function ensureIncentiveRates(): Promise<void> {
   seeded ??= (async () => {
     const existing = await repository.listIncentiveRates();
-    // Every default whose event has no row at all is seeded — a platform
-    // that priced the seven old events keeps them and gains the lead ones.
-    const priced = new Set(existing.map((rate) => rate.event));
+    /*
+     * Every default KEY with no row at all is seeded, a key being the event
+     * and the tier together.
+     *
+     * It used to be the event alone, which was right while a default was one
+     * row per event. CP-4 made lead rewards two rows — the advertiser's
+     * figure and the publisher's off switch — and on a platform that already
+     * had a `*` row for LEAD_CONVERTED the old guard would have skipped both
+     * and quietly left the hunt paying on both sides. By key, a platform
+     * gains exactly the keys it is missing and keeps every price it has set.
+     */
+    const priced = new Set(existing.map((rate) => `${rate.event}:${rate.tier}`));
     for (const rate of DEFAULT_INCENTIVE_RATES) {
-      if (priced.has(rate.event)) continue;
+      if (priced.has(`${rate.event}:${rate.tier}`)) continue;
       await repository.upsertIncentiveRate({
         event: rate.event,
         tier: rate.tier,
         amount: new Decimal(rate.amount),
+        ...(rate.paysNothing ? { paysNothing: true } : {}),
         effectiveFrom: new Date(Date.UTC(2020, 0, 1)),
       });
     }
@@ -83,13 +111,16 @@ export async function setIncentiveRate(input: {
   event: IncentiveEvent;
   tier?: string;
   amount: Money;
+  /** CP-4: record the key as switched off. The amount is then ignored and stored as zero. */
+  paysNothing?: boolean;
   effectiveFrom: Date;
 }) {
   await ensureIncentiveRates();
   return repository.upsertIncentiveRate({
     event: input.event,
     tier: input.tier ?? '*',
-    amount: new Decimal(input.amount),
+    amount: new Decimal(input.paysNothing ? '0' : input.amount),
+    ...(input.paysNothing ? { paysNothing: true } : {}),
     effectiveFrom: input.effectiveFrom,
   });
 }
@@ -119,7 +150,11 @@ export async function rateFor(
 ): Promise<string | null> {
   await ensureIncentiveRates();
   const rate = await repository.findIncentiveRate(event, tier, now, side);
-  return rate ? money(rate.amount) : null;
+  /* CP-4: a switched-off key answers null, the same as an unpriced one, so
+     every caller that already prints nothing and records nothing keeps
+     working without knowing this flag exists. */
+  if (!rate || rate.paysNothing) return null;
+  return money(rate.amount);
 }
 
 /**

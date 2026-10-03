@@ -381,6 +381,19 @@ describe('listings: committing', () => {
     expect(csv.split('\r\n')[0]).toBe('rowNumber,outcome,message,targetId,externalRef,title,category,subType,description,address,city,state,latitude,longitude,mediaType,sizeClass,size,material,ratePerDay,monthlyPrice,slotsTotal,instantBooking,photos');
     expect(csv).toContain('3,CREATED,,,,Station Wall,OUTDOOR');
   });
+
+  /* 26 Sep 2026: the attempt names who opened it — ADX, the publisher themselves, or their agent. */
+  it.each([
+    ['ADX', { userId: 'usr_admin', isAdmin: true }, 'ADMIN_BULK'],
+    ['the publisher themselves', { userId: 'usr_pub', isAdmin: false }, 'PUBLISHER_BULK'],
+    ['their agent', { userId: 'usr_agent', isAdmin: false }, 'AGENT'],
+  ] as const)('records the origin for %s', async (_who, actor, origin) => {
+    repository.findImport.mockResolvedValue(validated(rows()));
+    repository.listPublisherListings.mockResolvedValue([own()]);
+    repository.findExternalRefs.mockResolvedValue(new Map([['REF-7', 'lst_old']]));
+    await commitListingImport('imp_1', actor, actor.userId);
+    expect(supply.createAttempt).toHaveBeenCalledWith(expect.objectContaining({ origin, createdByUserId: actor.userId }));
+  });
 });
 
 describe('rate card: validating', () => {

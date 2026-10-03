@@ -6,7 +6,7 @@ import { settleOnboardingIfReady } from './onboarding/publisher-onboarding.servi
 import { ApiError } from '../../shared/errors';
 import { allocateIdentifier } from '../identifiers';
 import { kycUserLabels } from '../kyc';
-import { withCityKey } from '../pricing';
+import { cityKeyFor, withCityKey } from '../pricing';
 import { createNotification } from '../notifications';
 import { initiateDigioKyc } from './kyc/digio.service';
 import {
@@ -18,12 +18,13 @@ import {
   reviewKyc as reviewKycAtDesk,
   splitKycSubmission,
 } from './kyc/kyc-desk.service';
-import type { KycStatus, PartySizeBand } from '../../shared/database';
+import type { KycEntityType, KycStatus, PartySizeBand, Publisher } from '../../shared/database';
 import { prismaPublishersRepository as repository } from './prisma-publishers.repository';
-import { logActivity } from '../../shared/audit';
+import { auditDiff, logActivity } from '../../shared/audit';
 import { slaAge } from '../../shared/time';
-import { KYC_QUEUE_STATES, deriveKycState, kycStateCounts, kycSummaryOf, type KycQueueState } from '../../shared/kyc-state';
+import { KYC_QUEUE_STATES, assertLegacyTypeChange, deriveKycState, entityTypeFacts, entityTypeForEdit, isUpgradeRequest, isVerifiedParty, kycStateCounts, kycSummaryOf, type KycQueueState } from '../../shared/kyc-state';
 import { toListPage } from '../../shared/pagination';
+import { accountStateOf, assertOpenForKyc, type RosterStatus } from '../../shared/party-status';
 import type { PublisherRosterQuery } from './publishers.schema';
 import { getPlatformSettings } from '../app-config';
 import { assertAgentMayWrite, assertAgentOwnsPublisher } from './publishers.policy';
@@ -41,9 +42,9 @@ import type {
  */
 export type DeskPerson = { firstName?: string; lastName?: string; dateOfBirth?: string; gender?: Gender };
 
-/** The four basics the readiness rule counts — with them in, the account opens complete. */
-function basicsIn(row: { name: string | null; email: string | null; address: string | null }, dateOfBirth: Date | string | null | undefined): boolean {
-  return Boolean(row.name && row.email && row.address && dateOfBirth);
+/** The basics the readiness rule counts — with them in, the account opens complete. AGE-1: the date of birth is not one of them. */
+function basicsIn(row: { name: string | null; email: string | null; address: string | null }): boolean {
+  return Boolean(row.name && row.email && row.address);
 }
 
 /**
@@ -86,7 +87,7 @@ export async function createPublisher(data: NewPublisher & DeskPerson) {
     });
     userId = account.id;
   }
-  const complete = userId !== undefined && basicsIn({ name: publisher.name, email: publisher.email ?? null, address: publisher.address ?? null }, dateOfBirth);
+  const complete = userId !== undefined && basicsIn({ name: publisher.name, email: publisher.email ?? null, address: publisher.address ?? null });
   // Lot X-B: the city key rides with the typed city (null for a town the catalogue lacks).
   return repository.create(
     await withCityKey({
@@ -115,10 +116,14 @@ export async function setPublisherBand(publisherId: string, adminId: string, siz
   return updated;
 }
 
-export async function updatePublisherAtDesk(publisherId: string, adminId: string, input: PublisherPatch & DeskPerson) {
+export async function updatePublisherAtDesk(publisherId: string, adminId: string, input: PublisherPatch & DeskPerson, req?: Request) {
   const publisher = await repository.findById(publisherId);
   if (!publisher) throw new ApiError(404, 'NOT_FOUND', 'Publisher not found');
-  const { firstName, lastName, dateOfBirth, gender, ...patch } = input;
+  const { firstName, lastName, dateOfBirth, gender, entityType, ...patch } = input;
+  // The legacy type may not move a verified publisher's legal form round the entity type's rule.
+  assertLegacyTypeChange({ party: 'PUBLISHER', stored: publisher.entityType, legacyType: publisher.type, verified: publisher.kycStatus === 'VERIFIED' || (publisher as { kyc?: { status: string } | null }).kyc?.status === 'VERIFIED' }, patch.type, entityType);
+  // Phase D: the legal form first, on its own rule — a refusal leaves the rest of the patch unwritten.
+  if (entityType !== undefined) await editEntityType(publisher, entityType, { userId: adminId, req });
   const person = {
     ...(firstName !== undefined ? { firstName } : {}),
     ...(lastName !== undefined ? { lastName } : {}),
@@ -152,20 +157,60 @@ export async function updatePublisherAtDesk(publisherId: string, adminId: string
   return updated;
 }
 
+/**
+ * Phase D (1 Oct 2026): the edit's rule for the legal form — stored on an
+ * unverified publisher (null clears it back to what `type` says); on a
+ * verified one only the upgrade, which goes out as a fresh Digio request
+ * on the business's workflow (the KYC back to PENDING once Digio has it);
+ * anything else 409 KYC_LOCKED.
+ */
+async function editEntityType(publisher: Publisher & { kyc?: { status: string } | null }, requested: KycEntityType | null, actor: { userId: string; req?: Request | undefined }): Promise<void> {
+  const verified = publisher.kycStatus === 'VERIFIED' || publisher.kyc?.status === 'VERIFIED';
+  const change = entityTypeForEdit({ party: 'PUBLISHER', stored: publisher.entityType, legacyType: publisher.type, verified }, requested);
+  if (!change || change.change === 'KEEP') return;
+  if (change.change === 'UPGRADE') {
+    await initiateDigioKyc(publisher, { byUserId: actor.userId, entityType: change.entityType, req: actor.req });
+    return;
+  }
+  const next = change.change === 'CLEAR' ? null : change.entityType;
+  await repository.update(publisher.id, { entityType: next });
+  await logActivity(actor.userId, 'KYC_ENTITY_TYPE_SET', {
+    req: actor.req,
+    targetType: 'Publisher',
+    targetId: publisher.id,
+    module: 'publishers',
+    diff: auditDiff({ entityType: change.previous }, { entityType: next }),
+    metadata: { party: 'PUBLISHER', at: 'EDIT' },
+  });
+}
+
+/** Phase D: every publisher read answers the effective legal form and whether it was chosen — never the bare column. */
+export function withEntityType<T extends { entityType?: KycEntityType | null; type?: string | null }>(row: T): T & { entityType: KycEntityType | null; entityTypeStored: boolean } {
+  return { ...row, ...entityTypeFacts('PUBLISHER', row) };
+}
+
 export async function getPublishersForAgent(agentId: string, category?: string) {
-  return repository.findForAgent(agentId, category);
+  return (await repository.findForAgent(agentId, category)).map(withEntityType);
 }
 
 /** The whole roster, for ADX. An agent gets their own list from the same route. E10-1: `q` narrows it. */
-export async function getAllPublishers(category?: string, q?: string) {
-  return repository.findAllForAdmin(category, q);
+export async function getAllPublishers(category?: string, q?: string, status?: RosterStatus) {
+  // Account lifecycle (2 Oct 2026): every row says where the account stands.
+  return (await repository.findAllForAdmin(category, q, status)).map((row) => ({ ...withEntityType(row), accountState: accountStateOf(row) }));
 }
 
 /** E10-1: the roster on the list contract — `{ items, total, page, pageSize, counts }`, the chips by KYC status. */
 export async function getPublisherRoster(query: PublisherRosterQuery) {
-  const { items, total, counts } = await repository.findRosterPage(query);
-  // QR-14: the roster names who onboarded each row.
-  return toListPage(await withOnboardingFacts(items as never[]), total, counts, query);
+  // Lot X-B: `?city=` is a slug (or a name) — matched by the key, the spelling as the fallback.
+  const filter = query.city ? { ...query, cityId: (await cityKeyFor(query.city))?.cityId ?? null } : query;
+  const { items, total, counts, statusCounts } = await repository.findRosterPage(filter);
+  // QR-14: the roster names who onboarded each row. 29 Sep 2026: and where each
+  // stands on KYC — the state the queue row and the party page print, derived
+  // from the six columns the read joined (never the document links).
+  // Phase D: and the effective legal form, as the detail read answers it.
+  // Account lifecycle (2 Oct 2026): and where the account stands, beside the counts per state.
+  const withKyc = items.map((row) => ({ ...withEntityType(row), kyc: kycSummaryOf(row.kyc, row.kycStatus), accountState: accountStateOf(row) }));
+  return { ...toListPage(await withOnboardingFacts(withKyc), total, counts, query), statusCounts };
 }
 
 /**
@@ -201,7 +246,8 @@ export async function getOwnedPublisher(
   const kyc = publisher.kyc ? { ...publisher.kyc, ...(await kycReviewsFor(publisher.kyc)), state: summary.state, kycId: summary.kycId } : { ...summary, status: null };
   // QR-14: who onboarded them, named.
   const [stamped] = await withOnboardingFacts([publisher]);
-  return withDetailFacts({ ...stamped!, kyc });
+  // Phase D: the effective legal form (null when unknown) and whether it was chosen.
+  return withDetailFacts({ ...withEntityType(stamped!), kyc });
 }
 
 /**
@@ -260,6 +306,7 @@ export async function findPublisherBilling(publisherId: string): Promise<{
   address: string | null;
   city: string | null;
   state: string | null;
+  postalCode: string | null;
 } | null> {
   const publisher = await repository.findSummaryById(publisherId);
   if (!publisher) return null;
@@ -271,6 +318,7 @@ export async function findPublisherBilling(publisherId: string): Promise<{
     address: publisher.address,
     city: publisher.city,
     state: publisher.state,
+    postalCode: publisher.postalCode,
   };
 }
 
@@ -303,16 +351,24 @@ export async function assertOwnedPublisher(publisherId: string, userId: string) 
 export async function updatePublisher(
   publisherId: string,
   userId: string,
-  data: PublisherPatch,
+  input: PublisherPatch,
+  req?: Request,
 ) {
   const publisher = await getOwnedPublisher(publisherId, userId);
   const { grantId } = await assertAgentMayWrite(userId, publisher);
+  const { entityType, ...data } = input;
+  // Phase D: the legal form on its own rule, as the desk's edit takes it — read
+  // off the row itself, since the detail read answers the effective value.
+  if (entityType !== undefined) {
+    const row = await repository.findById(publisherId);
+    if (row) await editEntityType(row, entityType, { userId, req });
+  }
   const updated = await repository.update(publisherId, await withCityKey(data));
   // Every write under a grant carries the grant id.
   await logActivity(userId, 'PUBLISHER_UPDATED_UNDER_GRANT', undefined, {
     publisherId,
     grantId,
-    fields: Object.keys(data),
+    fields: Object.keys(input),
   });
   return updated;
 }
@@ -375,6 +431,7 @@ export async function listKycQueue(filter: KycQueueFilter & { assignedTo?: 'me' 
     ...row,
     state: deriveKycState(row.kyc, row.kycStatus),
     kycId: row.kyc?.id ?? null,
+    accountState: accountStateOf(row),
     // The clock runs only while the case is PENDING — a party with nothing in has no age.
     ...slaAge(row.kyc?.status === 'PENDING' ? (row.kyc.submittedAt ?? null) : null, reviewSlaHours, now),
     assignedTo: label(row.kyc?.assignedToId),
@@ -452,13 +509,16 @@ export async function reviewKyc(
  * their phone makes — records who asked, and tells the publisher to open
  * the app and finish it. A verified publisher has nothing to restart.
  */
-export async function restartDigioKyc(publisherId: string, byUserId: string, req?: Request) {
-  const publisher = await repository.findSummaryById(publisherId);
+export async function restartDigioKyc(publisherId: string, byUserId: string, req?: Request, body: { entityType?: KycEntityType | undefined } = {}) {
+  const publisher = await repository.findKycDetail(publisherId);
   if (!publisher) throw new ApiError(404, 'NOT_FOUND', 'Publisher not found');
-  if (publisher.kycStatus === 'VERIFIED') {
+  // Account lifecycle (2 Oct 2026): a closed account is never asked; one suspended from new work, not until reinstated.
+  assertOpenForKyc({ closedAt: publisher.user?.closedAt ?? null, suspensionScopes: publisher.suspensionScopes });
+  // Phase D: a verified individual registering a business is the one restart a verified publisher may have.
+  if (publisher.kycStatus === 'VERIFIED' && !isUpgradeRequest('PUBLISHER', publisher, body.entityType)) {
     throw new ApiError(409, 'CONFLICT', 'This publisher is already verified; there is nothing to restart');
   }
-  const session = await initiateDigioKyc(publisherId, publisher.name, publisher.email ?? '', publisher.mobile);
+  const session = await initiateDigioKyc(publisher, { byUserId, entityType: body.entityType, req });
   await logActivity(byUserId, 'PUBLISHER_KYC_DIGIO_RESTARTED', req, { publisherId, kycId: session.kycId });
   if (publisher.userId) {
     await createNotification({
@@ -481,4 +541,18 @@ export async function getOnboardingStatus(publisherId: string, userId: string) {
     listingsCount: publisher.listings.length,
     kycDocuments: publisher.kyc,
   };
+}
+
+/**
+ * 26 Sep 2026: `GET /publishers/:id/public` — the header of a publisher's
+ * storefront on the website (`/spaces?publisherId=`): `{ id, name,
+ * avatarUrl, verified, liveListings }`. Public: no contact data, no KYC
+ * detail beyond the verified mark every card already carries. `:id` is the
+ * publisher's id or display id. 404 for none, and for a publisher blocked
+ * from new business.
+ */
+export async function publicPublisherCard(idOrDisplayId: string): Promise<{ id: string; name: string; avatarUrl: string | null; verified: boolean; liveListings: number }> {
+  const row = await repository.findPublicCard(idOrDisplayId);
+  if (!row) throw new ApiError(404, 'NOT_FOUND', 'Publisher not found');
+  return { id: row.id, name: row.name, avatarUrl: row.avatarUrl, verified: isVerifiedParty(row.kycStatus), liveListings: row.liveListings };
 }

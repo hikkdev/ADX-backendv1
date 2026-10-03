@@ -17,6 +17,7 @@ const {
   revenueQuote,
   advertisers,
   placeOrder,
+  announceOrdersPaid,
   issueTrackingCodes,
   payouts,
   agents,
@@ -43,6 +44,7 @@ const {
     releaseCampaignHold: vi.fn(),
   },
   placeOrder: vi.fn(),
+  announceOrdersPaid: vi.fn(),
   issueTrackingCodes: vi.fn(),
   payouts: { recordIncentive: vi.fn() },
   agents: { findAgentTier: vi.fn() },
@@ -53,7 +55,7 @@ const {
 vi.mock('../prisma-campaigns.repository', () => ({ prismaCampaignsRepository: repository }));
 vi.mock('../../revenue', () => ({ quote: revenueQuote }));
 vi.mock('../../advertisers', () => advertisers);
-vi.mock('../../orders', () => ({ placeOrder, notifyAdmins: vi.fn() }));
+vi.mock('../../orders', () => ({ placeOrder, notifyAdmins: vi.fn(), announceOrdersPaid }));
 // Lot D (Q123): the insertion order is accepted on the version live now; these
 // tests are about the money, so it has been.
 vi.mock('../../agreements', () => ({

@@ -1,6 +1,7 @@
 import type { Request } from 'express';
 import { ApiError } from '../../shared/errors';
 import { logger } from '../../shared/logging';
+import { env } from '../../config/env';
 import { auditDiff, logActivity } from '../../shared/audit';
 import { PERMISSIONS, permissionsOfTier, unknownPermissions } from '../../shared/auth';
 import type { Role } from '../../shared/database';
@@ -232,12 +233,13 @@ export async function assertNotLastSuperAdmin(userId: string, action: SuperAdmin
 }
 
 /**
- * K-B1: a super admin is a member of the system role, or an admin under
- * the launch rule (no role config at all). One predicate, read by the
- * grant guard below and by `consoleStandingFor`.
+ * K-B1: a super admin is a member of the system role — and nothing else
+ * (RP-1, 24 Sep 2026; an admin with no role config used to count under the
+ * launch rule). One predicate, read by the grant guard below and by
+ * `consoleStandingFor`.
  */
 function isSuperAdminMembership(membership: { roleConfig: { isSystem: boolean } } | null): boolean {
-  return !membership || membership.roleConfig.isSystem;
+  return !!membership && membership.roleConfig.isSystem;
 }
 
 async function assertActingIsSuperAdmin(actingUserId: string): Promise<void> {
@@ -305,18 +307,83 @@ export async function findRoleMemberUserIds(roleName: string): Promise<string[]>
  * The permission ids a session gets — the resolver `auth` calls at login and
  * on refresh.
  *
- * The launch rule is deliberate: ADX ships with one admin and no roles
- * configured, and an admin who can see nothing is a platform nobody can
- * operate. So an ADMIN without a `UserRoleConfig` holds everything, and the
- * moment somebody is given a role they hold exactly that role's list.
- * Everyone else — publishers, advertisers, agents — holds none; their access
- * is the `Role` enum and route guards, not this.
+ * RP-1 (owner, 24 Sep 2026): only Super admin holds every permission;
+ * anyone else holds exactly their role's list, and an ADMIN with no role
+ * holds none — `requireRole('ADMIN')` then refuses them by name
+ * (ROLE_REQUIRED) until a super admin assigns one. The launch rule that
+ * gave a role-less admin everything is gone. Everyone else — publishers,
+ * advertisers, agents — holds none; their access is the `Role` enum and
+ * route guards, not this.
+ *
+ * The one exception keeps a fresh platform operable: when the system role
+ * has no member at all, the first ADMIN to sign in is seated in it (see
+ * `seatSuperAdmin`). Once anyone holds the chair the exception never fires.
  */
 export async function permissionsFor(userId: string, roles: Role[]): Promise<string[]> {
   if (!roles.includes('ADMIN')) return [];
   const membership = await repository.findMembership(userId);
-  if (!membership) return [...PERMISSIONS];
-  return membership.roleConfig.permissions;
+  if (membership) return membership.roleConfig.permissions;
+  if (await seatIfChairEmpty(userId)) return [...PERMISSIONS];
+  return [];
+}
+
+/* ── the super admin chair ───────────────────────────────────────── */
+
+/**
+ * Seats `userId` in the system role when it has no member at all — the
+ * fresh-platform case, where the first admin exists only after the dev
+ * door or an invite minted them. Never when anyone already holds it. A
+ * failure is logged and answered false: sign-in must not break on it.
+ */
+async function seatIfChairEmpty(userId: string): Promise<boolean> {
+  try {
+    const system = await repository.findByName(SUPER_ADMIN_ROLE);
+    if (!system) return false;
+    if ((await repository.countMembers(system.id)) > 0) return false;
+    await seatSuperAdmin(userId, system.id, 'first admin to sign in');
+    return true;
+  } catch (err: unknown) {
+    logger.warn('Could not seat the first super admin', { userId, cause: err instanceof Error ? err.message : String(err) });
+    return false;
+  }
+}
+
+async function seatSuperAdmin(userId: string, roleConfigId: string, how: string): Promise<void> {
+  await repository.setMembership(userId, roleConfigId, userId);
+  await logActivity(userId, 'SUPER_ADMIN_SEATED', {
+    module: 'access-control',
+    targetType: 'RoleConfig',
+    targetId: roleConfigId,
+    metadata: { how },
+  });
+  logger.warn('Seated the super admin', { userId, how });
+}
+
+/**
+ * Boot (after `ensureSystemRoles`): when no open account holds the system
+ * role, seat one — the account `BOOTSTRAP_SUPER_ADMIN` names by mobile or
+ * email, else the oldest open ADMIN. Deterministic on purpose: without it,
+ * a platform whose super admin was deactivated has nobody who can assign a
+ * role, and RP-1 leaves every other admin outside. Naming an account that
+ * is not an open ADMIN seats nobody and says so; the setting is the
+ * owner's explicit choice and is not second-guessed.
+ */
+export async function ensureSuperAdminHolder(named: string | null = env.BOOTSTRAP_SUPER_ADMIN ?? null): Promise<void> {
+  const system = await repository.findByName(SUPER_ADMIN_ROLE);
+  if (!system) return;
+  const active = await repository.listMemberUserIds(system.id, { activeOnly: true });
+  if (active.length > 0) return;
+  const candidate = await repository.findBootstrapAdmin(named);
+  if (!candidate) {
+    logger.warn(
+      named
+        ? 'BOOTSTRAP_SUPER_ADMIN names no open ADMIN account; nobody was seated as super admin'
+        : 'No open ADMIN account exists; the first admin to sign in will be seated as super admin',
+      { named },
+    );
+    return;
+  }
+  await seatSuperAdmin(candidate.id, system.id, named ? 'BOOTSTRAP_SUPER_ADMIN' : 'oldest open ADMIN at boot');
 }
 
 /* ── the seeded roles ────────────────────────────────────────────── */

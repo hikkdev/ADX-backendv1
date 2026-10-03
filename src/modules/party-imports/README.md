@@ -341,3 +341,19 @@ exists); `shared/maps.geocodeAddress`; `pricing.resolveCity`;
 `PUBLISHER_TYPES`; `leads.createLeadSchema`, `LEAD_SIDES`;
 `pricing.marketDataImportRowSchema`; `reconciliation.DEFAULT_COLUMNS`,
 `parseStatement`.
+
+## 26 Sep 2026 — an .xlsx beside the CSV, and the publisher's own origin
+
+`POST /party-imports/listings` (and `/rate-card`) take a CSV **or** an Excel
+workbook under `file` (`uploads.spreadsheetUploadMiddleware`). A workbook is
+told by its first bytes and read by `shared/xlsx` — `shared/zip.readZip` plus
+`cheerio` in XML mode, no new dependency — its first sheet to the same rows the
+CSV gives (`parseImportXlsx`; a blank line skipped, numbers at Excel's fifteen
+digits, date cells as ISO dates). A broken workbook is 400 with the way to
+save it again. The four party imports keep the CSV door.
+
+A publisher's own commit opens its attempt with origin `PUBLISHER_BULK` (new
+`ListingAttemptOrigin` value, migration `20260926120000_publisher_bulk_origin`)
+instead of `AGENT`; ADX's is still `ADMIN_BULK`, an agent's `AGENT`. Pinned in
+`party-imports.routes.test.ts`, `listing-imports.service.test.ts`,
+`shared/xlsx/__tests__/xlsx.test.ts`.

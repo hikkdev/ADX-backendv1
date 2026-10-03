@@ -7,6 +7,9 @@ import { findWorkingAgentProfile } from '../agents';
 import { findPublisherForUser } from '../publishers';
 import {
   advertiserPaymentsQuerySchema,
+  bankTransferConfirmSchema,
+  bankTransferRejectSchema,
+  bankTransferSubmitSchema,
   checkoutQuerySchema,
   confirmSchema,
   createIntentSchema,
@@ -16,8 +19,12 @@ import {
 import { checkoutPage, returnPage, returnRedirectUrlFor, type RenderedPage } from './checkout-page.service';
 import {
   actorFromCheckoutToken,
+  bankTransferDetails,
+  confirmBankTransfer,
   confirmPayment,
   createIntent,
+  rejectBankTransfer,
+  submitBankTransfer,
   getPayment,
   handleWebhook,
   listGateways,
@@ -176,4 +183,32 @@ export async function ccavenueWebhookHandler(req: Request, res: Response): Promi
     return;
   }
   res.json({ success: true, data: result });
+}
+
+/* ── BT-1: bank transfer ─────────────────────────────────────────────── */
+
+/** GET /payments/bank-transfer/details — the account to pay into, or which fields ops still have to fill. */
+export async function bankTransferDetailsHandler(_req: Request, res: Response): Promise<void> {
+  res.json({ success: true, data: await bankTransferDetails() });
+}
+
+/** POST /payments/:id/bank-transfer/submit — "I have paid": UTR, day, amount, proof. */
+export async function submitBankTransferHandler(req: Request, res: Response): Promise<void> {
+  const body = parse<z.infer<typeof bankTransferSubmitSchema>>(bankTransferSubmitSchema, req.body);
+  const actor = await resolveActor(req);
+  res.json({ success: true, data: await submitBankTransfer(req.params['id'] as string, body, actor) });
+}
+
+/** POST /payments/:id/bank-transfer/confirm — ops: captured and settled for what arrived. */
+export async function confirmBankTransferHandler(req: Request, res: Response): Promise<void> {
+  const body = parse<z.infer<typeof bankTransferConfirmSchema>>(bankTransferConfirmSchema, req.body);
+  const actor = await resolveActor(req);
+  res.json({ success: true, data: await confirmBankTransfer(req.params['id'] as string, body, actor) });
+}
+
+/** POST /payments/:id/bank-transfer/reject — ops: nothing arrived. */
+export async function rejectBankTransferHandler(req: Request, res: Response): Promise<void> {
+  const body = parse<z.infer<typeof bankTransferRejectSchema>>(bankTransferRejectSchema, req.body);
+  const actor = await resolveActor(req);
+  res.json({ success: true, data: await rejectBankTransfer(req.params['id'] as string, body, actor) });
 }

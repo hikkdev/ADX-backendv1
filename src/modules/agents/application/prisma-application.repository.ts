@@ -1,4 +1,5 @@
 import { prisma, Prisma } from '../../../shared/database';
+import { workingAgentAccountWhere } from '../../../shared/party-status';
 import type { AgentDocumentKind, AgentDocumentStatus } from '../../../shared/database';
 import type { ApplicationRecord, ApplicationRepository, ApplicationRow, ApplicationsFilter, DocumentStamp, NewApplication, NewDocument, NewInterview, ProfilePatch, SideRows } from './application.repository';
 
@@ -201,7 +202,10 @@ export const prismaApplicationRepository: ApplicationRepository = {
         expiresAt: { lte: before },
         expiredAt: null,
         status: { in: ['SUBMITTED', 'APPROVED'] },
-        agent: { stage: { notIn: ['REJECTED', 'WITHDRAWN', 'EXITED'] } },
+        // Account lifecycle (2 Oct 2026): working accounts only — a suspended,
+        // deactivated or closed agent is not reminded; their papers are swept
+        // on the first run after they are reinstated.
+        agent: { AND: [{ stage: { notIn: ['REJECTED', 'WITHDRAWN', 'EXITED'] } }, workingAgentAccountWhere()] },
       },
       select: {
         id: true,
@@ -226,6 +230,25 @@ export const prismaApplicationRepository: ApplicationRepository = {
   },
 
   /* ── AG-5 ── */
+
+  async otherWorkingRoles(userId) {
+    const [publisher, advertiser, employee, printPartner] = await Promise.all([
+      prisma.publisher.findUnique({ where: { userId }, select: { suspensionScopes: true } }),
+      prisma.advertiser.findUnique({ where: { userId }, select: { suspensionScopes: true } }),
+      prisma.employee.findUnique({ where: { userId }, select: { isActive: true } }),
+      prisma.printPartner.findUnique({ where: { userId }, select: { isActive: true } }),
+    ]);
+    return [
+      ...(publisher && !publisher.suspensionScopes.includes('BLOCK_NEW') ? ['PUBLISHER' as const] : []),
+      ...(advertiser && !advertiser.suspensionScopes.includes('BLOCK_NEW') ? ['ADVERTISER' as const] : []),
+      ...(employee?.isActive ? ['EMPLOYEE' as const] : []),
+      ...(printPartner?.isActive ? ['PRINT_PARTNER' as const] : []),
+    ];
+  },
+
+  async switchOffSignIn(userId) {
+    await prisma.user.update({ where: { id: userId }, data: { isActive: false } });
+  },
 
   agentsForPurge(before) {
     return prisma.agentProfile.findMany({

@@ -95,7 +95,7 @@ async function ensurePublisher(cityId: string | null) {
     data: {
       name: 'ADX Demo Spaces',
       mobile: DEMO_PUBLISHER_MOBILE,
-      email: 'demo-spaces@adx.local',
+      email: 'demo-spaces@example.com',
       type: 'BUSINESS',
       address: '1, Demo Street, Indiranagar',
       city: 'Bengaluru',

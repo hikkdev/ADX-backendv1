@@ -45,6 +45,8 @@ export type { InboundInput } from './inbound.service';
 
 /** LH5: the map's ports and duties — LT-1's fix for the nearby-hot alert, the hourly lapse, the link-opened alert LH7 raises. */
 export { registerMapPositionPort, alertLinkOpened, alertNearbyHot, sweepClaims, territoryFor } from './map.service';
+/** Account lifecycle (2 Oct 2026): a suspended agent's open leads, handed back to the pool — `suspension` asks. */
+export { releaseLeadsHeldBy } from './map.service';
 
 /** LH6: the outreach hub — the job's three ticks, the boot seed, the ports LH7 fills. */
 export { flushQueued, registerInviteLinkPort, sendMessage, reachability, channelStates } from './outreach.service';

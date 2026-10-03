@@ -111,6 +111,22 @@ describe('validating', () => {
     expect(audit.logActivity).toHaveBeenCalledWith('usr_admin', 'PUBLISHER_IMPORT_VALIDATED', expect.objectContaining({ targetType: 'PublisherImport', targetId: 'imp_1' }));
   });
 
+  it('onboarding addresses (1 Oct 2026): a merge fills a blank PIN, a bad PIN makes the row INVALID and names the column', async () => {
+    repository.findPublishersByMobiles.mockResolvedValue([{ ...existing, postalCode: null }]);
+    await validateImport(
+      {
+        rows: [
+          { rowNumber: 2, data: { mobile: '9876543210', postalCode: '411001' } },
+          { rowNumber: 3, data: { mobile: '9000000004', name: 'Bad Pin', postalCode: '01100' } },
+        ],
+      },
+      'usr_admin',
+    );
+    const rows = repository.createImport.mock.calls[0]![0].rows as { rowNumber: number; outcome: string; message: string | null; data: Record<string, unknown> }[];
+    expect((rows[0]!.data['plan'] as { fill: Record<string, unknown> }).fill).toEqual({ postalCode: '411001' });
+    expect(rows[1]).toMatchObject({ outcome: 'INVALID', message: 'postalCode: A PIN code is six digits and does not start with 0 — 560001, say.' });
+  });
+
   it('normalises the mobile and upper-cases the PAN and GSTIN before planning', async () => {
     await validateImport({ rows: [{ rowNumber: 2, data: { mobile: '98765 43211', name: 'X', panNumber: 'abcde1234f', type: 'business' } }] }, 'usr_admin');
     const [row] = repository.createImport.mock.calls[0]![0].rows as { data: Record<string, unknown> }[];
@@ -189,7 +205,7 @@ describe('committing', () => {
   it('reports the rows as CSV, outcome and message first', async () => {
     const csv = await importReportCsv('imp_1');
     const lines = csv.trim().split('\r\n');
-    expect(lines[0]).toBe('rowNumber,outcome,message,publisherId,name,mobile,email,type,gstin,address,city,state,contactName,contactMobile,contactEmail,panNumber,firstName,lastName,dateOfBirth,gender,latitude,longitude');
+    expect(lines[0]).toBe('rowNumber,outcome,message,publisherId,name,mobile,email,type,gstin,address,city,state,postalCode,contactName,contactMobile,contactEmail,panNumber,firstName,lastName,dateOfBirth,gender,latitude,longitude');
     expect(lines[1]).toContain('2,MERGED,');
     expect(lines[2]).toContain('3,WARNING,');
     expect(lines).toHaveLength(4);

@@ -1,7 +1,9 @@
+import type { AccountState, PartyAccountState, RosterStatus } from '../../shared/party-status';
 import type {
   Advertiser,
   AdvertiserType,
   Gender,
+  KycEntityType,
   PayoutRailName,
   RefundDestination,
   RefundReason,
@@ -20,6 +22,7 @@ import type {
   WalletTopUp,
 } from '../../shared/database';
 import type { ListPage, ListQuery, Page, PageQuery } from '../../shared/pagination';
+import type { KycQueueState } from '../../shared/kyc-state';
 
 /* ------------------------------------------------------------------ */
 /* Money over the wire                                                 */
@@ -184,6 +187,7 @@ export type CreateAdvertiserInput = {
   mobile: string;
   email?: string | null;
   type?: AdvertiserType;
+  entityType?: KycEntityType | null;
   companyName?: string | null;
   gstin?: string | null;
   billingAddress?: string | null;
@@ -209,12 +213,15 @@ export type UpdateAdvertiserInput = Partial<
     | 'name'
     | 'email'
     | 'type'
+    | 'entityType'
     | 'companyName'
     | 'gstin'
     | 'billingAddress'
     | 'city'
     | 'cityId'
     | 'state'
+    | 'postalCode'
+    | 'country'
     | 'industry'
     | 'userId'
     | 'agentId'
@@ -247,8 +254,26 @@ export type PersonRow = {
   consentAcceptedAt: Date | null;
 };
 
-/** QR-15: the roster's cuts beside `q` — the door and the person who opened it. */
-export type AdvertiserRosterQuery = PageQuery & { q?: string | undefined; onboardedVia?: OnboardingSource | undefined; onboardedById?: string | undefined };
+/**
+ * QR-15: the roster's cuts beside `q` — the door and the person who opened it.
+ * 29 Sep 2026: and the KYC state, the type and the city (`cityId` the key the
+ * city resolved to, null when it did not — the spelling then matches the
+ * rows keyed to nothing).
+ */
+export type AdvertiserRosterQuery = PageQuery & {
+  q?: string | undefined;
+  onboardedVia?: OnboardingSource | undefined;
+  onboardedById?: string | undefined;
+  kycState?: KycQueueState | undefined;
+  type?: AdvertiserType | undefined;
+  city?: string | undefined;
+  cityId?: string | null | undefined;
+  /** Account lifecycle (2 Oct 2026): the account state; absent is ACTIVE, ALL is everyone. */
+  status?: RosterStatus | undefined;
+};
+
+/** 29 Sep 2026: a roster row — the account, and its campaigns counted in the same query. Account lifecycle: and where the account stands. */
+export type AdvertiserRosterRow = Advertiser & { campaignCount: number; accountState: AccountState };
 
 export type CreateAcceptanceInput = {
   templateId: string;
@@ -294,6 +319,8 @@ export interface AdvertisersRepository {
    * before any record.
    */
   findKycSummary(advertiserId: string, userId: string | null): Promise<KycRecordSummary | null>;
+  /** The same, for a page of the roster: advertiser id → its record or null. */
+  findKycSummaries(rows: readonly { id: string; userId: string | null }[]): Promise<Map<string, KycRecordSummary | null>>;
   findAdvertiserByMobile(mobile: string): Promise<Advertiser | null>;
   findAdvertiserByUserId(userId: string): Promise<Advertiser | null>;
   /** E7-3: the label per login, for the desks that name the party behind a user. */
@@ -301,8 +328,12 @@ export interface AdvertisersRepository {
   /** K-B1: `{ id, label, displayId }` per id in one query — the QR desk names the code's subject with it. */
   findLabelsByIds(ids: string[]): Promise<{ id: string; label: string; displayId: string | null }[]>;
   updateAdvertiser(id: string, patch: UpdateAdvertiserInput): Promise<Advertiser>;
-  /** E7-3: `q` is a contains over name / email / mobile / displayId beside the cursor page. */
-  listAdvertisers(query: AdvertiserRosterQuery): Promise<Page<Advertiser>>;
+  /**
+   * E7-3: `q` is a contains over name / email / mobile / displayId beside the cursor page.
+   * 29 Sep 2026: and the city; cut by KYC state, type and city; `total` counts every row the cuts match.
+   */
+  /** Account lifecycle: `statusCounts` — advertisers per account state over the cuts, with the status facet removed. */
+  listAdvertisers(query: AdvertiserRosterQuery): Promise<Page<AdvertiserRosterRow> & { total: number; statusCounts: Record<PartyAccountState, number> }>;
   /** Every account this agent opened or looks after. */
   findAdvertisersForAgent(agentId: string): Promise<Advertiser[]>;
 

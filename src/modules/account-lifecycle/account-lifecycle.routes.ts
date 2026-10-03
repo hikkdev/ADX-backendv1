@@ -47,14 +47,14 @@ accountLifecycleRouter.get('/me/data-export', authenticate, requireFeature('user
 
 /* -- The queues. Literal paths, ahead of the `/:id` routes below. -- */
 
-accountLifecycleRouter.get('/closure-cases', ...admin, asyncHandler(h.listClosureCasesHandler));
+accountLifecycleRouter.get('/closure-cases', ...admin, requirePermission('system.view'), asyncHandler(h.listClosureCasesHandler));
 accountLifecycleRouter.post(
   '/closure-cases/:id/decide',
-  ...admin,
+  ...admin, requirePermission('system.accounts'),
   asyncHandler(h.decideClosureCaseHandler),
 );
 
-accountLifecycleRouter.get('/erasure', ...admin, asyncHandler(h.listErasureHandler));
+accountLifecycleRouter.get('/erasure', ...admin, requirePermission('system.view'), asyncHandler(h.listErasureHandler));
 /* The DPO's signature. Its own permission group, so a role that holds every
  * settings permission still does not hold this one. */
 accountLifecycleRouter.post(
@@ -63,17 +63,17 @@ accountLifecycleRouter.post(
   requirePermission('dpo.erasure'),
   asyncHandler(h.approveErasureHandler),
 );
-accountLifecycleRouter.post('/erasure/:id/refuse', ...admin, asyncHandler(h.refuseErasureHandler));
+accountLifecycleRouter.post('/erasure/:id/refuse', ...admin, requirePermission('dpo.erasure'), asyncHandler(h.refuseErasureHandler));
 accountLifecycleRouter.post(
   '/erasure/:id/execute',
-  ...admin,
+  ...admin, requirePermission('dpo.erasure'),
   asyncHandler(h.executeErasureHandler),
 );
 
 /* -- One account at a time. -- */
 
-accountLifecycleRouter.get('/:id/closure-review', ...admin, asyncHandler(h.closureReviewHandler));
-accountLifecycleRouter.post('/:id/closure-cases', ...admin, asyncHandler(h.openClosureCaseHandler));
-accountLifecycleRouter.post('/:id/erasure', ...admin, asyncHandler(h.requestErasureHandler));
+accountLifecycleRouter.get('/:id/closure-review', ...admin, requirePermission('system.view'), asyncHandler(h.closureReviewHandler));
+accountLifecycleRouter.post('/:id/closure-cases', ...admin, requirePermission('system.edit'), asyncHandler(h.openClosureCaseHandler));
+accountLifecycleRouter.post('/:id/erasure', ...admin, requirePermission('system.edit'), asyncHandler(h.requestErasureHandler));
 /* E6: the open request the account page reads before it offers the button. */
-accountLifecycleRouter.get('/:id/erasure', ...admin, asyncHandler(h.openErasureHandler));
+accountLifecycleRouter.get('/:id/erasure', ...admin, requirePermission('system.view'), asyncHandler(h.openErasureHandler));

@@ -6,15 +6,17 @@ import './features';
 import { asyncHandler } from '../shared/http';
 import { registerServerErrorAlertPort } from '../shared/errors';
 import { logger } from '../shared/logging';
+import { getEffectiveVerificationSettings } from '../shared/integrations';
+import { createBreaker, prismaAttemptStore, prismaProviderEventStore, prismaSessionStore, redisBreakerStore, wireVerification } from '../shared/verification';
 import { env } from '../config/env';
 
 import { authRouter, registerPermissionResolver, registerMobileTombstonePort, revokeSessions } from '../modules/auth';
-import { userRouter, listAdminUserIds, findUserLabels, ensureSystemUser, registerPartnerApplicationPort, chooseParty } from '../modules/users';
+import { userRouter, listAdminUserIds, findUserLabels, ensureSystemUser, registerPartnerApplicationPort, registerAccountLifecyclePort, chooseParty } from '../modules/users';
 import { accountLifecycleRouter, wasMobileErased } from '../modules/account-lifecycle';
-import { rolesConfigRouter, ensureSystemRoles, permissionsFor } from '../modules/access-control';
+import { rolesConfigRouter, ensureSuperAdminHolder, ensureSystemRoles, permissionsFor } from '../modules/access-control';
 import { accessGrantRouter, registerAccessGrantsModule, liveGrantFor, findAccessGrantLabels, revokeLiveGrantsForAgent } from '../modules/access-grants';
 import { employeeRouter, findEmployeeByUserId, employeeExists, registerAppointmentSigningHooks } from '../modules/employees';
-import { hrRouter, ensureHolidays, ensureDepartments } from '../modules/hr';
+import { hrRouter, ensureHolidayCalendar, ensureDepartments } from '../modules/hr';
 import { scheduleRouter } from '../modules/schedule';
 import { workRouter } from '../modules/work';
 import { qrRouter, registerQrRefLabelPort, deactivateQrsFor } from '../modules/qr';
@@ -28,12 +30,16 @@ import {
   getAgentOrderIdsAwaitingWork,
   findOrderLabels,
   updateAgentLocation,
+  releaseAgentOffers,
+  registerOrderScreeningPort,
 } from '../modules/orders';
 import {
   milestoneTemplateRouter,
   milestonePlanRouter,
   orderMilestoneRouter,
   agentMilestoneRouter,
+  agentSentToListing,
+  releaseAgentMilestones,
 } from '../modules/order-milestones';
 import {
   listingRouter,
@@ -44,7 +50,7 @@ import {
   getListingsForPublisher,
   findListingLabels,
 } from '../modules/listings';
-import { supplyRouter } from '../modules/supply';
+import { supplyRouter, listingsNamingFile } from '../modules/supply';
 import { identifierRouter } from '../modules/identifiers';
 import {
   advertiserRouter,
@@ -54,6 +60,7 @@ import {
   getAdvertiserForUser,
   findAdvertiserLabelsForUsers,
   findAdvertiserLabels,
+  registerAdvertiserKycUpgradePort,
 } from '../modules/advertisers';
 import { campaignRouter, campaignRefundRouter, creativeGateForOrder, registerSpotReviewPort } from '../modules/campaigns';
 import { packageRouter, quotePackage, listCatalogue } from '../modules/packages';
@@ -63,21 +70,33 @@ import {
   publisherRouter,
   digioWebhookHandler,
   onUnmatchedDigioWebhook,
+  applyHostedKycDecision,
+  publisherBackupCase,
   registerPublisherModule,
   registerPublisherSummaryPort,
   findPublisherForUser,
   findPublisherLabelsForUsers,
   findPublisherLabels,
 } from '../modules/publishers';
-import { agentRouter, milestoneRouter, findAgentProfile, findAgentLabelsForUsers, findAgentLabels, ensureLeadMilestoneTemplates } from '../modules/agents';
+import { agentRouter, milestoneRouter, findAgentProfile, findAgentLabelsForUsers, findAgentLabels, ensureLeadMilestoneTemplates, endExitedAgentSignIn } from '../modules/agents';
 import { trainingRouter, getCertification as getAgentCertification, getAssessmentStanding } from '../modules/training';
-import { agreementRouter, ensureAgreementDrafts, esignWebhookHandler, registerEsignNotifyPort, registerEsignPolicyPort, type EsignMessage } from '../modules/agreements';
+import { agreementRouter, publicAgreementRouter, ensureAgreementDrafts, esignWebhookHandler, registerEsignNotifyPort, registerEsignPolicyPort, type EsignMessage } from '../modules/agreements';
 import { agentLocationRouter, registerOrderPositionPort, readLastFix } from '../modules/agent-locations';
 import { earningsRouter } from '../modules/earnings';
 import { aiRouter } from '../modules/ai';
 import { rateCardRouter, raisePriceCase, registerListingEnforcementPort } from '../modules/rate-cards';
 import { priceModelRouter } from '../modules/price-model';
-import { payoutRouter, financeRouter, registerCommissionResolverPort, registerPayoutUserLabelPort, listMethods as listPayoutMethods, requestClosingWithdrawal } from '../modules/payouts';
+import {
+  payoutRouter,
+  financeRouter,
+  registerCommissionResolverPort,
+  registerPayoutUserLabelPort,
+  registerWithdrawalPaidPort,
+  isClosureWithdrawal,
+  partyContext as payoutPartyContext,
+  listMethods as listPayoutMethods,
+  requestClosingWithdrawal,
+} from '../modules/payouts';
 import { reconciliationRouter } from '../modules/reconciliation';
 import {
   printPartnerRouter,
@@ -85,6 +104,7 @@ import {
   printQuoteRequestsRouter,
   printPartnerKycRouter,
   handlePrintPartnerDigioWebhook,
+  printPartnerBackupCase,
   registerPrintPartnersModule,
   applyAsPartner,
 } from '../modules/print-partners';
@@ -99,16 +119,27 @@ import {
   notify,
 } from '../modules/notifications';
 import { announcementRouter } from '../modules/announcements';
+import { promoCodeRouter } from '../modules/promo-codes';
 import { supportRouter, registerRequesterPort, supportAttachmentViewer, type RequesterParty } from '../modules/support';
 import { disputeRouter, disputePartiesForEvidenceFile, registerPartyLookupPort } from '../modules/disputes';
-import { findWalletFor } from '../modules/wallets';
+import { findWalletFor, snapshot as walletSnapshot } from '../modules/wallets';
 import { money } from '../shared/money';
-import { fraudRouter, installThumbnailDecoder } from '../modules/fraud';
-import { ensureDefaultSequences, leadRouter, leadClusters, leadLandingRouter, leadOutreachWebhookRouter, leadWebhookRouter, registerAgentPositionPort, registerMapPositionPort, registerPartyOpenerPort, registerPackagePorts, registerRecycleSequencing } from '../modules/leads';
+import { fraudRouter, installThumbnailDecoder, orderScreeningRouter, screenOrderInBackground } from '../modules/fraud';
+import { competitorSightingRouter } from '../modules/competitor-sightings';
+import { ensureDefaultSequences, leadRouter, leadClusters, leadLandingRouter, leadOutreachWebhookRouter, leadWebhookRouter, registerAgentPositionPort, registerMapPositionPort, registerPartyOpenerPort, registerPackagePorts, registerRecycleSequencing, releaseLeadsHeldBy } from '../modules/leads';
 import { registerLeadLayerPort, registerAgentReviewPort, registerApplicationPort } from '../modules/agents';
 import { reviewPartyRouter, reviewRouter, recentAgentReviews, reviewIdsForCampaignSpots } from '../modules/reviews';
-import { visitRouter, agentDayRouter, visitsForPublisher } from '../modules/visits';
+import { visitRouter, agentDayRouter, visitsForPublisher, cancelAgentVisits } from '../modules/visits';
 import { legalRouter } from '../modules/legal';
+import { contentRouter } from '../modules/content';
+// LM-1: layouts (what each screen draws) and the media library they draw from.
+import { layoutRouter, appLayoutRouter } from '../modules/layouts';
+import { mediaRouter } from '../modules/media';
+// PB-1: the site's pages, addresses and redirects (Studio), and a custom page resolved for the website and the apps.
+import { siteRouter, appSiteRouter, appPagesRouter } from '../modules/site-pages';
+// FM-1 / CF-1: the form builder's desk and door, and the custom fields per record type.
+import { formRouter, appFormRouter } from '../modules/forms';
+import { customFieldRouter, appCustomFieldRouter } from '../modules/custom-fields';
 import { safetyRouter } from '../modules/safety';
 import { onboardingRouter } from '../modules/onboarding';
 import {
@@ -116,14 +147,24 @@ import {
   userKycRouter,
   agentKycRouter,
   employeeKycRouter,
+  kycEntityTypeRouter,
+  upgradeAdvertiserKyc,
   handleAdvertiserDigioWebhook,
   handleAgentDigioWebhook,
   handleEmployeeDigioWebhook,
+  verificationRouter,
+  secureIdWebhookRouter,
+  registerBackupCase,
+  registerHostedOutcomeHandler,
+  advertiserBackupCase,
+  agentBackupCase,
+  employeeBackupCase,
   registerEmployeeLookupPort,
   registerKycUserLabelPort,
   mirrorAgentIdentityDocument,
 } from '../modules/kyc';
-import { uploadRouter, filesRouter, registerFileAccessPort, purgeStoredFile, fileIdFromUrl } from '../modules/uploads';
+import { uploadRouter, filesRouter, registerFileAccessPort, purgeStoredFile, fileIdFromUrl, findUploadedFile } from '../modules/uploads';
+import { storageRouter } from '../modules/uploads';
 import { integrationsRouter } from '../modules/integrations';
 import { brandingRouter } from '../modules/branding';
 import { appStatusRouter, configRouter, getPlatformSettings, platformSettingsRouter } from '../modules/app-config';
@@ -133,7 +174,7 @@ import { auditRouter } from '../modules/audit';
 import { adminOverviewRouter } from '../modules/admin-overview';
 import { sectionOverviewsRouter } from '../modules/section-overviews';
 import { partyImportsRouter } from '../modules/party-imports';
-import { suspensionRouter } from '../modules/suspension';
+import { suspensionRouter, suspendForUserDeactivation, reinstateAfterUserReactivation } from '../modules/suspension';
 import {
   appFlagsRouter,
   flagRouter,
@@ -149,7 +190,8 @@ import {
   statementRouter,
   registerInvoicesModule,
 } from '../modules/invoices';
-import { paymentRouter, advertiserPaymentRouter, paymentWebhookRouter, registerPaymentsModule } from '../modules/payments';
+import { paymentRouter, advertiserPaymentRouter, paymentWebhookRouter, registerPaymentsModule, registerPromotionPaymentsPort } from '../modules/payments';
+import { promotionRouter, appPromotionRouter, registerPromotionsModule, adPaymentTarget, boostPaymentTarget, settleAdPayment, settleBoostPayment } from '../modules/promotions';
 
 /**
  * The whole `/api/v1` surface, assembled from module public exports.
@@ -188,17 +230,38 @@ registerApplicationPort({
   mirrorIdentityDocument: (agentId, userId, kind, url, number) => mirrorAgentIdentityDocument(agentId, userId, kind, url, number),
   adminUserIds: () => listAdminUserIds(),
   // AG-5: the exit's settlement, through the modules that own each part.
+  // Account lifecycle (2 Oct 2026): sign-in is NOT ended here — the agent keeps
+  // it until the final payout is PAID (the owner's decision); `exitAgent`
+  // ends it now when nothing is owed. New work is frozen by the stage and the
+  // SUSPENDED status, and the work in hand is handed back like STOP_OPEN_WORK.
   settleExit: async (agentId, userId) => {
     const notes: string[] = [];
-    await revokeSessions(userId, 'AGENT_EXITED');
+    const handBack = async (what: string, run: () => Promise<string[]>): Promise<number> =>
+      (
+        await run().catch((error: unknown) => {
+          notes.push(`The ${what} could not be handed back: ${error instanceof Error ? error.message : String(error)}`);
+          return [] as string[];
+        })
+      ).length;
+    const released = {
+      offers: await handBack('pending offers', () => releaseAgentOffers(agentId, 'EXITED')),
+      visits: await handBack('open visits', () => cancelAgentVisits(agentId, 'EXITED')),
+      milestones: await handBack('dispatched milestones', () => releaseAgentMilestones(agentId, 'EXITED')),
+      leads: await handBack('held leads', () => releaseLeadsHeldBy(agentId, 'Agent exited')),
+    };
     const grantsRevoked = await revokeLiveGrantsForAgent(agentId, userId).catch((error: unknown) => {
       notes.push(`Access grants could not be closed: ${error instanceof Error ? error.message : String(error)}`);
       return 0;
     });
     await deactivateQrsFor('AGENT', agentId).catch(() => notes.push('The agent QR code could not be deactivated.'));
     let payout: { amount: string; reference: string | null; outcome: string } | null = null;
+    let balanceRemains = false;
     const wallet = await findWalletFor({ kind: 'AGENT', id: agentId }).catch(() => null);
     if (wallet) {
+      // Anything still in the wallet — withdrawable now, held, or inside its clearing window — is money owed.
+      balanceRemains = await walletSnapshot(wallet.id)
+        .then((balances) => Number(balances.balance) > 0)
+        .catch(() => true);
       const result = await requestClosingWithdrawal(wallet.id, { userId, note: 'Agent exit — the closing payout' }).catch((error: unknown) => {
         notes.push(`The closing payout could not be raised: ${error instanceof Error ? error.message : String(error)}`);
         return null;
@@ -206,7 +269,7 @@ registerApplicationPort({
       if (result && result.reason !== 'NOTHING_WITHDRAWABLE') payout = { amount: String(result.amount), reference: result.withdrawal?.reference ?? null, outcome: result.reason };
       if (result?.reason === 'NO_VERIFIED_METHOD') notes.push('The wallet holds a balance but no verified payout method: pay it by hand from Finance.');
     }
-    return { sessionsEnded: true, grantsRevoked, qrDeactivated: true, payout, notes };
+    return { sessionsEnded: false, grantsRevoked, qrDeactivated: true, payout, notes, balanceRemains, released };
   },
   purgeFile: async (url) => {
     const id = fileIdFromUrl(url);
@@ -304,12 +367,33 @@ registerOrderPositionPort({ update: (orderId, coords) => updateAgentLocation(ord
 // partner module fills it here. Unregistered, choosing the party is a 503.
 registerPartnerApplicationPort({ apply: (userId, input) => applyAsPartner(userId, input) });
 
+// Account lifecycle (2 Oct 2026): a user's Deactivate suspends the person's
+// profiles with BLOCK_NEW and Reactivate lifts exactly that. `suspension`
+// imports `users` for its actor labels, so `users` declares the door and
+// the suspension module answers it here. Unregistered, only the sign-in
+// switch moves, logged.
+registerAccountLifecyclePort({
+  onDeactivated: (userId, byUserId) => suspendForUserDeactivation(userId, byUserId),
+  onReactivated: (userId, byUserId) => reinstateAfterUserReactivation(userId, byUserId),
+});
+
 // Supplies the advertisers module's OriginalMethodRefundPort (Lot C, Q110):
 // whether a refund request may go back to the card or UPI it came from —
 // a captured gateway payment with enough left. Inverted because `payments`
 // reads `advertisers` for the wallet. Unregistered, ORIGINAL_METHOD keeps
 // answering 409 GATEWAY_NOT_CONFIGURED, exactly as it did before the lot.
 registerPaymentsModule();
+// LM-1: supplies listings' SponsoredPort — the boosts browse and the similar row put first today.
+registerPromotionsModule();
+// LM-1: supplies payments' PromotionPaymentsPort — an ad or a sponsored
+// listing paid through a gateway is guarded, priced and settled by
+// `promotions`; neither module imports the other.
+registerPromotionPaymentsPort({
+  adTarget: (adBookingId, actor) => adPaymentTarget(adBookingId, actor),
+  boostTarget: (boostId, actor) => boostPaymentTarget(boostId, actor),
+  settleAd: (adBookingId, payment, byUserId, now) => settleAdPayment(adBookingId, payment, byUserId, now),
+  settleBoost: (boostId, payment, byUserId, now) => settleBoostPayment(boostId, payment, byUserId, now),
+});
 
 // Supplies the orders module's CreativeGatePort (Lot D, Q120): whether an
 // order's artwork is APPROVED, asked by markPrintReady before the pickup code
@@ -349,6 +433,21 @@ registerListingEnforcementPort({
 // Unregistered, the accrual skips an unstamped spot and logs it rather than
 // paying at a rate nobody chose; every stamped spot still accrues.
 registerCommissionResolverPort({ resolve: (input) => commissionForListing(input) });
+
+// Account lifecycle (2 Oct 2026): an exited agent keeps signing in until the
+// final payout lands. `payouts` sits underneath `agents`, so the PAID moment
+// is a port: the closing withdrawal (the closure marker) on an agent's wallet
+// — or any later one that leaves the wallet empty, when the balance was still
+// clearing at the exit — ends the exited agent's sign-in, unless the person
+// works as something else (`endExitedAgentSignIn` checks the stage and the roles).
+registerWithdrawalPaidPort({
+  onPaid: async (paid, byUserId) => {
+    const party = await payoutPartyContext(paid.walletId);
+    if (party?.kind !== 'AGENT') return;
+    if (!isClosureWithdrawal(paid) && Number((await walletSnapshot(paid.walletId)).balance) > 0) return;
+    await endExitedAgentSignIn(party.entityId, byUserId, 'FINAL_PAYOUT_PAID');
+  },
+});
 
 // P-B: the publisher's detail card reads the running subscription and the
 // visits made to the publisher through a port, because `revenue` imports
@@ -411,22 +510,39 @@ registerKycUserLabelPort((ids) => findUserLabels(ids));
 // signal so the arithmetic stays free of I/O and a test can register its own.
 installThumbnailDecoder();
 
+// Order fraud screening (2 Oct 2026): placement and the payment behind an
+// order tell `orders`' port, and `fraud` scores the order in the background.
+// Inverted because `fraud` reads orders (its linked-accounts rail, and the
+// order it scores). Never in the way: the port is not awaited and a failure
+// is logged. Unregistered, nothing is scored at placement — the nightly
+// re-screen still reaches every open order.
+registerOrderScreeningPort({
+  orderPlaced: (orderId) => screenOrderInBackground(orderId, 'PLACED'),
+  ordersPaid: async (orderIds) => {
+    for (const orderId of orderIds) await screenOrderInBackground(orderId, 'PAYMENT');
+  },
+});
+
 /*
  * The six roles the console ships with, created or refreshed at boot.
  *
  * There is no startup hook in this codebase — server.ts binds the port and
  * starts the jobs — and seeding from prisma/seed.ts would only reach a fresh
  * database. So it runs here, once, deliberately NOT awaited: a role catalogue
- * that cannot be written is not a reason to refuse traffic, and the launch
- * rule keeps the console usable until it succeeds. Skipped under NODE_ENV
- * 'test', where importing the app must not write to a database.
+ * that cannot be written is not a reason to refuse traffic. RP-1: once the
+ * roles exist, `ensureSuperAdminHolder` seats the chair when nobody open
+ * holds it — the account BOOTSTRAP_SUPER_ADMIN names, else the oldest open
+ * ADMIN — because a role-less admin now holds nothing. Skipped under
+ * NODE_ENV 'test', where importing the app must not write to a database.
  */
 if (env.NODE_ENV !== 'test') {
-  void ensureSystemRoles().catch((err: unknown) => {
-    logger.warn('Could not ensure the system roles', {
-      cause: err instanceof Error ? err.message : String(err),
+  void ensureSystemRoles()
+    .then(() => ensureSuperAdminHolder())
+    .catch((err: unknown) => {
+      logger.warn('Could not ensure the system roles or seat the super admin', {
+        cause: err instanceof Error ? err.message : String(err),
+      });
     });
-  });
   // E6: the system account the jobs attribute their audit rows to. Same
   // shape as the roles: not awaited, a miss is a warning, and `systemUserId`
   // retries on first use.
@@ -448,11 +564,14 @@ if (env.NODE_ENV !== 'test') {
       });
     });
   // Lot E (Q98): the year's holidays, the same way and for the same reason.
-  // Idempotent — only the days that are missing are written, and a name ops
-  // changed is never rewritten.
-  void ensureHolidays()
-    .then((inserted) => {
-      if (inserted > 0) logger.info('Seeded holidays', { inserted });
+  // HC-1 (1 Oct 2026): while the public holiday calendar is on (the
+  // default), the 2026 seed is retired and the calendar is synced once when
+  // next year has no calendar rows yet; while it is off, the old seed runs —
+  // idempotent, only the missing days, a name ops changed never rewritten.
+  void ensureHolidayCalendar()
+    .then((outcome) => {
+      if (outcome.mode === 'seed' && outcome.inserted > 0) logger.info('Seeded holidays', { inserted: outcome.inserted });
+      if (outcome.mode === 'sync' && outcome.result) logger.info('Synced the holiday calendar at boot', { ...outcome.result });
     })
     .catch((err: unknown) => {
       logger.warn('Could not ensure the holidays', {
@@ -577,6 +696,33 @@ registerFileAccessPort({
   // ADX attached to their own ticket. `uploads` admits the owner and the
   // desk before it asks; this is the other side.
   supportPartyMayView: supportAttachmentViewer,
+  // ST-2 (28 Sep 2026): a LISTING_DOCUMENT — a venue paper, an audience
+  // report — is the listing's. `supply` says which listings name the file
+  // (by `/files/:id`, or by the object name a URL recorded while it was
+  // still public); the viewer may open it as that
+  // listing's publisher, as the field agent sent to it (`order-milestones`:
+  // a visit of theirs on it, open or recent, or its order's own agent), or
+  // as an agent under a live grant on the publisher. `uploads` sits under
+  // all three, so the question is composed here.
+  listingDocumentMayView: async (viewerUserId, fileId) => {
+    const file = await findUploadedFile(fileId);
+    if (!file) return false;
+    const key = file.storageKey ?? '';
+    const objectName = key.slice(key.lastIndexOf('/') + 1) || null;
+    const listings = await listingsNamingFile({ fileId, objectName });
+    if (listings.length === 0) return false;
+    if (listings.some((listing) => listing.publisherUserId === viewerUserId)) return true;
+    const agent = await findAgentProfile(viewerUserId);
+    if (agent) {
+      for (const listing of listings) {
+        if (await agentSentToListing(agent.id, listing.listingId)) return true;
+      }
+    }
+    for (const listing of listings) {
+      if (listing.publisherUserId && (await agentMayViewFileFor(viewerUserId, listing.publisherUserId))) return true;
+    }
+    return false;
+  },
 });
 
 // E7-3: the party record behind a login — `{ type, id, displayId, name,
@@ -638,8 +784,36 @@ apiRouter.get('/health/ready', asyncHandler(readyHandler));
 // ADMIN-only — Q33 retired the x-admin-secret header the flow editor used.
 apiRouter.use('/config', configRouter);
 // Public like /config, and for the same reason: read before anyone signs in.
+// LM-1: the resolved layout, public — ahead of the /app status router.
+apiRouter.use('/app/layouts', appLayoutRouter);
+// PB-1: the site's routing table and sitemap, and a Studio page resolved — public, ahead of the /app status router too.
+apiRouter.use('/app/site', appSiteRouter);
+apiRouter.use('/app/pages', appPagesRouter);
 apiRouter.use('/app', appStatusRouter);
+// 26 Sep 2026: the live text of a platform agreement, public, beside the
+// legal documents. Owned by `agreements`; ahead of legalRouter so nothing
+// there reads "agreements" as a document kind.
+apiRouter.use('/legal/agreements', publicAgreementRouter);
 apiRouter.use('/legal', legalRouter);
+// CT-1: the pages ADX writes itself, beside the thirteen fixed legal documents.
+apiRouter.use('/content', contentRouter);
+// LM-1: the layout desk and the media library (ADMIN, content.*). The public
+// resolved layout is /app/layouts, mounted above with the other /app reads.
+apiRouter.use('/layouts', layoutRouter);
+// PB-1: the pages desk — Studio's pages, addresses (content.addresses) and redirects (ADMIN, content.*).
+apiRouter.use('/site', siteRouter);
+apiRouter.use('/media', mediaRouter);
+// FM-1: the form builder's desk (ADMIN, content.*) and its public door —
+// the published form is read signed out; an answer's guard is the form's
+// own (captcha + limiter, or a token). CF-1: the custom fields per record
+// type — the desk under /custom-fields (settings.* for the definitions, the
+// record's own group for the values) and the owner's own under
+// /app/custom-fields. Each /app/* router names its own guards, so mounting
+// after the /app status router is safe: that router has no catch-all.
+apiRouter.use('/forms', formRouter);
+apiRouter.use('/app/forms', appFormRouter);
+apiRouter.use('/custom-fields', customFieldRouter);
+apiRouter.use('/app/custom-fields', appCustomFieldRouter);
 // Lot A (Q31): the platform settings row and the feature flags, the two
 // documents other modules read on their hot paths. ADMIN-only at the router.
 // Lot E (decision 95): the housekeeping read — last dump, last drill,
@@ -689,6 +863,10 @@ apiRouter.use(suspensionRouter);
 apiRouter.use(reviewPartyRouter);
 
 // ── Supply and demand ──
+// Order fraud screening: the review desk's routes, AHEAD of the orders router
+// so `/orders/fraud-review` is not read as an order id. Guarded per route
+// (ADMIN + the fraud desk's permissions); anything else falls through.
+apiRouter.use('/orders', orderScreeningRouter);
 apiRouter.use('/orders', orderRouter);
 // ORDER-SENSITIVE (Lot B, Q13): a publisher's own invoice to ADX hangs off
 // /publishers/me but is owned by `invoices`. Mounted AHEAD of publisherRouter
@@ -749,6 +927,14 @@ apiRouter.use('/notifications', notificationRouter);
 // broadcast desk under /announcements. Both ADMIN at the router.
 apiRouter.use('/comms', commsRouter);
 apiRouter.use('/announcements', announcementRouter);
+// PC-1: the promo-code desk under Growth. ADMIN at the router.
+apiRouter.use('/promo-codes', promoCodeRouter);
+// LM-1: paid placements — display ads in slots and sponsored listings; the
+// buyer's reads, the advertiser's ads, the publisher's boosts and the desk,
+// each guard on its route. The clients' impression/click counter is public
+// under /app/promotions.
+apiRouter.use('/promotions', promotionRouter);
+apiRouter.use('/app/promotions', appPromotionRouter);
 apiRouter.use('/support', supportRouter);
 apiRouter.use('/disputes', disputeRouter);
 // Lot D (Q54/Q92): fraud as a case object — ADMIN at the router; a decision
@@ -806,6 +992,8 @@ apiRouter.use('/payouts/wallet/statements', statementRouter);
 apiRouter.use('/upload', uploadRouter);
 // Lot D (Q61): a file by id — the one door to every private document.
 apiRouter.use('/files', filesRouter);
+// ST-4 (28 Sep 2026): Settings › Storage — space per purpose, the unreferenced list, "Check now". ADMIN.
+apiRouter.use('/storage', storageRouter);
 apiRouter.use('/integrations', integrationsRouter);
 // QR-11: Settings › Brand & theme — the draft, publish, the release history. ADMIN at the router.
 apiRouter.use('/branding', brandingRouter);
@@ -852,6 +1040,8 @@ apiRouter.use('/user-kyc', userKycRouter);
 apiRouter.use('/agent-kyc', agentKycRouter);
 // Lot D: the employee record's KYC, the agent record's twin.
 apiRouter.use('/employee-kyc', employeeKycRouter);
+// Phase D (1 Oct 2026): the legal forms a party may verify as — the KYC start's question.
+apiRouter.use('/kyc', kycEntityTypeRouter);
 // Before /agents: the day view is the visits module's, mounted where an
 // agent's own things live. Registered first so `me/day` is never read by the
 // agents router as an id.
@@ -862,6 +1052,8 @@ apiRouter.use('/agents', agentRouter);
 apiRouter.use('/agreements', agreementRouter);
 // LT-1: the agent's position on a job, the ops live map, the order timeline. See modules/agent-locations/README.md.
 apiRouter.use('/agent-locations', agentLocationRouter);
+// VA-2: competitors' hoardings photographed in the street — the agent files one, the desk reads and analyses them.
+apiRouter.use('/competitor-sightings', competitorSightingRouter);
 // LH3: the lead-form ad webhooks (Meta / Google / LinkedIn), signed by their providers.
 apiRouter.use('/webhooks/leads', leadWebhookRouter);
 // LH6: the outreach providers' webhooks — Meta, the WhatsApp BSPs, Business Messages, telephony.
@@ -904,7 +1096,44 @@ onUnmatchedDigioWebhook(handlePrintPartnerDigioWebhook);
 // N3-B: and to the agent's and the employee's records — the desk's one-click request opens their sessions.
 onUnmatchedDigioWebhook(handleAgentDigioWebhook);
 onUnmatchedDigioWebhook(handleEmployeeDigioWebhook);
+// Phase D: the advertiser's Edit-details PATCH reaches the KYC module's upgrade
+// (a verified individual verifying again as a business) through this port —
+// `kyc` imports `advertisers`, so the call cannot go the other way.
+registerAdvertiserKycUpgradePort(upgradeAdvertiserKyc);
 apiRouter.post('/webhooks/digio', asyncHandler(digioWebhookHandler));
+
+/*
+ * Cashfree Phase 1 (the owner, 1 Oct 2026): the verification layer.
+ *
+ * `shared/verification` runs on ports; these are the real ones — every
+ * provider call recorded in Postgres, the breaker in Redis (shared by every
+ * instance), the routing read off the integrations row. Until this runs a
+ * process is on memory and the defaults, which is what a unit test gets.
+ *
+ * The Cashfree session's decision reaches the party's record down the same
+ * road Digio's callback takes (`applyHostedKycDecision` is the head of that
+ * chain), and each party's module supplies its own case for the desk's
+ * "Resend on backup" — `kyc` owns the endpoints and may import neither
+ * `publishers` nor `print-partners`.
+ */
+wireVerification({
+  attempts: prismaAttemptStore,
+  sessions: prismaSessionStore,
+  events: prismaProviderEventStore,
+  breaker: createBreaker(redisBreakerStore()),
+  settings: getEffectiveVerificationSettings,
+});
+registerHostedOutcomeHandler((payload) => applyHostedKycDecision(payload));
+registerBackupCase('PUBLISHER_KYC', publisherBackupCase);
+registerBackupCase('ADVERTISER_KYC', advertiserBackupCase);
+registerBackupCase('AGENT_KYC', agentBackupCase);
+registerBackupCase('EMPLOYEE_KYC', employeeBackupCase);
+registerBackupCase('PRINT_PARTNER_KYC', printPartnerBackupCase);
+// The person's own Cashfree session, and the desk's attempt list, health read and "Resend on backup".
+apiRouter.use('/verification', verificationRouter);
+// Cashfree Secure ID's callback (DigiLocker, the async bank check) — signed with the Secure ID client
+// secret over the raw body. Ahead of the gateways' `/webhooks/cashfree`, which is the Payment Gateway's.
+apiRouter.use('/webhooks/cashfree/verification', secureIdWebhookRouter);
 // DS-1 (Digio eSign): the signing rail's own callback, routed by Digio's document id onto the SigningRequest.
 apiRouter.post('/webhooks/digio/esign', asyncHandler(esignWebhookHandler));
 // Lot C (Q110): the three payment gateways' callbacks. Signature-checked in

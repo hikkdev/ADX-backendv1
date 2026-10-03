@@ -69,6 +69,8 @@ export const createTicketSchema = z
     description: z.string().trim().min(1).max(4000),
     category: z.string().optional(),
     relatedOrderId: z.string().optional(),
+    /** WG-1 (DR 12 board 07): the campaign the request is about, when it is about one. */
+    relatedCampaignId: z.string().trim().min(1).max(64).optional(),
     /** The report's upload or the feedback's screenshot, already stored through POST /upload. */
     attachmentUrls: z.array(z.string().url()).max(5).default([]),
     /** DR 07's Rate your experience: 1–5, and only on feedback. */

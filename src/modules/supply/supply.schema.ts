@@ -65,7 +65,16 @@ export const submitDocumentSchema = z.object({
     'MUNICIPAL_PERMIT',
     /** AG-4: the registration certificate of a vehicle put up as a spot. */
     'VEHICLE_RC',
+    /** WG-1 (DR 12 board 08): the papers the website's listing wizard draws. */
+    'DRIVING_LICENCE',
+    'VEHICLE_INSURANCE',
+    'VEHICLE_FITNESS',
+    'MEDIA_KIT',
+    'RATE_CARD',
     'OTHER',
+    /** LF-2 (28 Sep 2026): the audience evidence the listing flow asks for. */
+    'AUDIENCE_RATING',
+    'FOOTFALL_AUDIT',
   ]),
   url: z.string().url(),
   /** QR-24: when this permit or agreement runs out — a renewal carries the new date; approved, it extends the listing's term. */
@@ -160,7 +169,32 @@ export const decideClaimSchema = z
   });
 
 export const contactAttemptSchema = z.object({
-  channel: z.enum(['CALL', 'SMS', 'EMAIL', 'WHATSAPP', 'IN_APP']),
+  /** 3 Oct 2026: VISIT — somebody went to the publisher, as the owner listed it beside call, SMS and WhatsApp. */
+  channel: z.enum(['CALL', 'SMS', 'EMAIL', 'WHATSAPP', 'IN_APP', 'VISIT']),
   outcome: z.string().min(1).max(200),
   note: z.string().max(1000).optional(),
+});
+
+/**
+ * 3 Oct 2026: how a case ended, said when it is resolved — free text like a
+ * contact attempt's outcome, and a note. Both optional: an older console
+ * sends no body and the case still resolves.
+ */
+export const resolveCaseSchema = z.object({
+  outcome: z.string().trim().min(1).max(200).optional(),
+  note: z.string().trim().max(1000).optional(),
+});
+
+/* ── 3 Oct 2026: the verification queue's actions ─────────────────────── */
+
+/** "Give more time": 1 to 30 days, and why — the reason is on the audit row. */
+export const extendReverificationSchema = z.object({
+  days: z.number().int().min(1).max(30),
+  reason: z.string().trim().min(3).max(500),
+});
+
+/** "Send an agent": a named agent, or none and ADX picks one free in the listing's city; a line for the agent. */
+export const siteCheckSchema = z.object({
+  agentId: z.string().trim().min(1).max(64).optional(),
+  note: z.string().trim().max(500).optional(),
 });

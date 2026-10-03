@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { asyncHandler } from '../../shared/http';
-import { authenticate, requireRole } from '../../shared/auth';
+import { authenticate, requireRole, requirePermission } from '../../shared/auth';
 import { statusPageLimiter, statusSubscribeLimiter } from '../../shared/security';
 import {
   addIncidentUpdateHandler,
@@ -24,17 +24,17 @@ import {
  */
 export const opsRouter = Router();
 opsRouter.use(authenticate, requireRole('ADMIN'));
-opsRouter.get('/ops', asyncHandler(getOpsHealthHandler));
+opsRouter.get('/ops', requirePermission('settings.view'), asyncHandler(getOpsHealthHandler));
 /* E6: the heartbeats and the 30-day 5xx series, for the page's graphs; Lot G adds the per-service sample series. */
-opsRouter.get('/history', asyncHandler(getSystemHealthHistoryHandler));
+opsRouter.get('/history', requirePermission('settings.view'), asyncHandler(getSystemHealthHistoryHandler));
 /* Lot G (Q130): the region this API runs in, with a live round trip. */
-opsRouter.get('/regions', asyncHandler(getRegionsHandler));
+opsRouter.get('/regions', requirePermission('settings.view'), asyncHandler(getRegionsHandler));
 /* Lot G (Q130): the incident log. */
-opsRouter.get('/incidents', asyncHandler(listIncidentsHandler));
-opsRouter.post('/incidents', asyncHandler(createIncidentHandler));
-opsRouter.get('/incidents/:id', asyncHandler(getIncidentHandler));
-opsRouter.post('/incidents/:id/updates', asyncHandler(addIncidentUpdateHandler));
-opsRouter.patch('/incidents/:id', asyncHandler(patchIncidentHandler));
+opsRouter.get('/incidents', requirePermission('settings.view'), asyncHandler(listIncidentsHandler));
+opsRouter.post('/incidents', requirePermission('settings.edit'), asyncHandler(createIncidentHandler));
+opsRouter.get('/incidents/:id', requirePermission('settings.view'), asyncHandler(getIncidentHandler));
+opsRouter.post('/incidents/:id/updates', requirePermission('settings.edit'), asyncHandler(addIncidentUpdateHandler));
+opsRouter.patch('/incidents/:id', requirePermission('settings.edit'), asyncHandler(patchIncidentHandler));
 
 /**
  * Lot G (Q130): the public status page, root-mounted (`/status`, not under

@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import { DEFAULT_LIST_PAGE_SIZE, MAX_LIST_PAGE_SIZE } from '../../shared/pagination';
-import { PRINT_JOB_STATUSES, QUOTE_REQUEST_STATUSES } from './print-partners.repository';
+import { kycEntityTypeSchema, kycQueueStateSchema } from '../../shared/kyc-state';
+import { ONBOARDING_SOURCES } from '../../shared/onboarding';
+import { addressStateSchema, pinCodeSchema, upperEnum } from '../../shared/validation';
+import { PRINT_JOB_STATUSES, PRINT_PARTNER_ACCOUNT_STATES, QUOTE_REQUEST_STATUSES } from './print-partners.repository';
 
 /** A rupee amount on the wire is a decimal string, never a float. */
 const amount = z
@@ -26,6 +29,9 @@ export const createPartnerSchema = z.object({
   email: z.string().trim().email().nullable().optional(),
   address: optionalText(500),
   city: optionalText(80),
+  /** Onboarding addresses (1 Oct 2026): the shop address's state and PIN code; null clears. */
+  state: addressStateSchema,
+  postalCode: pinCodeSchema,
   latitude: z.number().min(-90).max(90).nullable().optional(),
   longitude: z.number().min(-180).max(180).nullable().optional(),
   capabilities: z.array(z.string().trim().min(1).max(60)).max(30).optional(),
@@ -42,7 +48,16 @@ export const createPartnerSchema = z.object({
  */
 export const updatePartnerSchema = createPartnerSchema
   .omit({ mobile: true })
-  .extend({ acceptsQuoteRequests: z.boolean().optional() })
+  .extend({
+    acceptsQuoteRequests: z.boolean().optional(),
+    /**
+     * Phase D (1 Oct 2026): the shop's legal form for the KYC — individual,
+     * sole proprietor, company or LLP/partnership; null clears it. A verified
+     * partner may only take the upgrade (an individual's business), which
+     * sends a fresh Digio request; anything else is 409 KYC_LOCKED.
+     */
+    entityType: kycEntityTypeSchema.nullable().optional(),
+  })
   .partial()
   .refine((value) => Object.keys(value).length > 0, { message: 'Nothing to change' });
 
@@ -53,11 +68,25 @@ export const listPartnersQuerySchema = z.object({
     .enum(['true', 'false'])
     .optional()
     .transform((value) => (value === undefined ? undefined : value === 'true')),
+  /**
+   * Account lifecycle (2 Oct 2026): the Status every party roster takes —
+   * ACTIVE, DEACTIVATED, CLOSED or ALL, case-insensitive. A print partner has
+   * no scoped suspension, so SUSPENDED is refused. Wins over `active=` when
+   * both are sent; `statusCounts` beside the page counts each with this facet
+   * removed.
+   */
+  status: upperEnum([...PRINT_PARTNER_ACCOUNT_STATES, 'ALL'] as const).optional(),
   /** PP-1: `applied=true` — the shops that applied from the app and await the desk. */
   applied: z
     .enum(['true', 'false'])
     .optional()
     .transform((value) => (value === undefined ? undefined : value === 'true')),
+  /**
+   * 29 Sep 2026 (the party rosters, made uniform): the door and the KYC state,
+   * the cuts every party desk takes. A shop has no type, so there is no `type`.
+   */
+  onboardedVia: upperEnum(ONBOARDING_SOURCES).optional(),
+  kycState: kycQueueStateSchema,
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(MAX_LIST_PAGE_SIZE).default(DEFAULT_LIST_PAGE_SIZE),
 });
@@ -104,6 +133,9 @@ export const updateMeSchema = z
     email: z.string().trim().email().nullable().optional(),
     address: optionalText(500),
     city: optionalText(80),
+    /** Onboarding addresses (1 Oct 2026): the shop address's state and PIN code; null clears. */
+    state: addressStateSchema,
+    postalCode: pinCodeSchema,
     latitude: z.number().min(-90).max(90).nullable().optional(),
     longitude: z.number().min(-180).max(180).nullable().optional(),
     capabilities: z.array(z.string().trim().min(1).max(60)).max(30).optional(),
@@ -138,6 +170,8 @@ export const rateCardSchema = z
   });
 
 export const myJobsQuerySchema = z.object({
+  /** 26 Sep 2026: `?orderId=` — the partner's job for one order (an ORDER notice carries the order id, not the job's). */
+  orderId: z.string().trim().min(1).max(64).optional(),
   status: z
     .string()
     .optional()
@@ -227,6 +261,9 @@ export const applicationDetailsSchema = z.object({
   email: z.string().trim().email().nullable().optional(),
   address: optionalText(500),
   city: optionalText(80),
+  /** Onboarding addresses (1 Oct 2026): the shop address's state and PIN code; null clears. */
+  state: addressStateSchema,
+  postalCode: pinCodeSchema,
   latitude: z.number().min(-90).max(90).nullable().optional(),
   longitude: z.number().min(-180).max(180).nullable().optional(),
   capabilities: z.array(z.string().trim().min(1).max(60)).max(30).optional(),

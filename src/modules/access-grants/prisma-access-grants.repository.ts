@@ -8,7 +8,9 @@ import type {
 
 const withNames = {
   publisher: { select: { id: true, name: true, userId: true } },
-  assignedAgent: { select: { id: true, userId: true } },
+  // 2 Oct 2026: the advertiser's name and the agent's — a screen showed raw ids for both.
+  advertiser: { select: { id: true, name: true, userId: true } },
+  assignedAgent: { select: { id: true, userId: true, displayId: true, user: { select: { name: true } } } },
 } as const;
 
 export const prismaAccessGrantsRepository: AccessGrantsRepository = {
@@ -143,8 +145,10 @@ export const prismaAccessGrantsRepository: AccessGrantsRepository = {
   },
 
   listOpen() {
+    // "Open" is a status AND a window still running (2 Oct 2026): nothing flips an ended grant to EXPIRED, and the
+    // gate itself already reads `expiresAt` — so a grant past its time is no longer anyone's authority and is not listed.
     return prisma.delegatedAccessGrant.findMany({
-      where: { status: { in: ['PENDING', 'ACTIVE'] } },
+      where: { status: { in: ['PENDING', 'ACTIVE'] }, OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }] },
       include: withNames,
       orderBy: { createdAt: 'desc' },
     }) as Promise<GrantDetail[]>;

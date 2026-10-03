@@ -60,7 +60,7 @@ const genqrRow = (over: Record<string, unknown> = {}) => ({
   provider: 'GENQR',
   baseUrl: 'https://genqr.example',
   apiKey: KEY,
-  shortBaseUrl: 'https://go.adx.example',
+  shortBaseUrl: 'https://go.adx.in',
   style: { foregroundColor: '#213333', dotStyle: 'rounded', frameCaption: 'Scan me' },
   ...over,
 });
@@ -100,7 +100,7 @@ describe('GET /integrations → qrEngine', () => {
     const view = res.body.data.qrEngine;
     expect(view.provider).toBe('GENQR');
     expect(view.baseUrl).toBe('https://genqr.example');
-    expect(view.shortBaseUrl).toBe('https://go.adx.example');
+    expect(view.shortBaseUrl).toBe('https://go.adx.in');
     expect(view.style).toEqual({ foregroundColor: '#213333', dotStyle: 'rounded', frameCaption: 'Scan me' });
     expect(view.hostsDynamic).toBe(true);
     expect(view.apiKey).not.toBe(KEY);
@@ -125,11 +125,11 @@ describe('PUT /integrations { section: "qrEngine" }', () => {
   });
 
   it('writes the switch, the host, the key and the short origin, and audits the provider change without the key', async () => {
-    const res = await put({ section: 'qrEngine', patch: { provider: 'GENQR', baseUrl: 'https://genqr.example/', apiKey: KEY, shortBaseUrl: 'https://go.adx.example' } });
+    const res = await put({ section: 'qrEngine', patch: { provider: 'GENQR', baseUrl: 'https://genqr.example/', apiKey: KEY, shortBaseUrl: 'https://go.adx.in' } });
     expect(res.status).toBe(200);
     const [section, patch] = config.updateIntegrationsConfig.mock.calls[0]!;
     expect(section).toBe('qrEngine');
-    expect(patch).toMatchObject({ provider: 'GENQR', baseUrl: 'https://genqr.example/', apiKey: KEY, shortBaseUrl: 'https://go.adx.example' });
+    expect(patch).toMatchObject({ provider: 'GENQR', baseUrl: 'https://genqr.example/', apiKey: KEY, shortBaseUrl: 'https://go.adx.in' });
 
     const changed = audit.logActivity.mock.calls.find((call) => call[1] === 'QR_ENGINE_CHANGED');
     expect(changed).toBeDefined();
@@ -141,7 +141,7 @@ describe('PUT /integrations { section: "qrEngine" }', () => {
 
   it('does not audit a provider change when the provider did not change', async () => {
     config.getIntegrationsConfig.mockResolvedValue(row(genqrRow()));
-    const res = await put({ section: 'qrEngine', patch: { provider: 'GENQR', shortBaseUrl: 'https://go2.adx.example' } });
+    const res = await put({ section: 'qrEngine', patch: { provider: 'GENQR', shortBaseUrl: 'https://go2.adx.in' } });
     expect(res.status).toBe(200);
     expect(audit.logActivity.mock.calls.find((call) => call[1] === 'QR_ENGINE_CHANGED')).toBeUndefined();
   });
@@ -190,7 +190,7 @@ describe('POST /integrations/qr-engine/test', () => {
       ok: true,
       status: 200,
       headers: { get: () => 'application/json' },
-      json: async () => ({ email: 'ops@adx.example', plan: { id: 'enterprise', name: 'Enterprise', apiAccessEnabled: true }, scope: 'qrcodes:read,qrcodes:write,analytics:read', redirectBase: 'https://genqr.example' }),
+      json: async () => ({ email: 'ops@adx.in', plan: { id: 'enterprise', name: 'Enterprise', apiAccessEnabled: true }, scope: 'qrcodes:read,qrcodes:write,analytics:read', redirectBase: 'https://genqr.example' }),
     }));
     vi.stubGlobal('fetch', fetchMock);
     const res = await test();
@@ -205,7 +205,7 @@ describe('POST /integrations/qr-engine/test', () => {
       reachable: true,
       authorized: true,
       status: 200,
-      account: { email: 'ops@adx.example', plan: 'Enterprise', apiAccess: true },
+      account: { email: 'ops@adx.in', plan: 'Enterprise', apiAccess: true },
       scopesMissing: ['render'],
       shortBaseMatches: false,
     });

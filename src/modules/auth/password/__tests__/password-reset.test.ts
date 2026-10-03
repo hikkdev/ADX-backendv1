@@ -12,7 +12,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  */
 
 const { repository, tokens, audit, password, security, twoFactor } = vi.hoisted(() => ({
-  repository: {
+  repository: { findLoginUserById: vi.fn(async () => ({ id: 'usr_1', email: 'ada@adx.in' })),
     setPasswordHash: vi.fn(),
     findByEmail: vi.fn(),
     findLoginUserByEmail: vi.fn(),
@@ -31,6 +31,8 @@ const { repository, tokens, audit, password, security, twoFactor } = vi.hoisted(
 }));
 
 vi.mock('../../prisma-auth.repository', () => ({ prismaAuthRepository: repository }));
+// ED-1: the reset link proves the mailbox; the stamp is a no-op here.
+vi.mock('../../otp/otp.service', () => ({ stampProvenEmail: vi.fn() }));
 vi.mock('../../tokens/tokens.service', () => tokens);
 vi.mock('../../../../shared/audit', () => audit);
 vi.mock('../password.service', () => password);

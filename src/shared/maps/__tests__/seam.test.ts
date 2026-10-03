@@ -56,7 +56,7 @@ const osmRow = (over: Record<string, unknown> = {}) => ({
   googleServerKey: 'SERVER-KEY',
   mapboxPublicToken: 'pk.public',
   mapboxSecretToken: 'sk.secret',
-  osm: resolveOsmConfig({ contactEmail: 'maps@adx.example', ...over }),
+  osm: resolveOsmConfig({ contactEmail: 'maps@adx.in', ...over }),
 });
 
 beforeEach(() => {
@@ -130,7 +130,7 @@ describe('the client config (GET /app/maps)', () => {
       mapboxPublicToken: 'pk.public',
       engineReady: true,
     });
-    for (const secret of ['SERVER-KEY', 'sk.secret', 'browser-key', 'maps@adx.example', 'mapboxSecretToken']) {
+    for (const secret of ['SERVER-KEY', 'sk.secret', 'browser-key', 'maps@adx.in', 'mapboxSecretToken']) {
       expect(JSON.stringify(cfg), secret).not.toContain(secret);
     }
   });

@@ -1,5 +1,6 @@
 import { randomInt } from 'crypto';
 import { env } from '../../config/env';
+import { assertPartyAdultForOrders } from '../../shared/age-gate';
 import { auditDiff, logActivity } from '../../shared/audit';
 import { ApiError } from '../../shared/errors';
 import { logger } from '../../shared/logging';
@@ -16,7 +17,7 @@ import {
   recordGatewayTopUp,
 } from '../advertisers';
 import { getSubscriptionPolicy, type SubscriptionAudience } from '../app-config';
-import { authorizeCampaignById, campaignPaymentQuote } from '../campaigns';
+import { authorizeCampaignById, campaignPaymentQuote, reservationFeePaymentQuote, settleReservationFeeById } from '../campaigns';
 import { isFeatureEnabled } from '../feature-flags';
 import { liveInvoiceFor, markInvoicePaid } from '../invoices';
 import { platformAccount, post as postLedger } from '../ledger';
@@ -39,7 +40,9 @@ import { checkoutUrlFor, returnUrlFor } from './checkout-page.service';
 import { consumeCheckoutToken, mintCheckoutToken } from './checkout-tokens';
 import type { PaymentListFilter, PaymentRefundRow, PaymentRow, PaymentView } from './payments.repository';
 import { prismaPaymentsRepository as repository } from './prisma-payments.repository';
+import { getIntegrationsConfig } from '../../shared/integrations';
 import { advertiserOf, payerOf, type Payer } from './payer';
+import { promotionPayments } from './promotion-payments.port';
 
 /**
  * Payments — the gateway (Lot C, Q110/Q118/Q12; Lot J-B2 for publishers).
@@ -92,11 +95,16 @@ export type PaymentRefundView = {
   processedAt: Date | null;
 };
 
-export type PaymentSummary = Omit<PaymentView, 'amount' | 'refunds'> & {
+/** BT-1: what the payer told us about their transfer, on a BANK_TRANSFER payment. */
+export type BankTransferClaim = { utr: string | null; paidOn: string | null; claimedAmount: Money | null; proofFileId: string | null; claimedAt: string | null };
+
+export type PaymentSummary = Omit<PaymentView, 'amount' | 'refunds' | 'bankClaimedAmount' | 'bankPaidOn'> & {
   amount: Money;
   /** What is still on the payment after the refunds that stand. */
   refundable: Money;
   refunds: PaymentRefundView[];
+  /** BT-1: null on a gateway payment. */
+  bankTransfer: BankTransferClaim | null;
 };
 
 const refundedSoFar = (refunds: Pick<PaymentRefundRow, 'amount' | 'status'>[]): Decimal =>
@@ -117,12 +125,48 @@ export function toRefundView(refund: PaymentRefundRow): PaymentRefundView {
 }
 
 export function toPaymentView(payment: PaymentView): PaymentSummary {
-  const { amount, refunds, ...rest } = payment;
+  const { amount, refunds, bankClaimedAmount, bankPaidOn, ...rest } = payment;
   return {
     ...rest,
     amount: money(amount),
     refundable: money(new Decimal(amount).minus(refundedSoFar(refunds))),
     refunds: refunds.map(toRefundView),
+    bankTransfer:
+      payment.gateway === 'BANK_TRANSFER'
+        ? {
+            utr: payment.bankUtr ?? null,
+            paidOn: bankPaidOn ? bankPaidOn.toISOString().slice(0, 10) : null,
+            claimedAmount: bankClaimedAmount ? money(bankClaimedAmount) : null,
+            proofFileId: payment.bankProofFileId ?? null,
+            claimedAt: payment.bankClaimedAt ? payment.bankClaimedAt.toISOString() : null,
+          }
+        : null,
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* BT-1: bank transfer                                                 */
+/* ------------------------------------------------------------------ */
+
+export type BankTransferDetails = { beneficiary: string; accountNumber: string; ifsc: string; bank: string | null; branch: string | null; instructions: string | null };
+
+const BANK_TRANSFER_FIELDS = ['beneficiary', 'accountNumber', 'ifsc'] as const;
+
+/** ADX's receiving account as Settings › Integrations holds it, or the fields still empty. */
+export async function bankTransferDetails(): Promise<{ configured: true; details: BankTransferDetails } | { configured: false; missing: string[] }> {
+  const cfg = (await getIntegrationsConfig()).bankTransfer ?? {};
+  const missing = BANK_TRANSFER_FIELDS.filter((field) => !cfg[field]);
+  if (missing.length > 0) return { configured: false, missing };
+  return {
+    configured: true,
+    details: {
+      beneficiary: cfg.beneficiary!,
+      accountNumber: cfg.accountNumber!,
+      ifsc: cfg.ifsc!,
+      bank: cfg.bank ?? null,
+      branch: cfg.branch ?? null,
+      instructions: cfg.instructions ?? null,
+    },
   };
 }
 
@@ -134,8 +178,8 @@ export type GatewayStatus = { gateway: PaymentGateway; configured: boolean; test
 
 /** Which gateways the app may offer. The empty field names are for the console only. */
 export async function listGateways(forAdmin: boolean): Promise<GatewayStatus[]> {
-  return Promise.all(
-    GATEWAY_NAMES.map(async (gateway) => {
+  const gateways = await Promise.all(
+    GATEWAY_NAMES.map(async (gateway): Promise<GatewayStatus> => {
       const readiness = await adapterFor(gateway).readiness();
       return {
         gateway,
@@ -145,6 +189,10 @@ export async function listGateways(forAdmin: boolean): Promise<GatewayStatus[]> 
       };
     }),
   );
+  // BT-1: bank transfer is offered once the receiving account is on file.
+  const bank = await bankTransferDetails();
+  gateways.push({ gateway: 'BANK_TRANSFER', configured: bank.configured, testMode: false, ...(forAdmin && !bank.configured ? { missing: bank.missing } : {}) });
+  return gateways;
 }
 
 async function configuredAdapter(gateway: PaymentGateway): Promise<GatewayAdapter> {
@@ -212,8 +260,22 @@ async function assertMayPayByGateway(advertiserId: string): Promise<void> {
   }
 }
 
+/** What an intent is for. RF-1: `purpose` picks the reservation fee on a campaign over its full amount. */
+type IntentInput = {
+  campaignId?: string | null;
+  packageSaleId?: string | null;
+  subscriptionOrderId?: string | null;
+  /** LM-1: a display ad or a sponsored listing. */
+  adBookingId?: string | null;
+  listingBoostId?: string | null;
+  gateway: PaymentGateway;
+  purpose?: 'SETTLEMENT' | 'RESERVATION_FEE' | undefined;
+  /** UP-1: the payer's UPI id, handed to the gateway. */
+  upiId?: string | undefined;
+};
+
 type PaymentTarget = {
-  kind: 'CAMPAIGN' | 'PACKAGE_SALE' | 'SUBSCRIPTION_ORDER';
+  kind: 'CAMPAIGN' | 'PACKAGE_SALE' | 'SUBSCRIPTION_ORDER' | 'AD_BOOKING' | 'LISTING_BOOST';
   id: string;
   reference: string;
   /** Who pays — the advertiser for a campaign or a sale, the publisher for a plan order. */
@@ -221,6 +283,24 @@ type PaymentTarget = {
   amount: Money;
   description: string;
 };
+
+/** LM-1: the Payment column each target is written to — and the key the audit row names it by. */
+const TARGET_COLUMN = {
+  CAMPAIGN: 'campaignId',
+  PACKAGE_SALE: 'packageSaleId',
+  SUBSCRIPTION_ORDER: 'subscriptionOrderId',
+  AD_BOOKING: 'adBookingId',
+  LISTING_BOOST: 'listingBoostId',
+} as const satisfies Record<PaymentTarget['kind'], string>;
+
+/** The five target columns of a new Payment, exactly one of them set. */
+const targetColumns = (target: Pick<PaymentTarget, 'kind' | 'id'>) => ({
+  campaignId: target.kind === 'CAMPAIGN' ? target.id : null,
+  packageSaleId: target.kind === 'PACKAGE_SALE' ? target.id : null,
+  subscriptionOrderId: target.kind === 'SUBSCRIPTION_ORDER' ? target.id : null,
+  adBookingId: target.kind === 'AD_BOOKING' ? target.id : null,
+  listingBoostId: target.kind === 'LISTING_BOOST' ? target.id : null,
+});
 
 /** Lot J (B2): the line a plan order is paid under — on the gateway order, the checkout page and the wallet note. */
 export const subscriptionOrderLine = (order: Pick<SubscriptionOrderRow, 'planName' | 'reference'>): string => `${order.planName} plan — ${order.reference}`;
@@ -244,9 +324,21 @@ async function assertGatewayOffered(audience: SubscriptionAudience, gateway: Pay
 }
 
 async function resolveTarget(
-  input: { campaignId?: string | null; packageSaleId?: string | null; subscriptionOrderId?: string | null; gateway: PaymentGateway },
+  input: IntentInput,
   actor: PaymentActor,
 ): Promise<PaymentTarget> {
+  if (input.campaignId && input.purpose === 'RESERVATION_FEE') {
+    // RF-1: the fee that holds the spots, not the booking.
+    const quote = await reservationFeePaymentQuote(input.campaignId, actor);
+    return {
+      kind: 'CAMPAIGN',
+      id: quote.campaignId,
+      reference: quote.reference,
+      payer: { kind: 'ADVERTISER', id: quote.advertiserId },
+      amount: quote.amount,
+      description: `Reservation fee — campaign ${quote.reference}, ${quote.name}`,
+    };
+  }
   if (input.campaignId) {
     const quote = await campaignPaymentQuote(input.campaignId, actor);
     return {
@@ -256,6 +348,19 @@ async function resolveTarget(
       payer: { kind: 'ADVERTISER', id: quote.advertiserId },
       amount: quote.total,
       description: `Campaign ${quote.reference} — ${quote.name}`,
+    };
+  }
+  if (input.adBookingId || input.listingBoostId) {
+    // LM-1: a paid placement — `promotions` guards it (whose it is, that it
+    // waits for payment, the switch) and prices it.
+    const placement = input.adBookingId ? await promotionPayments().adTarget(input.adBookingId, actor) : await promotionPayments().boostTarget(input.listingBoostId!, actor);
+    return {
+      kind: input.adBookingId ? 'AD_BOOKING' : 'LISTING_BOOST',
+      id: placement.id,
+      reference: placement.reference,
+      payer: placement.payer,
+      amount: placement.amount,
+      description: placement.description,
     };
   }
   if (input.subscriptionOrderId) {
@@ -312,6 +417,8 @@ const apiBase = (): string => env.BASE_URL ?? `http://localhost:${env.PORT}`;
 export type PaymentIntent = {
   payment: PaymentSummary;
   checkout: Record<string, unknown>;
+  /** BT-1: on a bank-transfer intent, the account to pay into and the reference to quote. */
+  bankTransfer?: BankTransferDetails & { reference: string; amount: Money };
   /**
    * E7-2, Razorpay only: the page the app opens in the system browser —
    * `GET /payments/:id/checkout?t=` under a one-time, twenty-minute token.
@@ -330,16 +437,23 @@ export type PaymentIntent = {
  * by the idempotent calls the wallet path makes.
  */
 export async function createIntent(
-  input: { campaignId?: string | null; packageSaleId?: string | null; subscriptionOrderId?: string | null; gateway: PaymentGateway },
+  input: IntentInput,
   actor: PaymentActor,
   now = new Date(),
 ): Promise<PaymentIntent> {
-  const targets = [input.campaignId, input.packageSaleId, input.subscriptionOrderId].filter(Boolean).length;
+  const targets = [input.campaignId, input.packageSaleId, input.subscriptionOrderId, input.adBookingId, input.listingBoostId].filter(Boolean).length;
   if (targets !== 1) {
-    throw new ApiError(400, 'VALIDATION_ERROR', 'Say what is being paid for: a campaignId, a packageSaleId or a subscriptionOrderId — exactly one of the three.');
+    throw new ApiError(
+      400,
+      'VALIDATION_ERROR',
+      'Say what is being paid for: a campaignId, a packageSaleId, a subscriptionOrderId, an adBookingId or a listingBoostId — exactly one of them.',
+    );
   }
+  if (input.gateway === 'BANK_TRANSFER') return createBankTransferIntent(input, actor, now);
   const adapter = await configuredAdapter(input.gateway);
   const target = await resolveTarget(input, actor);
+  // AGE-1: every intent is an order — the payer's account holder, 18 or over.
+  await assertPartyAdultForOrders(target.payer, { actorUserId: actor.userId });
   // The advertiser's booking gates are the advertiser's; a publisher's order
   // carries its own (Lot J-B2: the order's publisher, PENDING_PAYMENT).
   if (target.payer.kind === 'ADVERTISER') await assertMayPayByGateway(target.payer.id);
@@ -349,10 +463,10 @@ export async function createIntent(
     reference: await nextReference(now),
     advertiserId: target.payer.kind === 'ADVERTISER' ? target.payer.id : null,
     publisherId: target.payer.kind === 'PUBLISHER' ? target.payer.id : null,
-    campaignId: target.kind === 'CAMPAIGN' ? target.id : null,
-    packageSaleId: target.kind === 'PACKAGE_SALE' ? target.id : null,
-    subscriptionOrderId: target.kind === 'SUBSCRIPTION_ORDER' ? target.id : null,
+    ...targetColumns(target),
     gateway: input.gateway,
+    purpose: input.purpose ?? 'SETTLEMENT',
+    payerUpiId: input.upiId ?? null,
     amount: new Decimal(target.amount),
     currency: 'INR',
     createdByUserId: actor.userId,
@@ -372,6 +486,8 @@ export async function createIntent(
       // print the reference and the amount to the browser that paid.
       returnUrl: returnUrlFor(created.id, await mintCheckoutToken('return', created.id)),
       notifyUrl: `${apiBase()}/api/v1/webhooks/${input.gateway.toLowerCase()}`,
+      // UP-1: the UPI id, when the payer typed one.
+      ...(input.upiId ? { upiId: input.upiId } : {}),
     });
   } catch (err) {
     await repository.updatePayment(created.id, {
@@ -391,7 +507,7 @@ export async function createIntent(
       gateway: input.gateway,
       amount: target.amount,
       [target.payer.kind === 'ADVERTISER' ? 'advertiserId' : 'publisherId']: target.payer.id,
-      [target.kind === 'CAMPAIGN' ? 'campaignId' : target.kind === 'PACKAGE_SALE' ? 'packageSaleId' : 'subscriptionOrderId']: target.id,
+      [TARGET_COLUMN[target.kind]]: target.id,
       gatewayOrderId: order.gatewayOrderId,
     },
   });
@@ -529,8 +645,16 @@ async function settleSubscriptionOrder(payment: PaymentView, byUserId: string | 
   await markSubscriptionOrderPaid(order.id, { method: 'GATEWAY', reference: payment.reference }, now);
 }
 
-const targetFailure = (payment: Pick<PaymentView, 'campaignId' | 'subscriptionOrderId'>): string =>
-  payment.campaignId ? 'the campaign could not be authorised' : payment.subscriptionOrderId ? 'the order could not be activated' : 'the sale could not be activated';
+const targetFailure = (payment: Pick<PaymentView, 'campaignId' | 'subscriptionOrderId' | 'adBookingId' | 'listingBoostId'>): string =>
+  payment.campaignId
+    ? 'the campaign could not be authorised'
+    : payment.subscriptionOrderId
+      ? 'the order could not be activated'
+      : payment.adBookingId
+        ? 'the ad booking could not be paid'
+        : payment.listingBoostId
+          ? 'the sponsored listing could not be paid'
+          : 'the sale could not be activated';
 
 /**
  * Applies a captured payment to what it was for, out of the wallet balance
@@ -540,10 +664,22 @@ const targetFailure = (payment: Pick<PaymentView, 'campaignId' | 'subscriptionOr
  */
 async function settleTarget(payment: PaymentView, byUserId: string | null, now: Date): Promise<'SETTLED' | 'NOT_APPLIED'> {
   try {
-    if (payment.campaignId) {
+    if (payment.campaignId && payment.purpose === 'RESERVATION_FEE') {
+      // RF-1: the fee, out of the balance the capture just credited.
+      await settleReservationFeeById(payment.campaignId, payment.id, now);
+    } else if (payment.campaignId) {
       await authorizeCampaignById(payment.campaignId, now);
     } else if (payment.subscriptionOrderId) {
       await settleSubscriptionOrder(payment, byUserId, now);
+    } else if (payment.adBookingId || payment.listingBoostId) {
+      // LM-1: the placement's own debit out of the balance the capture
+      // credited (keyed on the booking, so the wallet route and this are one
+      // charge), and — for an ad — its invoice, stamped with this payment.
+      const settled = payment.adBookingId
+        ? await promotionPayments().settleAd(payment.adBookingId, { id: payment.id, reference: payment.reference }, byUserId, now)
+        : await promotionPayments().settleBoost(payment.listingBoostId!, { id: payment.id, reference: payment.reference }, byUserId, now);
+      if (settled.invoiceId && payment.invoiceId !== settled.invoiceId) await repository.updatePayment(payment.id, { invoiceId: settled.invoiceId });
+      return 'SETTLED';
     } else if (payment.packageSaleId) {
       const sale = await findSale(payment.packageSaleId);
       if (!sale) throw new ApiError(404, 'NOT_FOUND', 'Sale not found');
@@ -570,6 +706,8 @@ async function settleTarget(payment: PaymentView, byUserId: string | null, now: 
   // and package sales and its Invoice names an advertiser; a publisher's
   // receipt is a later lot (revenue README, "Not here").
   if (payment.subscriptionOrderId) return 'SETTLED';
+  // RF-1: no paper for a reservation fee — the invoice comes with the booking it is folded into.
+  if (payment.purpose === 'RESERVATION_FEE') return 'SETTLED';
 
   // Lot B (Q13): the paper. The invoice the authorise or the sale issued
   // carries the payment that settled it.
@@ -645,9 +783,19 @@ async function settleCapture(
     await notifyPayer(payment, {
       title: 'Payment received',
       message: `${money(capture.amount)} received against ${payment.reference}. ${
-        payment.campaignId ? 'Your campaign is booked.' : payment.subscriptionOrderId ? 'Your subscription is paid for.' : 'Your plan is active.'
+        payment.campaignId
+          ? payment.purpose === 'RESERVATION_FEE'
+            ? 'Your spots are reserved.'
+            : 'Your campaign is booked.'
+          : payment.subscriptionOrderId
+            ? 'Your subscription is paid for.'
+            : payment.adBookingId
+              ? 'Your ad is paid for and waits for ADX to review it.'
+              : payment.listingBoostId
+                ? 'Your sponsored listing is booked.'
+                : 'Your plan is active.'
       }`,
-      relatedId: payment.campaignId ?? payment.packageSaleId ?? payment.subscriptionOrderId ?? payment.id,
+      relatedId: payment.campaignId ?? payment.packageSaleId ?? payment.subscriptionOrderId ?? payment.adBookingId ?? payment.listingBoostId ?? payment.id,
       relatedType: payment.campaignId ? 'CAMPAIGN' : undefined,
     });
   }
@@ -721,7 +869,7 @@ async function markFailed(payment: PaymentView, failure: { gatewayPaymentId: str
   await notifyPayer(payment, {
     title: 'Payment failed',
     message: `${payment.reference}: ${reason}. Nothing was charged; try again or choose another way to pay.`,
-    relatedId: payment.campaignId ?? payment.packageSaleId ?? payment.subscriptionOrderId ?? payment.id,
+    relatedId: payment.campaignId ?? payment.packageSaleId ?? payment.subscriptionOrderId ?? payment.adBookingId ?? payment.listingBoostId ?? payment.id,
     relatedType: payment.campaignId ? 'CAMPAIGN' : undefined,
     suggestedAction: 'Try again',
   });
@@ -1103,4 +1251,145 @@ export async function refundPayment(
   }
   // T-B: the envelope stays — `refund` as the Payment view lists a refund, `payment` as GET /payments/:id answers it.
   return { refund: toRefundView(updated), payment: toPaymentView(after) };
+}
+
+/* ------------------------------------------------------------------ */
+/* BT-1: bank transfer — an intent with no gateway behind it           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The advertiser (or, Lot J-B2, a publisher) chooses to pay by NEFT/IMPS/RTGS.
+ * The intent is the same row a gateway would open — the same target, the
+ * same amount, the same reference — with no gateway order; the answer
+ * carries ADX's receiving account and the reference to quote. The row
+ * stays CREATED until ops confirm the money on the statement
+ * (`confirmBankTransfer`), which captures and settles it exactly as a
+ * gateway capture would.
+ */
+async function createBankTransferIntent(
+  input: IntentInput,
+  actor: PaymentActor,
+  now: Date,
+): Promise<PaymentIntent> {
+  const bank = await bankTransferDetails();
+  if (!bank.configured) {
+    throw new ApiError(409, 'GATEWAY_NOT_CONFIGURED', 'Paying by bank transfer is not set up yet. Ask ADX to add the receiving account under Settings › Integrations.', {
+      gateway: 'BANK_TRANSFER',
+      missing: bank.missing,
+    });
+  }
+  const target = await resolveTarget(input, actor);
+  // AGE-1: a bank transfer is an order too — the payer's account holder, 18 or over.
+  await assertPartyAdultForOrders(target.payer, { actorUserId: actor.userId });
+  if (target.payer.kind === 'ADVERTISER') await assertMayPayByGateway(target.payer.id);
+
+  const created = await repository.createPayment({
+    reference: await nextReference(now),
+    advertiserId: target.payer.kind === 'ADVERTISER' ? target.payer.id : null,
+    publisherId: target.payer.kind === 'PUBLISHER' ? target.payer.id : null,
+    ...targetColumns(target),
+    gateway: 'BANK_TRANSFER',
+    purpose: input.purpose ?? 'SETTLEMENT',
+    payerUpiId: input.upiId ?? null,
+    amount: new Decimal(target.amount),
+    currency: 'INR',
+    createdByUserId: actor.userId,
+  });
+  await logActivity(actor.userId, 'PAYMENT_INTENT_CREATED', {
+    module: 'payments',
+    targetType: 'Payment',
+    targetId: created.id,
+    metadata: {
+      reference: created.reference,
+      gateway: 'BANK_TRANSFER',
+      amount: target.amount,
+      [target.payer.kind === 'ADVERTISER' ? 'advertiserId' : 'publisherId']: target.payer.id,
+      [TARGET_COLUMN[target.kind]]: target.id,
+    },
+  });
+  const payment = (await repository.findPayment(created.id)) ?? { ...created, refunds: [] };
+  return {
+    payment: toPaymentView(payment),
+    checkout: {},
+    checkoutUrl: null,
+    bankTransfer: { ...bank.details, reference: created.reference, amount: target.amount },
+  };
+}
+
+export type BankTransferClaimInput = { utr: string; paidOn: string; amount: Money; proofFileId?: string | null | undefined };
+
+/**
+ * "I have paid" — the payer records the UTR, the day, the amount and, if
+ * they like, a proof upload. Nothing moves: the claim is what ops check the
+ * statement against. Re-submitting replaces the claim while the row is
+ * still CREATED.
+ */
+export async function submitBankTransfer(paymentId: string, input: BankTransferClaimInput, actor: PaymentActor, now = new Date()): Promise<PaymentSummary> {
+  const payment = await getPayment(paymentId, actor);
+  if (payment.gateway !== 'BANK_TRANSFER') throw new ApiError(409, 'CONFLICT', 'This payment goes through a gateway, not a bank transfer.');
+  if (payment.status !== 'CREATED') throw new ApiError(409, 'CONFLICT', `This payment is already ${payment.status.toLowerCase()}.`);
+  const paidOn = new Date(`${input.paidOn}T00:00:00.000Z`);
+  if (Number.isNaN(paidOn.getTime()) || paidOn.getTime() > now.getTime() + 24 * 60 * 60 * 1000) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Say the day the transfer was made (not a day in the future).', { paidOn: input.paidOn });
+  }
+  await repository.updatePayment(payment.id, {
+    bankUtr: input.utr.trim().toUpperCase(),
+    bankPaidOn: paidOn,
+    bankClaimedAmount: new Decimal(input.amount),
+    bankProofFileId: input.proofFileId ?? null,
+    bankClaimedAt: now,
+  });
+  await logActivity(actor.userId, 'PAYMENT_BANK_TRANSFER_CLAIMED', {
+    module: 'payments',
+    targetType: 'Payment',
+    targetId: payment.id,
+    metadata: { reference: payment.reference, utr: input.utr.trim().toUpperCase(), paidOn: input.paidOn, amount: input.amount, expected: money(payment.amount) },
+  });
+  await notifyOps(
+    'Bank transfer claimed',
+    `${payment.reference}: ${money(input.amount)} said to be sent on ${input.paidOn} (UTR ${input.utr.trim().toUpperCase()}) against ${money(payment.amount)}. Confirm it under Finance › Payments once it shows on the statement.`,
+    payment.id,
+  );
+  return toPaymentView((await repository.findPayment(payment.id)) ?? payment);
+}
+
+/**
+ * Ops saw the money on the statement: the payment is captured for what
+ * arrived and settled exactly as a gateway capture is — the wallet topped
+ * up (keyed on the UTR, so a second confirm is one credit), the campaign
+ * authorised or the sale paid. `amount` defaults to the intent's; a
+ * different figure is credited as it came and flagged, as a gateway's
+ * mismatch would be. ADMIN + finance.approve.
+ */
+export async function confirmBankTransfer(paymentId: string, input: { amount?: Money | undefined; utr?: string | undefined; note?: string | undefined }, actor: PaymentActor, now = new Date()): Promise<PaymentSummary> {
+  const payment = await getPayment(paymentId, actor);
+  if (payment.gateway !== 'BANK_TRANSFER') throw new ApiError(409, 'CONFLICT', 'This payment goes through a gateway; it captures itself.');
+  if (payment.status === 'CAPTURED' || payment.status === 'REFUNDED' || payment.status === 'PARTIALLY_REFUNDED') {
+    await settleTarget(payment, actor.userId, now);
+    return toPaymentView((await repository.findPayment(payment.id)) ?? payment);
+  }
+  if (payment.status === 'FAILED') throw new ApiError(409, 'CONFLICT', 'This payment was rejected. The payer has to start a new one.');
+  const utr = (input.utr ?? payment.bankUtr ?? '').trim().toUpperCase();
+  if (!utr) throw new ApiError(400, 'VALIDATION_ERROR', 'Give the UTR from the statement — the payer left none.');
+  if (input.utr && input.utr.trim().toUpperCase() !== (payment.bankUtr ?? '').toUpperCase()) {
+    await repository.updatePayment(payment.id, { bankUtr: utr });
+  }
+  const amount = money(input.amount ?? payment.amount);
+  const settled = await settleCapture(payment, { gatewayPaymentId: `UTR:${utr}`, amount, method: 'bank_transfer' }, actor.userId, now);
+  await logActivity(actor.userId, 'PAYMENT_BANK_TRANSFER_CONFIRMED', {
+    module: 'payments',
+    targetType: 'Payment',
+    targetId: payment.id,
+    metadata: { reference: payment.reference, utr, amount, expected: money(payment.amount), note: input.note ?? null },
+  });
+  return toPaymentView(settled);
+}
+
+/** Nothing arrived, or the wrong thing did: the payment fails with the reason, and the payer is told. ADMIN + finance.approve. */
+export async function rejectBankTransfer(paymentId: string, input: { reason: string }, actor: PaymentActor): Promise<PaymentSummary> {
+  const payment = await getPayment(paymentId, actor);
+  if (payment.gateway !== 'BANK_TRANSFER') throw new ApiError(409, 'CONFLICT', 'This payment goes through a gateway.');
+  if (payment.status !== 'CREATED') throw new ApiError(409, 'CONFLICT', `This payment is already ${payment.status.toLowerCase()}.`);
+  const failed = await markFailed(payment, { gatewayPaymentId: null, failureReason: input.reason, method: 'bank_transfer' }, actor.userId);
+  return toPaymentView(failed);
 }

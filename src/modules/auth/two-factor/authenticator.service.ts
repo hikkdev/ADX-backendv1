@@ -1,3 +1,4 @@
+import { isWorkingUser } from '../../../shared/party-status';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import QRCode from 'qrcode';
@@ -98,7 +99,7 @@ export async function mustEnrolAuthenticator(user: Pick<TwoFactorUser, 'totpSecr
 
 async function requireUser(userId: string): Promise<TwoFactorUser> {
   const user = await repository.findUser(userId);
-  if (!user || !user.isActive) throw new ApiError(401, 'UNAUTHORIZED', 'Account not active');
+  if (!user || !isWorkingUser(user)) throw new ApiError(401, 'UNAUTHORIZED', 'Account not active');
   return user;
 }
 

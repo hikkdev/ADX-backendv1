@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { asyncHandler } from '../../shared/http';
-import { authenticate, requireRole } from '../../shared/auth';
+import { authenticate, requireRole, requirePermission } from '../../shared/auth';
 import { requireFeature } from '../feature-flags';
 import { clientSettingsHandler, liveHandler, orderTimelineHandler, pingHandler, streamTokenHandler, trailHandler } from './agent-locations.controller';
 import { authenticateLiveStream, liveStreamHandler } from './agent-locations.stream';
@@ -20,7 +20,7 @@ agentLocationRouter.post('/me', requireRole('AGENT_PUBLISHER', 'AGENT_ADVERTISER
 agentLocationRouter.get('/me/settings', requireRole('AGENT_PUBLISHER', 'AGENT_ADVERTISER'), asyncHandler(clientSettingsHandler));
 
 agentLocationRouter.use(requireRole('ADMIN'), requireFeature('ops.live-map'));
-agentLocationRouter.get('/live', asyncHandler(liveHandler));
-agentLocationRouter.post('/stream-token', asyncHandler(streamTokenHandler));
-agentLocationRouter.get('/agents/:agentId/trail', asyncHandler(trailHandler));
-agentLocationRouter.get('/orders/:orderId/timeline', asyncHandler(orderTimelineHandler));
+agentLocationRouter.get('/live', requirePermission('agents.view'), asyncHandler(liveHandler));
+agentLocationRouter.post('/stream-token', requirePermission('agents.view'), asyncHandler(streamTokenHandler));
+agentLocationRouter.get('/agents/:agentId/trail', requirePermission('agents.view'), asyncHandler(trailHandler));
+agentLocationRouter.get('/orders/:orderId/timeline', requirePermission('agents.view'), asyncHandler(orderTimelineHandler));

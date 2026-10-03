@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { DEFAULT_LIST_PAGE_SIZE, MAX_LIST_PAGE_SIZE, listQuerySchema } from '../../shared/pagination';
 import { upperEnum } from '../../shared/validation';
+import { LISTING_VIEW_SOURCES } from './listing-views.repository';
+import { ELEVATIONS, LISTING_VEHICLE_TYPES, TRAFFIC_GRADES, VISIBILITY_RANGES, toVocabularyCode, type VocabularyEntry } from '../../shared/listing-vocabulary';
 
 export const LISTING_CATEGORIES = ['INDOOR', 'OUTDOOR', 'TRANSIT', 'MEDIA'] as const;
 
@@ -111,12 +113,11 @@ const spotAttributes = {
   footfallNote: z.string().max(500).optional(),
 
   /* Physical attributes a pricing factor can key on. Controlled strings rather
-     than enums so ops can extend the vocabulary without a migration. */
+     than enums so ops can extend the vocabulary without a migration.
+     LD-1 moved elevation, visibility and traffic to `listingExtras` below,
+     where they are stored as codes and may be cleared. */
   illumination: z.string().max(60).optional(),
   facing: z.string().max(60).optional(),
-  elevation: z.string().max(60).optional(),
-  visibility: z.string().max(60).optional(),
-  trafficGrade: z.string().max(60).optional(),
 
   /* Step 7 — availability. */
   minBookingDays: z.number().int().min(1).max(3650).optional(),
@@ -136,6 +137,20 @@ const spotAttributes = {
 } as const;
 
 /**
+ * VH-3: the pre-listing RC check. The registration, and who the spot is
+ * being registered for — omitted, the caller's own publisher record.
+ */
+export const checkVehicleRcSchema = z.object({
+  vehicleNumber: z
+    .string()
+    .trim()
+    .min(4)
+    .max(20)
+    .transform((value) => value.toUpperCase().replace(/[^A-Z0-9]/g, '')),
+  publisherId: z.string().trim().min(1).max(64).optional(),
+});
+
+/**
  * The publisher's own unit and figure.
  *
  * A mall quotes rupees per square foot per month; a billboard owner quotes per
@@ -151,6 +166,129 @@ const pricingModelFields = {
   pricingUnit: z.enum(PRICING_UNITS).optional(),
   basePrice: ratePerDayString.optional(),
 } as const;
+
+/**
+ * WG-1 (DR 12 board 08): what the website's listing wizard asks beyond the
+ * app — stored as stated and shown to the advertiser; nothing prices on
+ * them. Every field is optional on create and on patch; null clears.
+ */
+const calendarDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
+
+/**
+ * LD-1: one of the listing forms' closed lists, stored as its code. The
+ * code or the list's words are accepted (`toVocabularyCode`); any other
+ * controlled string the desk writes is kept as sent. Null clears.
+ */
+const coded = (entries: readonly VocabularyEntry[], max = 60) =>
+  z
+    .string()
+    .trim()
+    .min(1)
+    .max(max)
+    .transform((value) => toVocabularyCode(entries, value))
+    .nullable()
+    .optional();
+
+/** "HH:MM", or the words a picker printed ("10 AM") — free-form, as `availableHoursFrom` always was. */
+const clock = z.string().trim().max(20).nullable().optional();
+
+export const listingExtras = {
+  installationByAdx: z.boolean().nullable().optional(),
+  /** LD-1: AUTO | CAR | CAB | BUS | TRUCK | OTHER — "What kind of vehicle?", transit spots. */
+  vehicleType: coded(LISTING_VEHICLE_TYPES, 80),
+  /** LD-1: LOW | MEDIUM | HIGH | VERY_HIGH — "How busy is it?". */
+  trafficGrade: coded(TRAFFIC_GRADES),
+  /** LD-1: UNDER_50M | 50_150M | 150_300M | OVER_300M — "From how far can it be seen?". */
+  visibility: coded(VISIBILITY_RANGES),
+  /** LD-1: GROUND | FIRST_FLOOR | ROOFTOP | ELEVATED — "How high is it?", outdoor spots. */
+  elevation: coded(ELEVATIONS),
+  /** LD-1: "About how many people pass this spot in a day?" — a whole number, the publisher's estimate. */
+  estimatedDailyFootfall: z.number().int().min(0).max(100_000_000).nullable().optional(),
+  /** LD-1: the area a transit or area spot covers — its own column, no longer written into `city`. */
+  coverage: z.string().trim().max(200).nullable().optional(),
+  /** LD-1: the venue's operating hours, kept beside the visibility window (`availableHoursFrom/To`). */
+  operatingHoursFrom: clock,
+  operatingHoursTo: clock,
+  /** LD-1: how sure the pin is, in metres (the map pick's or the GPS fix's accuracy). */
+  locationAccuracyM: z.number().min(0).max(100_000).nullable().optional(),
+  vehicleModel: z.string().trim().max(120).nullable().optional(),
+  broadcastLanguage: z.string().trim().max(80).nullable().optional(),
+  contentFormat: z.string().trim().max(80).nullable().optional(),
+  /**
+   * The audience as the publisher states it — shares (`{ "18–24": 30, … }` or a
+   * list of `{ label, share }`), or, LF-2 (28 Sep 2026), the listing flow's
+   * profile: `{ ageBand, genderSplit, urbanRural, secProfile, incomeBracket,
+   * occupation }`, each the words chosen.
+   */
+  audienceDemographics: z
+    .union([
+      z.record(z.string().max(60), z.union([z.number().min(0).max(100), z.string().trim().min(1).max(80)])),
+      z.array(z.object({ label: z.string().max(60), share: z.number().min(0).max(100) })).max(12),
+    ])
+    .nullable()
+    .optional(),
+  maxBookingDays: z.number().int().min(1).max(3660).nullable().optional(),
+  advanceBookingDays: z.number().int().min(0).max(365).nullable().optional(),
+  cancellationNoticeDays: z.number().int().min(0).max(90).nullable().optional(),
+  /** LF-2: FLEXIBLE (free up to 48 hours before), NOTICE (`cancellationNoticeDays` ahead) or NONE (no cancellation once confirmed). */
+  cancellationPolicy: z.enum(['FLEXIBLE', 'NOTICE', 'NONE']).nullable().optional(),
+  /** LF-2: "Available year-round?" — never `availableNow`, which is the live occupied flag. */
+  availableYearRound: z.boolean().nullable().optional(),
+  rateCardValidFrom: calendarDay.transform((day) => new Date(`${day}T00:00:00.000Z`)).nullable().optional(),
+  rateCardValidTo: calendarDay.transform((day) => new Date(`${day}T00:00:00.000Z`)).nullable().optional(),
+  seasonalVariationNote: z.string().trim().max(500).nullable().optional(),
+  widthPx: z.number().int().min(1).max(100_000).nullable().optional(),
+  heightPx: z.number().int().min(1).max(100_000).nullable().optional(),
+};
+
+/** LD-1: one answer the flow collected that maps to no column — a Flow Editor question. */
+const extraAnswerValue: z.ZodType<unknown> = z.union([
+  z.string().max(5000),
+  z.number(),
+  z.boolean(),
+  z.null(),
+  z.array(z.unknown()).max(50),
+  z.record(z.string(), z.unknown()),
+]);
+export const extraAnswerSchema = z.object({
+  key: z.string().trim().min(1).max(64),
+  label: z.string().trim().min(1).max(200),
+  value: extraAnswerValue,
+});
+export type ExtraAnswer = z.infer<typeof extraAnswerSchema>;
+
+/** LD-1: a paper the publisher marked "Not applicable" — the kind, and why when they said. ADX stamps `at`. */
+export const documentWaiverSchema = z.object({
+  kind: z.string().trim().min(1).max(60).transform((kind) => kind.toUpperCase()),
+  reason: z.string().trim().max(500).optional(),
+});
+export type DocumentWaiverInput = z.infer<typeof documentWaiverSchema>;
+
+/**
+ * LD-1: what a listing form asked and the server used to drop — accepted on
+ * create and on edit. `extraAnswers` replaces the stored list (null clears);
+ * `documentWaivers` replaces it too, each waiver keeping the moment it was
+ * first stated; `ownershipDeclared` true stamps the "I own the venue" tick,
+ * false clears it.
+ */
+const listingRecordInputs = {
+  extraAnswers: z.array(extraAnswerSchema).max(100).nullable().optional(),
+  documentWaivers: z.array(documentWaiverSchema).max(20).nullable().optional(),
+  ownershipDeclared: z.boolean().optional(),
+};
+
+/** LD-1: a photograph as a form files it — the URL the upload answered, and (when the client has them) the upload's id and when it was taken. */
+const listingPhotoInput = {
+  url: z.string().url(),
+  uploadedFileId: z.string().trim().min(1).max(64).optional(),
+  takenAt: z.coerce.date().optional(),
+};
+
+/** WG-1: a photograph added to a live listing — the URL an upload of purpose LISTING_PHOTO answered. */
+export const addPhotoSchema = z.object({ ...listingPhotoInput, type: z.string().trim().min(1).max(40).default('main') });
+
+/** WG-1 (26 · address): the publisher's written word back on a send-back. */
+export const clarificationSchema = z.object({ message: z.string().trim().min(3).max(2000) });
 
 export const createListingSchema = z.object({
   /**
@@ -211,7 +349,17 @@ export const createListingSchema = z.object({
    * more than 1; the service refuses the rest (400). See `slots.service`.
    */
   slotsTotal: slotsTotalField,
-  photos: z.array(z.object({ url: z.string().url(), type: z.string() })).optional(),
+  photos: z.array(z.object({ ...listingPhotoInput, type: z.string() })).optional(),
+  ...listingExtras,
+  ...listingRecordInputs,
+  /**
+   * LD-1: the review step's "Terms agreement" tick. True stamps
+   * `termsAcceptedAt`; `termsVersion` names the wording ticked (the listing
+   * flow's version when the client does not say). A listing finished from a
+   * draft reads the tick off the draft's `terms` answer as well.
+   */
+  termsAccepted: z.boolean().optional(),
+  termsVersion: z.string().trim().min(1).max(60).optional(),
   planId: z.string().optional(),
   /**
    * QR-24: how the publisher holds the space and, for a lease, licence or
@@ -278,6 +426,10 @@ export const createListingSchema = z.object({
  * search around for "Popular near you". Money arrives as a decimal string;
  * dates as ISO; everything optional.
  */
+/** 26 Sep 2026: the browse's illumination facet, in the words the listing flow and the seed both store. */
+export const ILLUMINATION_KINDS = ['FRONTLIT', 'BACKLIT', 'DIGITAL', 'NONE'] as const;
+export type IlluminationKind = (typeof ILLUMINATION_KINDS)[number];
+
 export const browseQuerySchema = z
   .object({
     q: z.string().trim().min(1).max(80).optional(),
@@ -287,6 +439,8 @@ export const browseQuerySchema = z
     venueTypeId: z.string().trim().min(1).max(64).optional(),
     /** QR-27: one publisher's live spaces, by the publisher's id. */
     publisherId: z.string().trim().min(1).max(64).optional(),
+    /** SIM-1: the spaces like one listing (its id or LST- display id) — the listing page's "View all similar listings". */
+    similarTo: z.string().trim().min(1).max(64).optional(),
     display: z.enum(['DIGITAL', 'STATIC']).optional(),
     minRate: z.string().regex(/^\d+(\.\d{1,2})?$/).optional(),
     maxRate: z.string().regex(/^\d+(\.\d{1,2})?$/).optional(),
@@ -301,6 +455,16 @@ export const browseQuerySchema = z
       .enum(['true', 'false'])
       .transform((value) => value === 'true')
       .optional(),
+    /**
+     * 26 Sep 2026: how the face is lit — one or more of FRONTLIT, BACKLIT,
+     * DIGITAL, NONE, comma-separated. The listing flow stores "Front-lit",
+     * "Back-lit", "Digital", "Non-lit"; older rows the upper-case words; both match.
+     */
+    illumination: z
+      .string()
+      .optional()
+      .transform((value) => (value ? [...new Set(value.split(',').map((part) => part.trim().toUpperCase()).filter(Boolean))] : undefined))
+      .pipe(z.array(z.enum(ILLUMINATION_KINDS)).min(1).optional()),
     lat: z.coerce.number().min(-90).max(90).optional(),
     lng: z.coerce.number().min(-180).max(180).optional(),
     radiusKm: z.coerce.number().min(1).max(100).default(10),
@@ -418,6 +582,14 @@ export type ReviewQueueQuery = z.infer<typeof reviewQueueQuerySchema>;
 
 /** Lot D (Q5): the saved-spaces page. No status, no sort — newest save first. */
 /** G7 (Q109): the month the audience panel is asked about — this month unless said. */
+/**
+ * 3 Oct 2026: `GET /listings/:listingId/insights?from=&to=` — two inclusive
+ * Indian days, the overviews' window (the last thirty when absent). The
+ * service refuses `to` before `from` and a span past a year.
+ */
+const insightDay = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/, 'must be YYYY-MM-DD');
+export const listingInsightsQuerySchema = z.object({ from: insightDay.optional(), to: insightDay.optional() });
+
 export const audienceQuerySchema = z.object({
   period: z
     .string()
@@ -461,6 +633,10 @@ export const sendBackListingSchema = z.object({
 export const updateListingSchema = z.object({
   ...spotAttributes,
   ...pricingModelFields,
+  ...listingExtras,
+  ...listingRecordInputs,
+  /** LD-1: the slot duration (a media outlet's "30 seconds") the website's edit used to drop. */
+  size: z.string().trim().max(120).nullable().optional(),
   title: z.string().optional(),
   description: z.string().optional(),
   monthlyPrice: z.number().positive().optional(),
@@ -494,3 +670,20 @@ export const updateListingSchema = z.object({
       'Send one price: basePrice or pricingUnit, or ratePerDay, or monthlyPrice — not two that disagree',
     path: ['basePrice'],
   });
+
+/** AV-1: `GET /listings/browse/:listingId/availability` — a range of whole days, and what the advertiser wants to fit. */
+export const availabilityQuerySchema = z.object({
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  length: z.coerce.number().int().min(1).max(366).optional(),
+  quantity: z.coerce.number().int().min(1).max(100).optional(),
+});
+
+/**
+ * LD-1: `POST /listings/:displayIdOrId/view` — which client counted the
+ * view: the website (`WEB`) or an app (`APP`). Nothing else is read.
+ */
+export const listingViewSchema = z.object({ source: z.enum(LISTING_VIEW_SOURCES) });
+
+/** SIM-1: `GET /listings/:id/similar?limit=` — five by default (the app's row), up to 24 (the website's scrolling row). */
+export const similarLimitSchema = z.object({ limit: z.coerce.number().int().min(1).max(24).optional() });

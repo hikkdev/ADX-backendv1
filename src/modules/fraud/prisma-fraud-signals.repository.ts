@@ -130,13 +130,16 @@ export const prismaFraudSignalsIndex: FraudSignalIndex & {
   async payoutHandlesFor(userId): Promise<PayoutHandle[]> {
     const rows = await prisma.payoutMethod.findMany({
       where: { userId },
-      select: { accountNumber: true, upiVpa: true, accountHolder: true, nameMatchPct: true },
+      select: { accountNumber: true, upiVpa: true, accountHolder: true, nameMatchPct: true, bankName: true, ifscCode: true },
+      orderBy: [{ isDefault: 'desc' }, { createdAt: 'asc' }],
     });
     return rows.map((r) => ({
       accountNumber: r.accountNumber,
       upiVpa: r.upiVpa,
       accountHolder: r.accountHolder,
       nameMatchPct: r.nameMatchPct === null ? null : Number(r.nameMatchPct),
+      bankName: r.bankName,
+      ifscCode: r.ifscCode,
     }));
   },
 

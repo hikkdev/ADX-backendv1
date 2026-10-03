@@ -1,4 +1,4 @@
-import { redis } from '../shared/cache';
+import { redis, orSkipWhenRedisDown } from '../shared/cache';
 import { logger } from '../shared/logging';
 import { reportError } from '../shared/errors';
 import { recordHeartbeat } from '../shared/jobs';
@@ -25,7 +25,8 @@ export let rightsRenewalInterval: ReturnType<typeof setInterval> | null = null;
 export function startRightsRenewalJob(): void {
   rightsRenewalInterval = setInterval(async () => {
     recordHeartbeat('rights-renewal');
-    const acquired = await redis.set(LOCK_KEY, '1', 'PX', LOCK_TTL_MS, 'NX');
+    // Redis away (Docker stopped): skip this tick rather than take the API down.
+    const acquired = await orSkipWhenRedisDown(redis.set(LOCK_KEY, '1', 'PX', LOCK_TTL_MS, 'NX'), TAG);
     if (!acquired) return;
     try {
       const result = await runRightsSweep();

@@ -1,3 +1,4 @@
+import { isWorkingUser } from '../../../shared/party-status';
 import type { Request, Response } from 'express';
 import { ApiError } from '../../../shared/errors';
 import { signAccessToken } from '../../../shared/auth';
@@ -63,7 +64,7 @@ export async function publisherVerifyOtpHandler(req: Request, res: Response): Pr
   }
 
   const user = await repository.findPublisherLoginUserById(userId);
-  if (!user || !user.isActive) {
+  if (!user || !isWorkingUser(user)) {
     throw new ApiError(401, 'UNAUTHORIZED', 'Account not active');
   }
 

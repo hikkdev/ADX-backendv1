@@ -10,7 +10,7 @@ import { prisma } from '../../../../shared/database';
  * implementation used Prisma's `mode: 'insensitive'`, which compiles to a
  * Postgres `ILIKE` — so `_` and `%` inside the *supplied value* became pattern
  * wildcards. The value is a Google address, and Workspace allows `_`, so a user
- * holding `ad_in@adx.co` matched the row `admin@adx.co`, came back as exactly
+ * holding `ad_in@adx.in` matched the row `admin@adx.in`, came back as exactly
  * one row (leaving the ambiguity guard silent) and was handed that account's
  * session.
  *

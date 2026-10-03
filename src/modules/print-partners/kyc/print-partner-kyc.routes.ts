@@ -17,17 +17,17 @@ import * as h from './print-partner-kyc.controller';
 export const printPartnerKycRouter = Router();
 printPartnerKycRouter.use(authenticate, requireRole('ADMIN'), requireFeature('print.partner-kyc'));
 
-printPartnerKycRouter.get('/', asyncHandler(h.listQueueHandler));
-printPartnerKycRouter.get('/:id', asyncHandler(h.getCaseHandler));
+printPartnerKycRouter.get('/', requirePermission('kyc.view'), asyncHandler(h.listQueueHandler));
+printPartnerKycRouter.get('/:id', requirePermission('kyc.view'), asyncHandler(h.getCaseHandler));
 /* The desk records the documents on the partner's behalf — recordedVia DESK. */
-printPartnerKycRouter.put('/:id', asyncHandler(h.recordAtDeskHandler));
+printPartnerKycRouter.put('/:id', requirePermission('kyc.edit'), asyncHandler(h.recordAtDeskHandler));
 /* The desk asks the partner — Digio on their behalf, or by hand; KYC_REQUESTED. N3-B: the catalogue's KYC edit
    tier beside ADMIN — a role config granted `kyc.edit` may send it; the super admin and an admin with no role
    config pass under the launch rule. */
 printPartnerKycRouter.post('/:id/request', requirePermission('kyc.edit'), asyncHandler(h.requestKycHandler));
-printPartnerKycRouter.patch('/:id/review', asyncHandler(h.reviewHandler));
-printPartnerKycRouter.patch('/:id/documents/:field', asyncHandler(h.reviewDocumentHandler));
-printPartnerKycRouter.post('/:id/request-reupload', asyncHandler(h.requestReuploadHandler));
-printPartnerKycRouter.patch('/:id/assign', asyncHandler(h.assignHandler));
-printPartnerKycRouter.post('/:id/escalate', asyncHandler(h.escalateHandler));
-printPartnerKycRouter.post('/:id/digio/restart', asyncHandler(h.restartDigioHandler));
+printPartnerKycRouter.patch('/:id/review', requirePermission('kyc.approve'), asyncHandler(h.reviewHandler));
+printPartnerKycRouter.patch('/:id/documents/:field', requirePermission('kyc.edit'), asyncHandler(h.reviewDocumentHandler));
+printPartnerKycRouter.post('/:id/request-reupload', requirePermission('kyc.edit'), asyncHandler(h.requestReuploadHandler));
+printPartnerKycRouter.patch('/:id/assign', requirePermission('kyc.edit'), asyncHandler(h.assignHandler));
+printPartnerKycRouter.post('/:id/escalate', requirePermission('kyc.edit'), asyncHandler(h.escalateHandler));
+printPartnerKycRouter.post('/:id/digio/restart', requirePermission('kyc.edit'), asyncHandler(h.restartDigioHandler));

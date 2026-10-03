@@ -25,6 +25,8 @@ const repository = vi.hoisted(
       reviewDocument: vi.fn(),
       listDocuments: vi.fn(),
       documentsCleared: vi.fn(),
+      // ST-2
+      listingsNamingFile: vi.fn(),
       createVerification: vi.fn(),
       findVerification: vi.fn(),
       reviewVerification: vi.fn(),
@@ -39,6 +41,9 @@ const repository = vi.hoisted(
       publisherIdOfUser: vi.fn(),
       markListingVerified: vi.fn(),
       markDocumentsCleared: vi.fn(),
+      // 3 Oct 2026: the verification queue's actions
+      setVerificationExpiry: vi.fn(),
+      publisherContact: vi.fn(),
       createClaim: vi.fn(),
       findClaim: vi.fn(),
       listClaims: vi.fn(),

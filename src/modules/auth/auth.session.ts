@@ -1,3 +1,4 @@
+import { isWorkingUser } from '../../shared/party-status';
 import type { Request } from 'express';
 import { ApiError } from '../../shared/errors';
 import { signAccessToken } from '../../shared/auth';
@@ -5,6 +6,7 @@ import type { Role } from '../../shared/database';
 import { issueRefreshToken, type SessionMeta } from './tokens/tokens.service';
 import { prismaAuthRepository as repository } from './prisma-auth.repository';
 import { resolvePermissions } from './auth.ports';
+import { locateSession } from './sessions/geo-ip';
 
 export function sessionMeta(req: Request): SessionMeta {
   return { userAgent: req.headers['user-agent'], ipAddress: req.ip };
@@ -43,6 +45,9 @@ export async function startSession(
   // reads it on every request and refresh re-decides it.
   const accessToken = signAccessToken(userId, roles, sessionId, { perms, mustEnrolAuthenticator: options.mustEnrolAuthenticator });
 
+  // SL-1: where it signed in from, after the fact — a sign-in never waits on it.
+  void locateSession(sessionId, meta.ipAddress);
+
   return { accessToken, refreshToken };
 }
 
@@ -60,7 +65,7 @@ export async function startSession(
  */
 export async function reissueAccessToken(userId: string, sessionId: string): Promise<string> {
   const user = await repository.findUserWithRoles(userId);
-  if (!user || !user.isActive) throw new ApiError(401, 'UNAUTHORIZED', 'Account not active');
+  if (!user || !isWorkingUser(user)) throw new ApiError(401, 'UNAUTHORIZED', 'Account not active');
   const roles = user.roles.map((r) => r.role) as Role[];
   const perms = await resolvePermissions(userId, roles);
   return signAccessToken(userId, roles, sessionId, { perms });

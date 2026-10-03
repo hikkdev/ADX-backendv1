@@ -1,9 +1,18 @@
+import type { AccountState, AgentRosterStatus } from '../../shared/party-status';
 import type { DispatchAsk } from '../../shared/dispatch';
-import type { AgentGrade, AgentProfile, AgentProfileStatus, AgentStage, AgentTier, KycStatus, SuspensionScope, TierLevel } from '../../shared/database';
+import type { AgentGrade, AgentProfile, AgentProfileStatus, AgentSourceKind, AgentStage, AgentTier, KycStatus, SuspensionScope, TierLevel } from '../../shared/database';
+import type { KycQueueState } from '../../shared/kyc-state';
 import type { Money } from '../../shared/money';
 
 /** E7-3: what another desk needs to name an agent beside a user id. */
 export type AgentLabelRow = { id: string; userId: string; displayId: string | null; name: string | null; kycStatus: KycStatus | null };
+
+/**
+ * 3 Oct 2026 (the verification queue's "Send an agent"): the town the work is
+ * in. With it, only agents of that city are considered — by the key when the
+ * work's city resolved to one, the spelling catching the rows whose key is null.
+ */
+export type AssignablePlace = { cityId: string | null; city: string | null };
 
 export type AgentFilter = {
   /** A slug, or a name for the console's older links. */
@@ -12,6 +21,26 @@ export type AgentFilter = {
   cityId?: string | null;
   tier?: AgentTier;
   search?: string;
+  /** 29 Sep 2026: where the profile came from — the agent's door. */
+  sourceKind?: AgentSourceKind;
+  /** 29 Sep 2026: the side the agent works (the rule `application.service.sideOf` applies). */
+  side?: 'PUBLISHER' | 'ADVERTISER';
+  /** 29 Sep 2026: the KYC state the queue and the agent page print. */
+  kycState?: KycQueueState;
+  /** Account lifecycle (2 Oct 2026): absent is ACTIVE, ALL is everyone. */
+  status?: AgentRosterStatus;
+};
+
+/**
+ * 29 Sep 2026 (the party rosters, made uniform): one row of the console's
+ * roster — the profile, the person's name, number, email, sign-in switch and
+ * roles, the six KYC columns the state is derived from, and the accounts the
+ * agent brought in, counted in the same query.
+ */
+export type AgentRosterRow = AgentProfile & {
+  user: { id: string; name: string | null; mobile: string; email: string | null; isActive: boolean; closedAt: Date | null; roles: { role: string }[] };
+  kyc: { id: string; status: KycStatus; submittedAt: Date | null; requestedAt: Date | null; requestedChannel: string | null; method: string | null } | null;
+  onboardedCount: number;
 };
 
 export type AgentRole = 'AGENT_PUBLISHER' | 'AGENT_ADVERTISER';
@@ -29,6 +58,8 @@ export type NewAgent = {
   cityId?: string | null;
   state?: string;
   displayId: string;
+  /** 28 Sep 2026: the person's own ADX-… id, for the account a desk create opens (an existing account keeps its own). */
+  userDisplayId?: string;
 };
 
 /**
@@ -74,7 +105,7 @@ export interface AgentsRepository {
     filter: AgentFilter,
     limit: number,
     offset: number,
-  ): Promise<{ items: AgentProfile[]; total: number }>;
+  ): Promise<{ items: AgentRosterRow[]; total: number; statusCounts: Record<AccountState, number> }>;
   /** The profile with the account slice `GET /agents/:id` prints; E10-1: the closure columns ride it (Lot A, Q21). */
   findById(id: string): Promise<AgentWithUser | null>;
   exists(id: string): Promise<boolean>;
@@ -91,7 +122,7 @@ export interface AgentsRepository {
    * the first of them in offer-priority order (`shared/dispatch`).
    */
   /** The sweep's pick — AG-5: for the grade the work's band asks for, and where it is. */
-  findAssignable(excludeIds: string[], ask?: DispatchAsk, now?: Date): Promise<{ id: string } | null>;
+  findAssignable(excludeIds: string[], ask?: DispatchAsk, now?: Date, place?: AssignablePlace): Promise<{ id: string } | null>;
   /**
    * Lot A: the profile's status and suspension scopes, for the dispatch points
    * that have to refuse a suspended agent — visits, milestones, leads.

@@ -11,6 +11,10 @@ import { releaseAgentMilestones } from '../order-milestones';
 import { findUserLabels, type UserLabel } from '../users';
 import { cancelAgentVisits } from '../visits';
 import { freezeWallet, unfreezeWallet } from '../wallets';
+import { revokeLiveGrantsForAgent, revokeLiveGrantsOnParty } from '../access-grants';
+import { deactivateQrsFor } from '../qr';
+import { releaseLeadsHeldBy } from '../leads';
+import { accountClosedAt, assertNotClosed } from '../../shared/party-status';
 import { prismaSuspensionRepository as repository } from './prisma-suspension.repository';
 import type { PartyType } from './suspension.repository';
 
@@ -46,6 +50,17 @@ import type { PartyType } from './suspension.repository';
  *                    refused with 409 WALLET_FROZEN.
  *   BLOCK_SIGNIN     `User.isActive` goes false and every refresh token is
  *                    revoked.
+ *
+ * Account lifecycle (2 Oct 2026): BLOCK_NEW and BLOCK_SIGNIN on a publisher,
+ * an advertiser or an agent also close the doors — every live access grant
+ * (an agent's own, or the ones ON a publisher's or advertiser's account) is
+ * revoked and the party's QR codes are deactivated; STOP_OPEN_WORK on an
+ * agent hands their open leads back to the pool. Neither comes back on
+ * reinstatement: a grant is asked for again, a code is issued again.
+ * Reinstating BLOCK_SIGNIN on a closed account is refused (409
+ * ACCOUNT_CLOSED). A user deactivation suspends the user's profiles with
+ * BLOCK_NEW (`suspendForUserDeactivation`), and the reactivation lifts
+ * exactly what it placed (`reinstateAfterUserReactivation`).
  *
  * Two rules the whole module turns on. Nothing here touches a wallet balance:
  * money that has to come back goes through the refund desk, which is a
@@ -104,6 +119,11 @@ export type SuspensionEffects = {
   releasedOrderIds: string[];
   cancelledVisitIds: string[];
   releasedMilestoneIds: string[];
+  /** Account lifecycle: an agent's open leads handed back to the pool (STOP_OPEN_WORK). */
+  releasedLeadIds: string[];
+  /** Account lifecycle: live access grants revoked, and whether the party's QR codes were deactivated (BLOCK_NEW / BLOCK_SIGNIN). */
+  grantsRevoked: number;
+  qrDeactivated: boolean;
   /** One per campaign: what the refund desk was asked for, and whether it took. */
   refunds: { campaignId: string; amount: string; requested: boolean; note?: string }[];
   walletFrozen: boolean;
@@ -117,13 +137,22 @@ const noEffects = (): SuspensionEffects => ({
   releasedOrderIds: [],
   cancelledVisitIds: [],
   releasedMilestoneIds: [],
+  releasedLeadIds: [],
+  grantsRevoked: 0,
+  qrDeactivated: false,
   refunds: [],
   walletFrozen: false,
   signinBlocked: false,
 });
 
-export type SuspendInput = { scopes: SuspensionScope[]; reason: string; byUserId: string };
-export type ReinstateInput = { scopes?: SuspensionScope[]; reason: string; byUserId: string };
+/**
+ * Account lifecycle: why a step happened when it was not ops pressing
+ * Suspend — recorded on the event's metadata so the reactivation can tell
+ * the BLOCK_NEW a deactivation placed from one ops placed.
+ */
+export type SuspensionCause = 'USER_DEACTIVATED' | 'USER_REACTIVATED';
+export type SuspendInput = { scopes: SuspensionScope[]; reason: string; byUserId: string; cause?: SuspensionCause };
+export type ReinstateInput = { scopes?: SuspensionScope[]; reason: string; byUserId: string; cause?: SuspensionCause };
 
 const unique = (scopes: SuspensionScope[]): SuspensionScope[] => [...new Set(scopes)];
 
@@ -244,6 +273,7 @@ export async function suspendParty(
     reason: input.reason,
     byUserId: input.byUserId,
     at,
+    ...(input.cause ? { metadata: { cause: input.cause, added } } : {}),
   });
 
   const effects = await applySuspension(partyType, party, scopes, input, at);
@@ -295,6 +325,10 @@ export async function reinstateParty(
   const lifted = requested.length === 0 ? before : requested.filter((scope) => before.includes(scope));
   const next = before.filter((scope) => !lifted.includes(scope));
 
+  // Account lifecycle (2 Oct 2026): a closed account never signs in again —
+  // lifting its sign-in block is refused before anything is written.
+  if (lifted.includes('BLOCK_SIGNIN') && party.userId) assertNotClosed(await accountClosedAt(party.userId));
+
   await repository.setScopes(partyType, partyId, {
     scopes: next,
     // The CHECK on each table ties the three columns to the scope list: no
@@ -311,6 +345,7 @@ export async function reinstateParty(
     scopes: lifted,
     reason: input.reason,
     byUserId: input.byUserId,
+    ...(input.cause ? { metadata: { cause: input.cause } } : {}),
   });
 
   await applyReinstatement(partyType, party, lifted, input);
@@ -412,7 +447,20 @@ async function applySuspension(
       effects.releasedOrderIds.push(...(await releaseAgentOffers(party.id, 'SUSPENDED')));
       effects.cancelledVisitIds.push(...(await cancelAgentVisits(party.id, 'SUSPENDED')));
       effects.releasedMilestoneIds.push(...(await releaseAgentMilestones(party.id, 'SUSPENDED')));
+      // Account lifecycle (2 Oct 2026): and the leads they hold go back to the pool.
+      effects.releasedLeadIds.push(
+        ...(await releaseLeadsHeldBy(party.id, `Agent suspended: ${input.reason}`, at).catch((err) => {
+          logger.warn('Suspension could not release the agent\'s leads', { agentId: party.id, err: String(err) });
+          return [] as string[];
+        })),
+      );
     }
+  }
+
+  // Account lifecycle (2 Oct 2026): nothing new and no sign-in means no way
+  // in on somebody else's authority either — the grants close and the codes go.
+  if (partyType !== 'LISTING' && (scopes.includes('BLOCK_NEW') || scopes.includes('BLOCK_SIGNIN'))) {
+    await closeDoors(partyType, party.id, input.byUserId, effects);
   }
 
   if (scopes.includes('FREEZE_WALLET')) {
@@ -488,6 +536,89 @@ async function applyReinstatement(
   if (lifted.includes('BLOCK_SIGNIN') && party.userId) {
     await repository.setUserActive(party.userId, true);
   }
+}
+
+/**
+ * Account lifecycle (2 Oct 2026): the live access grants and the QR codes of
+ * a party blocked from new work or from signing in. An agent's own grants
+ * (the accounts they were lent) close; a publisher's or advertiser's grants
+ * are the ones ON their account. Never fails the suspension — a door left
+ * open is logged for ops, and the suspension still stands.
+ */
+async function closeDoors(
+  partyType: Exclude<PartyType, 'LISTING'>,
+  partyId: string,
+  byUserId: string,
+  effects: SuspensionEffects,
+): Promise<void> {
+  try {
+    effects.grantsRevoked +=
+      partyType === 'AGENT'
+        ? await revokeLiveGrantsForAgent(partyId, byUserId)
+        : await revokeLiveGrantsOnParty(partyType === 'PUBLISHER' ? { publisherId: partyId } : { advertiserId: partyId }, byUserId);
+  } catch (err) {
+    logger.warn('Suspension could not revoke the live access grants', { partyType, partyId, err: String(err) });
+  }
+  try {
+    await deactivateQrsFor(partyType, partyId);
+    effects.qrDeactivated = true;
+  } catch (err) {
+    logger.warn('Suspension could not deactivate the QR codes', { partyType, partyId, err: String(err) });
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* A user deactivation and its reactivation                            */
+/* ------------------------------------------------------------------ */
+
+const DEACTIVATION_SCOPES: SuspensionScope[] = ['BLOCK_NEW'];
+
+/**
+ * Account lifecycle (2 Oct 2026): "Deactivate" on a user also stops their
+ * publisher, advertiser and agent profiles taking new work — listings stop
+ * being bookable, campaigns do not start, no offer reaches the agent. Each is
+ * an ordinary BLOCK_NEW suspension, with `cause: USER_DEACTIVATED` on its
+ * event; a profile already blocked from new work is left alone, so the
+ * reactivation never lifts a block somebody else placed.
+ */
+export async function suspendForUserDeactivation(
+  userId: string,
+  byUserId: string,
+  reason = 'The account was deactivated',
+): Promise<{ partyType: PartyType; partyId: string }[]> {
+  const suspended: { partyType: PartyType; partyId: string }[] = [];
+  for (const { partyType, partyId } of await repository.partiesOfUser(userId)) {
+    const party = await repository.findParty(partyType, partyId);
+    if (!party || DEACTIVATION_SCOPES.every((scope) => party.scopes.includes(scope))) continue;
+    await suspendParty(partyType, partyId, { scopes: DEACTIVATION_SCOPES, reason, byUserId, cause: 'USER_DEACTIVATED' });
+    suspended.push({ partyType, partyId });
+  }
+  return suspended;
+}
+
+/**
+ * The reactivation's half: lifts BLOCK_NEW from each profile only where the
+ * newest event that touched BLOCK_NEW is the deactivation's own suspension.
+ * A later reinstatement means there is nothing to lift; a later (or earlier,
+ * un-lifted) suspension by ops means the block is theirs and stays.
+ */
+export async function reinstateAfterUserReactivation(
+  userId: string,
+  byUserId: string,
+  reason = 'The account was reactivated',
+): Promise<{ partyType: PartyType; partyId: string }[]> {
+  const reinstated: { partyType: PartyType; partyId: string }[] = [];
+  for (const { partyType, partyId } of await repository.partiesOfUser(userId)) {
+    const party = await repository.findParty(partyType, partyId);
+    if (!party?.scopes.includes('BLOCK_NEW')) continue;
+    const events = await repository.listEvents(partyType, partyId, EVENT_LIMIT);
+    const last = events.find((event) => event.scopes.includes('BLOCK_NEW'));
+    const cause = (last?.metadata as { cause?: unknown } | null | undefined)?.cause;
+    if (last?.action !== 'SUSPEND' || cause !== 'USER_DEACTIVATED') continue;
+    await reinstateParty(partyType, partyId, { scopes: DEACTIVATION_SCOPES, reason, byUserId, cause: 'USER_REACTIVATED' });
+    reinstated.push({ partyType, partyId });
+  }
+  return reinstated;
 }
 
 /**

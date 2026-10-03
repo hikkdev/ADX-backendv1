@@ -217,10 +217,11 @@ export async function liveAgents(filter: LiveFilter = {}, now = new Date()): Pro
   const rules = rulesOf(settings);
   const [active, fixes] = await Promise.all([repository.activeAgents({ city: filter.city }), listLastFixes(new Date(now.getTime() - 24 * 60 * 60 * 1000))]);
   const byId = new Map(fixes.map((fix) => [fix.agentId, fix]));
-  // An agent with a fix but not in the active list (held, exited, another city): still shown when the filter is not by city.
+  // Account lifecycle (2 Oct 2026): the map shows working agents only. An agent
+  // with a fix who is not in that list (held, suspended, deactivated, exited)
+  // used to be drawn anyway; the owner's rule is that work only goes to — and
+  // the map only shows — the agents who can take it.
   const known = new Map(active.map((agent) => [agent.id, agent]));
-  const extra = fixes.map((fix) => fix.agentId).filter((id) => !known.has(id));
-  if (extra.length > 0 && !filter.city) for (const agent of await repository.agentSummaries(extra)) known.set(agent.id, agent);
 
   const rows: LiveAgent[] = [];
   for (const agent of known.values()) {

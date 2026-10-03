@@ -23,7 +23,7 @@ const { repository, otp, password, notifications } = vi.hoisted(() => ({
     findUserById: vi.fn(),
     promoteInvitee: vi.fn(),
   },
-  otp: { sendOtp: vi.fn(), verifyOtp: vi.fn(), normalizeMobile: vi.fn((m: string) => m) },
+  otp: { stampProvenEmail: vi.fn(), sendOtp: vi.fn(), verifyOtp: vi.fn(), normalizeMobile: vi.fn((m: string) => m) },
   password: { hashPassword: vi.fn(async () => 'hashed') },
   notifications: { notify: vi.fn() },
 }));
@@ -44,7 +44,7 @@ import {
 
 const invite = (over: Record<string, unknown> = {}) => ({
   id: 'inv_1',
-  email: 'new.admin@adx.co',
+  email: 'new.admin@adx.in',
   method: 'PASSWORD',
   roleConfigId: 'rc_1',
   tokenHash: 'hash',
@@ -69,7 +69,7 @@ beforeEach(() => {
   repository.findUserById.mockResolvedValue({ id: 'usr_new', email: null, mobile: '+919845012210', name: null });
   repository.promoteInvitee.mockResolvedValue({
     id: 'usr_new',
-    email: 'new.admin@adx.co',
+    email: 'new.admin@adx.in',
     mobile: '+919845012210',
     name: 'New Admin',
     roles: [{ role: 'ADMIN' }],
@@ -81,7 +81,7 @@ beforeEach(() => {
 
 describe('issuing an invitation', () => {
   it('stores a hashed token, sends the link and dates it a week out', async () => {
-    const view = await createInvite({ email: 'new.admin@adx.co', roleConfigId: 'rc_1', method: 'PASSWORD' }, 'adm_1');
+    const view = await createInvite({ email: 'new.admin@adx.in', roleConfigId: 'rc_1', method: 'PASSWORD' }, 'adm_1');
 
     const [data] = repository.create.mock.calls[0] as [Record<string, unknown>];
     expect(String(data['tokenHash'])).toHaveLength(64);
@@ -95,23 +95,23 @@ describe('issuing an invitation', () => {
     expect(userId).toBeNull();
     expect(vars['url']).toContain('?token=');
     expect(vars['url']).not.toContain(String(data['tokenHash']));
-    expect(opts).toMatchObject({ recipient: { email: 'new.admin@adx.co' }, immediate: true });
+    expect(opts).toMatchObject({ recipient: { email: 'new.admin@adx.in' }, immediate: true });
     expect(view.status).toBe('OPEN');
   });
 
   it('refuses an address that already has an account, or an open invitation', async () => {
     repository.findUserByEmail.mockResolvedValue({ id: 'usr_1' });
-    await expect(createInvite({ email: 'taken@adx.co', method: 'PASSWORD' }, 'adm_1')).rejects.toMatchObject({ statusCode: 409 });
+    await expect(createInvite({ email: 'taken@adx.in', method: 'PASSWORD' }, 'adm_1')).rejects.toMatchObject({ statusCode: 409 });
 
     repository.findUserByEmail.mockResolvedValue(null);
     repository.findOpenByEmail.mockResolvedValue(invite());
-    await expect(createInvite({ email: 'new.admin@adx.co', method: 'PASSWORD' }, 'adm_1')).rejects.toMatchObject({ statusCode: 409 });
+    await expect(createInvite({ email: 'new.admin@adx.in', method: 'PASSWORD' }, 'adm_1')).rejects.toMatchObject({ statusCode: 409 });
     expect(repository.create).not.toHaveBeenCalled();
   });
 
   it('refuses a console role that does not exist', async () => {
     repository.roleConfigExists.mockResolvedValue(false);
-    await expect(createInvite({ email: 'new.admin@adx.co', roleConfigId: 'rc_none', method: 'PASSWORD' }, 'adm_1')).rejects.toMatchObject({
+    await expect(createInvite({ email: 'new.admin@adx.in', roleConfigId: 'rc_none', method: 'PASSWORD' }, 'adm_1')).rejects.toMatchObject({
       statusCode: 404,
     });
   });
@@ -138,7 +138,7 @@ describe('resending and revoking', () => {
 describe('what the accept screen may read', () => {
   it('names the address only for a live invitation', async () => {
     repository.findByTokenHash.mockResolvedValue(invite());
-    await expect(describeInvite('raw')).resolves.toMatchObject({ email: 'new.admin@adx.co', valid: true });
+    await expect(describeInvite('raw')).resolves.toMatchObject({ email: 'new.admin@adx.in', valid: true });
 
     repository.findByTokenHash.mockResolvedValue(invite({ revokedAt: new Date() }));
     await expect(describeInvite('raw')).resolves.toEqual({ email: '', method: 'PASSWORD', expiresAt: null, valid: false });
@@ -177,7 +177,7 @@ describe('accepting it', () => {
 
     expect(otp.verifyOtp).toHaveBeenCalledWith('+919845012210', '123456', 'REGISTER');
     expect(repository.promoteInvitee).toHaveBeenCalledWith(
-      expect.objectContaining({ inviteId: 'inv_1', userId: 'usr_new', email: 'new.admin@adx.co', roleConfigId: 'rc_1', passwordHash: 'hashed' }),
+      expect.objectContaining({ inviteId: 'inv_1', userId: 'usr_new', email: 'new.admin@adx.in', roleConfigId: 'rc_1', passwordHash: 'hashed' }),
     );
     expect(result).toMatchObject({ stage: 'ACCEPTED', roles: ['ADMIN'] });
   });

@@ -301,8 +301,15 @@ function ownerFor(lead: Lead, actor: SendInput['actor']): { byAgentId: string | 
   return { byAgentId: actor.agentId ?? lead.assignedAgentId ?? null, byUserId: actor.userId };
 }
 
-/** Hands a rendered message to the channel's adapter. SMS and email go through the dispatcher's one door. */
-async function dispatch(lead: Lead, channel: LeadChannelValue, conversation: LeadConversation, copy: { body: string; subject: string | null; templateKey: string | null }, vars: CopyVars): Promise<{ ok: true; providerId: string | null; status: 'SENT' | 'QUEUED' } | { ok: false; code: 'NOT_CONFIGURED' | 'NO_WINDOW' | 'NO_TEMPLATE' | 'PROVIDER_ERROR'; message: string }> {
+/**
+ * Hands a rendered message to the channel's adapter. SMS and email go through
+ * the dispatcher's one door.
+ *
+ * `now` is the caller's clock, not `new Date()`: the window rule has to be
+ * judged at the moment the send is being made, which for a queued message the
+ * tick is flushing is the tick's instant, and which a test pins.
+ */
+async function dispatch(lead: Lead, channel: LeadChannelValue, conversation: LeadConversation, copy: { body: string; subject: string | null; templateKey: string | null }, vars: CopyVars, now: Date): Promise<{ ok: true; providerId: string | null; status: 'SENT' | 'QUEUED' } | { ok: false; code: 'NOT_CONFIGURED' | 'NO_WINDOW' | 'NO_TEMPLATE' | 'PROVIDER_ERROR'; message: string }> {
   if (channel === 'SMS' || channel === 'EMAIL') {
     const result = await notify(
       'LEAD_OUTREACH',
@@ -317,7 +324,7 @@ async function dispatch(lead: Lead, channel: LeadChannelValue, conversation: Lea
   }
   if (channel === 'WHATSAPP') {
     const to = (lead.phoneNormalised ?? lead.phone)!;
-    if (windowOpen(conversation, new Date())) {
+    if (windowOpen(conversation, now)) {
       const outcome = await whatsappAdapter.sendText({ to, text: copy.body });
       return outcome.ok ? { ok: true, providerId: outcome.providerId, status: 'SENT' } : outcome;
     }
@@ -327,12 +334,12 @@ async function dispatch(lead: Lead, channel: LeadChannelValue, conversation: Lea
     return outcome.ok ? { ok: true, providerId: outcome.providerId, status: 'SENT' } : outcome;
   }
   if (channel === 'INSTAGRAM' || channel === 'MESSENGER') {
-    if (!conversation.providerThreadId || !windowOpen(conversation, new Date())) return { ok: false, code: 'NO_WINDOW', message: 'Replies only, inside the window' };
+    if (!conversation.providerThreadId || !windowOpen(conversation, now)) return { ok: false, code: 'NO_WINDOW', message: 'Replies only, inside the window' };
     const outcome = await metaDmAdapter.sendText(channel, { to: conversation.providerThreadId, text: copy.body });
     return outcome.ok ? { ok: true, providerId: outcome.providerId, status: 'SENT' } : outcome;
   }
   if (channel === 'GOOGLE_BUSINESS') {
-    if (!conversation.providerThreadId || !windowOpen(conversation, new Date())) return { ok: false, code: 'NO_WINDOW', message: 'Replies only, inside the window' };
+    if (!conversation.providerThreadId || !windowOpen(conversation, now)) return { ok: false, code: 'NO_WINDOW', message: 'Replies only, inside the window' };
     const outcome = await googleBusinessAdapter.sendText({ to: conversation.providerThreadId, text: copy.body });
     return outcome.ok ? { ok: true, providerId: outcome.providerId, status: 'SENT' } : outcome;
   }
@@ -387,7 +394,7 @@ export async function sendMessage(input: SendInput, now = new Date()): Promise<S
     return { outcome: 'QUEUED', message, scheduledFor: ruling.deferUntil };
   }
 
-  const sent = await dispatch(lead, channel, conversation, copy, vars);
+  const sent = await dispatch(lead, channel, conversation, copy, vars, now);
   if (!sent.ok) {
     const reason = sent.code === 'PROVIDER_ERROR' ? 'PROVIDER_ERROR' : sent.code;
     if (input.source !== 'SEQUENCE' && sent.code === 'PROVIDER_ERROR') {
@@ -415,7 +422,7 @@ export async function flushQueued(now = new Date(), limit = 100): Promise<{ sent
     const channel = row.channel as LeadChannelValue;
     const conversation = await ensureConversation(lead, channel);
     const vars = await copyVarsFor(lead, { userId: row.byUserId, agentId: row.byAgentId });
-    const outcome = await dispatch(lead, channel, conversation, { body: row.body, subject: null, templateKey: row.templateKey }, vars);
+    const outcome = await dispatch(lead, channel, conversation, { body: row.body, subject: null, templateKey: row.templateKey }, vars, now);
     if (outcome.ok) {
       await repository.updateMessage(row.id, { status: 'SENT', providerId: outcome.providerId, scheduledFor: null, at: now, error: null });
       await repository.updateConversation(conversation.id, { lastOutboundAt: now });

@@ -5,7 +5,7 @@ One overview read per user section — package O-B, 15 September 2026.
 ## Routes
 
 ```
-GET /section-overviews/:section?from=YYYY-MM-DD&to=YYYY-MM-DD&city=   ADMIN — :section is publishers | advertisers | agents | print-partners | employees | users | leads (LH9); cached 60 s per section + window + city
+GET /section-overviews/:section?from=YYYY-MM-DD&to=YYYY-MM-DD&city=   ADMIN — :section is publishers | advertisers | agents | print-partners | employees | users | leads (LH9) | listings (2 Oct 2026) | campaigns (2 Oct 2026); cached 60 s per section + window + city
 ```
 
 `from` and `to` are inclusive Indian days (the window opens at `from`'s IST
@@ -51,7 +51,9 @@ groups by the day directly.
 What another module already answers is carried through its export, never
 re-derived: `supply.supplyFunnel`, `advertisers.advertiserFunnel`,
 `employees.employeesOverview` and `employees.workloadReport`,
-`agents.getLeaderboardForCity`, and the four label lookups
+`agents.getLeaderboardForCity`, `agents.agentCostOverWindow` (CP-2 — a salary
+record is a row, so the money is aggregated where it is owned and only the
+total crosses the boundary), and the four label lookups
 (`findPublisherLabels`, `findAdvertiserLabels`, `findAgentLabels`,
 `findPrintPartnerLabels`). Both funnels are the platform's state now — the
 exports take no window — and are said to be.
@@ -62,7 +64,8 @@ exports take no window — and are said to be.
 `shared/pagination`, `shared/kyc-state` (the party-level where fragments),
 `shared/database` (repository only). Modules: `supply`, `advertisers`,
 `agents`, `employees`, `print-partners`, `publishers`, `pricing`, and since
-LH9 `leads` (`leadFunnel`, `LEAD_STAGES`) — exports only.
+LH9 `leads` (`leadFunnel`, `LEAD_STAGES`), and since 2 Oct 2026 `campaigns`
+(`launchQueueSummary`, `WAITING_REASONS`) — exports only.
 
 **The city facet (Lot X-B).** `?city=` is a slug (the console's older links
 still pass a name — either resolves) — resolved once per read through
@@ -220,6 +223,100 @@ hunt's money (`money.*`, the cost per activation) is scoped by the
 | `conversion.pipelineValue` | The funnel's per-stage values folded |
 | `recycle` | Leads recycled in the window (`recycledAt`, stamped by the D11 recycle since LH9) and how many of those have converted since (`convertedAt >= recycledAt`, one raw COUNT) — the yield |
 | `money.incentives`, `money.topUps` | The same two sums as figures against the previous window |
+
+## listings (2 Oct 2026)
+
+The owner asked for an Overview tab first on Listings like every other
+section's. City: `Listing.cityId` / `Listing.city`, the listing's own. A
+**booking** is a `CampaignSpot` on a campaign paid in the window, neither
+the spot nor the campaign cancelled (the admin overview's breakdown counts
+the same rows by listing); the **GMV** is `EarningAccrual.gross` over the
+window's days, the column the publishers overview calls GMV.
+
+| Field | What it is |
+| --- | --- |
+| `tiles.total` | Listings created before the window's close, every status (against the previous close) |
+| `tiles.live`, `tiles.awaitingReview` | ACTIVE / PENDING_REVIEW now (states) |
+| `tiles.suspended` | Status SUSPENDED or any `suspensionScopes` in force now (state) |
+| `tiles.newInWindow` | `createdAt` in the window |
+| `tiles.published` | `publishedAt` in the window — the published series' total |
+| `tiles.bookings` | Booked spots, as above |
+| `money.gmv` | Accrual gross, as above |
+| `series.newListings`, `series.published` | `createdAt` / `publishedAt` by day |
+| `work.renewals` | The renewals tab's queue counted: a leased / licensed / permitted spot (`rightsBasis` not OWNED) whose `rightsValidUntil` falls within 60 days (`due`) or is past (`lapsed`), in the statuses `supply.rightsDue` reads |
+| `work.claimsOpen` | `ListingClaim` PENDING |
+| `work.verification` | The verification tab's queue counted: ACTIVE or SUSPENDED listings whose `verificationExpiresAt` falls within the widest risk window (`supply.RISK_WINDOW_DAYS`, 15 days) or is past |
+| `breakdowns.byStatus` | Listings per status now, in the lifecycle's order; `/listings/directory?status=` |
+| `breakdowns.byCity` | Keyed city rows (Lot X-B): listings, the live ones, the accrual gross in the window; `/listings?city=` narrows this overview |
+| `breakdowns.byCategory` | Listings, live ones and accrual gross per category; `/listings/directory?category=` |
+| `breakdowns.byPublisher` | The ten publishers holding the most listings (unclaimed ones left out), with their live count, labelled through `publishers.findPublisherLabels`; `/publishers/:id` |
+
+The publishers overview's category rows link to `/listings/directory?category=`
+too since the same day — the table moved off `/listings`.
+
+## campaigns (2 Oct 2026)
+
+The owner: "Campaigns section feels too weak here" — an Overview tab first on
+Campaigns, like Listings'. City: the market the campaign targets
+(`Campaign.targetMarketCityId`, the typed `targetMarket` the fallback). The
+**booked value** is the `total` of the campaigns PAID in the window
+(`paidAt`), cancelled ones left out — the column the advertisers overview's
+spend reads. Engagement is the `TrackingEvent` rows recorded in the window
+(`SCAN`, `VIEW`, `CTA_CLICK`, `FORM_SUBMIT`), through the campaign's codes.
+The launch queue is the `campaigns` module's (`launchQueueSummary`, the same
+gates and population as `GET /campaigns/launch-queue`) — carried, not re-derived.
+
+| Field | What it is |
+| --- | --- |
+| `tiles.live`, `tiles.scheduled`, `tiles.awaitingPayment` | LIVE / SCHEDULED / PENDING_PAYMENT now (states) |
+| `tiles.waitingToLaunch` | Paid (or reservation-fee-paid) and blocked — the launch queue's size (a state) |
+| `tiles.paid`, `tiles.completed`, `tiles.cancelled` | `paidAt` (not cancelled since), `completedAt`, `cancelledAt` in the window |
+| `tiles.scans`, `tiles.landingViews`, `tiles.ctaClicks`, `tiles.enquiries` | The engagement events in the window |
+| `money.bookedValue` | The booked value, as above |
+| `series.bookedValue`, `series.scans` | `paidAt` by day (money), SCAN events by day |
+| `work.launchingSoon` | SCHEDULED campaigns whose flight overlaps the next 7 days, today in India included (flight days are UTC midnights); `href` the directory on `status=SCHEDULED&from=<today>&to=<today+6>`, the same overlap |
+| `work.endingSoon` | LIVE campaigns ending within the next 7 days; `href` the directory on `status=LIVE&sort=ENDING_SOON` |
+| `work.waitingToLaunch` | `{ total, href: /campaigns/launch-queue, byReason }` — one `CountRow` per reason (`RESERVATION_FEE`, `PAYMENT`, `DESIGN_QUOTE`, `KYC`, `ARTWORK`, `PUBLISHER`, `AGENT`), each `href` the queue on that reason; a campaign waiting on two counts under both |
+| `breakdowns.byStatus` | Campaigns per status now, in the lifecycle's order; `/campaigns/directory?status=` |
+| `breakdowns.byCity` | Keyed city rows (Lot X-B): campaigns, the live ones, the booked value in the window; `/campaigns?city=` narrows this overview |
+| `breakdowns.byGoal` | Campaigns and live ones per goal; `/campaigns/directory?goal=` |
+| `breakdowns.byAdvertiser` | The ten advertisers whose campaigns paid in the window are worth the most — `{ key, label, displayId, href: /advertisers/:id, amount, count }`, labelled through `advertisers.findAdvertiserLabels` |
+
+## Cost per onboarding (CP-2, 23 Sep 2026)
+
+Three of the overviews carry a `cost` block: **publishers** and
+**advertisers** get their own side's figure, **agents** the blended one.
+
+This module contributes only the denominator — `onboardingsByProvenance`, a
+count of accounts that finished onboarding in the window split by whether an
+agent brought them (the QR-14 `onboardedVia` stamp: `AGENT` or `QR`). The
+money is `agents.agentCostOverWindow`, because a salary record is a row and
+this port is aggregates only.
+
+```
+cost.perOnboarding      = (salary committed + rewards paid) / agent-led onboardings
+cost.allInPerOnboarding = the same, with the per-onboarding commission added back
+```
+
+Four decisions worth keeping straight:
+
+1. **The denominator is agent-led only.** An account that signed itself up
+   cost no agent anything; folding it in would flatter the figure every
+   month. `onboardings.selfServe` is reported beside it, not hidden.
+2. **The commission sits outside the basis.** It is the one payment that
+   scales exactly with the thing being counted, so putting it in both the
+   numerator and its own trigger tells you nothing the rate did not.
+   `allInPerOnboarding` is there for anyone who wants the whole bill.
+3. **Null is "not recorded", never "free".** Nothing onboarded, or no salary
+   on record for any agent there, both answer null. A `₹0.00` would say the
+   opposite of what is true, and the tiles print "Not recorded" and say which
+   it is.
+4. **The blended figure is not the two sides added up.** An agent holding
+   both roles is counted on both, because their salary genuinely buys both.
+
+`byCity` folds the two halves together by city key — the money by the agent's
+own city, the onboardings by the party's — and the console draws it as a
+"Cost each" column on the table each of those pages already has.
 
 ## What the platform does not record
 

@@ -28,8 +28,8 @@ const order = {
   currency: 'INR',
   customer: { id: 'adv_1', name: 'Anita', email: 'anita@example.com', mobile: '+919999999999' },
   description: 'Campaign ADX-CMP-2026-482913',
-  returnUrl: 'https://app.adx.local/pay/return',
-  notifyUrl: 'https://api.adx.local/api/v1/webhooks/razorpay',
+  returnUrl: 'https://app.adx.in/pay/return',
+  notifyUrl: 'https://api.adx.in/api/v1/webhooks/razorpay',
 };
 
 describe('razorpay adapter', () => {

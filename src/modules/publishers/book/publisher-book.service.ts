@@ -21,6 +21,7 @@ export type PublisherBookRow = {
   phone: string;
   city: string | null;
   address: string | null;
+  postalCode: string | null;
   kycStatus: string;
   onboardingStatus: string;
   active: boolean;
@@ -41,6 +42,7 @@ function toRow(publisher: BookPublisher, facts: PublisherFacts | undefined): Pub
     phone: publisher.mobile,
     city: publisher.city,
     address: publisher.address,
+    postalCode: publisher.postalCode,
     kycStatus: publisher.kycStatus,
     onboardingStatus: publisher.onboardingStatus,
     active,

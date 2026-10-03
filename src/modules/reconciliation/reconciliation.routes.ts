@@ -15,20 +15,20 @@ export const reconciliationRouter = Router();
 reconciliationRouter.use(authenticate);
 reconciliationRouter.use(requireRole('ADMIN'));
 
-reconciliationRouter.get('/profiles', asyncHandler(h.listProfilesHandler));
+reconciliationRouter.get('/profiles', requirePermission('finance.view'), asyncHandler(h.listProfilesHandler));
 reconciliationRouter.post('/profiles', requirePermission('finance.edit'), asyncHandler(h.createProfileHandler));
 
-reconciliationRouter.get('/imports', asyncHandler(h.listImportsHandler));
+reconciliationRouter.get('/imports', requirePermission('finance.view'), asyncHandler(h.listImportsHandler));
 reconciliationRouter.post('/imports', requirePermission('finance.edit'), csvUploadMiddleware, asyncHandler(h.importHandler));
 /* Lot G (Q125): one import's lines as a streamed CSV — match state, matched record, resolver. */
-reconciliationRouter.get('/imports/:id/export.csv', asyncHandler(h.exportImportHandler));
+reconciliationRouter.get('/imports/:id/export.csv', requirePermission('finance.export'), asyncHandler(h.exportImportHandler));
 
-reconciliationRouter.get('/lines', asyncHandler(h.listLinesHandler));
+reconciliationRouter.get('/lines', requirePermission('finance.view'), asyncHandler(h.listLinesHandler));
 /* Lot G (Q125): registered ahead of `/lines/:id/*` so "export.csv" is never read as an id. Do not reorder. */
-reconciliationRouter.get('/lines/export.csv', asyncHandler(h.exportLinesHandler));
+reconciliationRouter.get('/lines/export.csv', requirePermission('finance.export'), asyncHandler(h.exportLinesHandler));
 reconciliationRouter.post('/auto-match', requirePermission('finance.edit'), asyncHandler(h.autoMatchHandler));
 reconciliationRouter.post('/lines/:id/match', requirePermission('finance.edit'), asyncHandler(h.matchLineHandler));
 reconciliationRouter.post('/lines/:id/ignore', requirePermission('finance.edit'), asyncHandler(h.ignoreLineHandler));
 reconciliationRouter.post('/lines/:id/unmatch', requirePermission('finance.edit'), asyncHandler(h.unmatchLineHandler));
 
-reconciliationRouter.get('/summary', asyncHandler(h.summaryHandler));
+reconciliationRouter.get('/summary', requirePermission('finance.view'), asyncHandler(h.summaryHandler));

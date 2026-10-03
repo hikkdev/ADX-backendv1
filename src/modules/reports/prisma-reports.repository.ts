@@ -165,7 +165,7 @@ export const prismaReportsRepository: ReportsRepository = {
   },
 };
 
-/* ── The twelve reads ────────────────────────────────────────────── */
+/* ── The thirteen reads ────────────────────────────────────────────── */
 
 const sum = (value: Prisma.Decimal | null | undefined) => value ?? ZERO;
 

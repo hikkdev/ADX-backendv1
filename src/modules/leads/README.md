@@ -647,6 +647,40 @@ Tests: `__tests__/lh10-integrity.test.ts`.
 
 Tests: the recycle and its port in `__tests__/lh2-stages.test.ts`.
 
+## VH-2 — a vehicle as an ad spot (23 Sep 2026)
+
+A capture may carry a **registration number**: an auto, a taxi, a delivery
+van put up as a moving ad spot. Two things follow, and both matter.
+
+**The registration is the identity.** LH4's thirty-metre dedup is right for a
+wall, which stays where it is; an auto does not, and two agents can meet the
+same vehicle a kilometre apart on the same afternoon. So `Lead.vehicleNumber`
+is **unique across leads** and a second capture of the same plate is refused
+with `DUPLICATE_VEHICLE`, wherever the vehicle is standing.
+
+**The RC lookup fills the lead in.** `shared/integrations.lookupVehicleRc`
+(Cashfree's vehicle-RC endpoint, the same rail AG-4 gave the desk) answers
+the owner's name, the maker and model, the class, and the insurance, fitness
+and PUC dates. The capture uses it to name the lead (`Bajaj RE · KA01AB1234`
+rather than `Auto surface near MG Road`) and to fill the contact name, so the
+agent knocks on the window knowing who they are talking to. The answer is
+stored on `vehicleRcPayload` with `vehicleRcVerifiedAt`.
+
+**It is best effort, always.** The vendor is behind Cashfree's IP whitelist;
+until that clears it refuses, and a capture must survive that — the lead is
+created with the plate, `vehicleRcVerifiedAt` null, and the activity line
+says `(RC not checked)`. An agent standing in the street never loses a lead
+to a vendor.
+
+**What is not built, and why.** There is no bulk motor-vehicle lead feed and
+there is not going to be one: VAHAN's registry is not sold for lead
+generation, the authorised resellers answer single lookups keyed on a number
+you already hold, and using an owner's name and address from a compliance
+lookup to cold-call them is a consent problem. Capture-and-verify is the
+shape that is both legal and useful.
+
+Tests: `__tests__/lh4-capture.test.ts`.
+
 ## Routes
 
 | Route | Who | What |
@@ -799,3 +833,21 @@ no scraper and no partner feed behind it yet.
 - **Converting checks the phone against both account tables.** With no
   account named, the match is linked; a caller naming a different account
   than the phone belongs to is 409; with no match and nothing named, 400.
+
+## One clock (24 Sep 2026)
+
+`dispatch` takes the caller's `now` rather than reading `new Date()`. The
+24-hour window on WhatsApp, Instagram, Messenger and Google Business is
+judged at the moment the send is actually made — which for a queued message
+the tick is flushing is the tick's instant, not the moment the row was
+written. It had read wall-clock time, which made the rule untestable at a
+fixed instant and made `flushQueued` judge a delayed message against the
+wrong moment.
+
+## 26 Sep 2026 — the invite link answers the re-signed token
+
+`POST /j/:code/link` answers `accessToken` — the same session's token re-signed
+with the roles as they are now (`auth.reissueAccessToken`) — when the link put
+the account on a side its token did not carry, the way `POST /users/me/party`
+does (QR-2). No token is answered when the side was already held, or the token
+has no session to re-sign. Pinned in `__tests__/invite-link-token.test.ts`.

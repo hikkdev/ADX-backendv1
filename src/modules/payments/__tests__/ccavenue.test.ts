@@ -17,8 +17,8 @@ const order = {
   customer: { id: 'adv_1', name: 'Anita', email: 'anita@example.com', mobile: '+919999999999' },
   description: 'Campaign ADX-CMP-2026-482913',
   // E9: the API's own return page, under the intent's one-time return token — never a UI page.
-  returnUrl: 'https://api.adx.local/api/v1/payments/pay_local_1/return?t=tok_return',
-  notifyUrl: 'https://api.adx.local/api/v1/webhooks/ccavenue',
+  returnUrl: 'https://api.adx.in/api/v1/payments/pay_local_1/return?t=tok_return',
+  notifyUrl: 'https://api.adx.in/api/v1/webhooks/ccavenue',
 };
 
 /** The kit's own vector shape: encrypt then decrypt is the identity, and the ciphertext is hex. */
@@ -56,7 +56,7 @@ describe('ccavenue adapter', () => {
     expect(result.checkout).toMatchObject({
       accessCode: 'AVXX',
       redirectUrl: 'https://test.ccavenue.com/transaction/transaction.do?command=initiateTransaction',
-      returnUrl: 'https://api.adx.local/api/v1/payments/pay_local_1/return?t=tok_return',
+      returnUrl: 'https://api.adx.in/api/v1/payments/pay_local_1/return?t=tok_return',
     });
     // The page the app is handed for afterwards is the API return page for this payment, carrying the token.
     const returnUrl = new URL(result.checkout['returnUrl'] as string);
@@ -69,8 +69,8 @@ describe('ccavenue adapter', () => {
       order_id: 'pay_local_1',
       currency: 'INR',
       amount: '34810.00',
-      redirect_url: 'https://api.adx.local/api/v1/webhooks/ccavenue',
-      cancel_url: 'https://api.adx.local/api/v1/webhooks/ccavenue',
+      redirect_url: 'https://api.adx.in/api/v1/webhooks/ccavenue',
+      cancel_url: 'https://api.adx.in/api/v1/webhooks/ccavenue',
       billing_name: 'Anita',
       merchant_param1: 'PAY-2026-000482',
     });

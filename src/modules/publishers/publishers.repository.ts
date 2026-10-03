@@ -1,9 +1,10 @@
+import type { AccountState, PartyAccountState, RosterStatus } from '../../shared/party-status';
 import type { KycQueueState } from '../../shared/kyc-state';
 import type { Provenance } from '../../shared/onboarding';
-import type { Gender, PartySizeBand } from '../../shared/database';
+import type { Gender, KycEntityType, PartySizeBand } from '../../shared/database';
 import type {
   KycStatus,
-  Listing,
+  ListingRead as Listing,
   ListingPhoto,
   Publisher,
   PublisherKyc,
@@ -51,6 +52,8 @@ export type NewPublisher = Partial<Provenance> & {
   address?: string;
   latitude?: number | null;
   longitude?: number | null;
+  /** Onboarding addresses (1 Oct 2026): the address's PIN code. */
+  postalCode?: string | null;
   gstin?: string;
   contactName?: string;
   contactMobile?: string;
@@ -71,6 +74,8 @@ export type NewPublisher = Partial<Provenance> & {
   mobile: string;
   email?: string;
   type?: PublisherType;
+  /** Chosen at the desk beside the account type; null until asked otherwise. */
+  entityType?: KycEntityType;
   city?: string;
   /** Lot X-B: the `City` row `city` denotes, stamped by the service through `pricing.withCityKey`; null for a typed town. */
   cityId?: string | null;
@@ -85,6 +90,8 @@ export type PublisherPatch = Partial<{
   /** QR-5: where the address is, when it came off the map or a search. */
   latitude: number | null;
   longitude: number | null;
+  /** Onboarding addresses (1 Oct 2026): the address's PIN code; null clears. */
+  postalCode: string | null;
   city: string;
   /** Lot X-B: rides with `city` — the service stamps it, a caller never sends it. */
   cityId: string | null;
@@ -95,6 +102,8 @@ export type PublisherPatch = Partial<{
   contactEmail: string;
   /** AG-5: the band ops sets — the withdrawal ladder and, since AG-5, the grade of agent the publisher's work is routed to. */
   sizeBand: PartySizeBand;
+  /** Phase D: the legal form the KYC verifies; null clears it back to what `type` says. */
+  entityType: KycEntityType | null;
 }>;
 
 export type KycDocuments = Partial<{
@@ -139,13 +148,31 @@ export const toAgentLabel = (agent: { id: string; displayId: string | null; user
 export type PublisherWithDetail = Publisher & {
   kyc: PublisherKyc | null;
   listings: (unknown & { _count?: { orders: number } })[];
-  user?: { closedAt: Date | null; closeReason: string | null } | null;
+  user?: { closedAt: Date | null; closeReason: string | null; isActive?: boolean } | null;
   agent?: PublisherAgentLabel | null;
 };
+
+/**
+ * 29 Sep 2026 (the party rosters, made uniform): one row of the console's
+ * roster — the publisher's own columns, the six KYC columns the state is
+ * derived from (never the document links), the spots counted rather than
+ * joined, whether the account is closed and who brought them.
+ */
+export type PublisherRosterRow = Publisher & {
+  kyc: { id: string; status: KycStatus; submittedAt: Date | null; requestedAt: Date | null; requestedChannel: string | null; method: string | null } | null;
+  listingCount: number;
+  user: { closedAt: Date | null; closeReason: string | null; displayId: string | null; isActive: boolean } | null;
+  agent: PublisherAgentLabel | null;
+};
+
+/** The roster's cuts as the repository takes them — the query, with the city's key resolved beside its spelling. */
+export type PublisherRosterFilter = PublisherRosterQuery & { cityId?: string | null };
 
 /** D7: a queue row — the publisher, its KYC row, and who brought them (or nobody). */
 export type KycQueueRow = Publisher & {
   kyc: PublisherKyc | null;
+  /** Account lifecycle: the account behind the party, for the row's `accountState`. */
+  user: { isActive: boolean; closedAt: Date | null } | null;
   agent: { id: string; displayId: string | null; user: { name: string | null } } | null;
 };
 
@@ -174,6 +201,12 @@ export type KycQueueFilter = {
    * lists submitted rows — or none of them (false).
    */
   requested?: boolean;
+  /**
+   * Account lifecycle (2 Oct 2026): the queue lists working accounts only —
+   * a suspended, deactivated or closed publisher is left out, and every count
+   * with it — unless the desk asks for the inactive (`?include=inactive`).
+   */
+  includeInactive?: boolean;
 };
 
 /** Lot D (Q42): what a decision writes beside the status. */
@@ -194,6 +227,8 @@ export type KycQueueRowWithSla = KycQueueRow & {
   /** N3-B: derived from the record and the mirror — the publisher is in exactly one of six states. */
   state: KycQueueState;
   kycId: string | null;
+  /** Account lifecycle: ACTIVE, SUSPENDED, DEACTIVATED or CLOSED (`shared/party-status`). */
+  accountState: AccountState;
   ageHours: number | null;
   slaBreached: boolean;
   assignedTo: { id: string; name: string | null } | null;
@@ -246,7 +281,12 @@ export const OCCUPYING_ORDER_STATUSES = [
   'COMPLETED',
 ] as const;
 
+/** 26 Sep 2026: what a visitor may know of a publisher — no contact data, no KYC detail. */
+export type PublicPublisherRow = { id: string; name: string; kycStatus: string; avatarUrl: string | null; liveListings: number };
+
 export interface PublishersRepository {
+  /** 26 Sep 2026: one publisher's public card, by id or display id; null when there is none, or it is closed to new business. */
+  findPublicCard(idOrDisplayId: string): Promise<PublicPublisherRow | null>;
   /** D7: the queue, oldest submission first — N3-B: every publisher not yet verified plus every publisher with a record, awaiting-documents rows by when the publisher arrived. */
   findKycQueue(filter: KycQueueFilter): Promise<KycQueueRow[]>;
   /** Lot N: the same rows, counted — the `requested` chip is read with that facet forced on. */
@@ -259,13 +299,22 @@ export interface PublishersRepository {
   create(data: NewPublisher): Promise<PublisherWithDetail>;
   findForAgent(agentId: string, category?: string): Promise<PublisherWithDetail[]>;
   /** Every publisher, for ADX's own roster. E10-1: `q` is name / display id / city / mobile contains. */
-  findAllForAdmin(category?: string, q?: string): Promise<PublisherWithDetail[]>;
-  /** E10-1: the roster on the list contract — the chips are `kycStatus`, counted with the KYC tab removed. */
-  findRosterPage(query: PublisherRosterQuery): Promise<{ items: PublisherWithDetail[]; total: number; counts: Record<string, number> }>;
+  /** Account lifecycle: `status` absent or ALL is everyone. */
+  findAllForAdmin(category?: string, q?: string, status?: RosterStatus): Promise<PublisherWithDetail[]>;
+  /**
+   * E10-1: the roster on the list contract — the chips are `kycStatus`, counted with the KYC tab removed.
+   * 29 Sep 2026: cut by KYC state, type and city beside the door, and the spots counted, not joined.
+   */
+  /** Account lifecycle: `statusCounts` — publishers per account state over the cuts, with the status facet removed. */
+  findRosterPage(
+    query: PublisherRosterFilter,
+  ): Promise<{ items: PublisherRosterRow[]; total: number; counts: Record<string, number>; statusCounts: Record<PartyAccountState, number> }>;
   findById(publisherId: string): Promise<PublisherWithDetail | null>;
   /** Without joins — for ownership and state checks. */
   findSummaryById(publisherId: string): Promise<Publisher | null>;
   findByUserId(userId: string): Promise<Publisher | null>;
+  /** BD-1: everything the availability grid draws over a window — the spots, the orders holding a slot, the live reservations, the blocks. */
+  findAvailability(publisherId: string, window: { from: Date; to: Date }): Promise<AvailabilityRows>;
   /** E7-3: the label per login, for the desks that name the party behind a user. */
   findLabelsByUserIds(userIds: string[]): Promise<PartyLabelRow[]>;
   /** The publisher's own spots, paged, with the three shelf counts. */
@@ -331,12 +380,13 @@ export interface PublishersRepository {
     /** Issued by `identifiers`; allocated in the service, never by the caller. */
     displayId?: string;
   }): Promise<Publisher>;
-  setUserProfile(userId: string, name: string, email?: string): Promise<unknown>;
+  /** The person's display name (an individual's, when the account has none) and email, given at registration. */
+  setUserProfile(userId: string, name: string | undefined, email?: string): Promise<unknown>;
   /** QR-5: the person's date of birth and gender, collected with the publisher's details. */
   setUserDetails(userId: string, data: { dateOfBirth?: Date; gender?: string }): Promise<unknown>;
   findUserMobile(
     userId: string,
-  ): Promise<{ mobile: string; name: string | null; avatarUrl: string | null } | null>;
+  ): Promise<{ mobile: string; name: string | null; avatarUrl: string | null; email?: string | null } | null>;
   claim(publisherId: string, agentId: string): Promise<unknown>;
   /** Publisher state only — expiring its QR codes is the qr module's job. */
   resetOnboardingState(publisherId: string): Promise<unknown>;
@@ -344,3 +394,25 @@ export interface PublishersRepository {
   /** K-B1: `{ id, label, displayId }` per id in one query — the QR desk names the code's subject with it. */
   findLabelsByIds(ids: string[]): Promise<{ id: string; label: string; displayId: string | null }[]>;
 }
+
+/** BD-1: the rows behind `availability.service#shapeAvailability`. */
+export type AvailabilityRows = {
+  listings: { id: string; displayId: string | null; title: string; category: string; city: string | null; slotsTotal: number; status: string }[];
+  orders: {
+    id: string;
+    listingId: string;
+    status: string;
+    startDate: Date | null;
+    endDate: Date | null;
+    campaignName: string | null;
+    campaignSpot: { campaign: { name: string } } | null;
+    advertiser: { name: string | null; advertiserProfile: { name: string; companyName: string | null } | null };
+  }[];
+  reservations: {
+    listingId: string;
+    startDate: Date | null;
+    endDate: Date | null;
+    campaign: { name: string; advertiser: { name: string; companyName: string | null } };
+  }[];
+  blocks: { id: string; listingId: string; from: Date; to: Date; reason: string | null }[];
+};

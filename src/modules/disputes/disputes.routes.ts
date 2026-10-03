@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { asyncHandler } from '../../shared/http';
-import { authenticate, requireRole } from '../../shared/auth';
+import { authenticate, requireRole, requirePermission } from '../../shared/auth';
 import {
   evidenceHandler,
   getHandler,
@@ -22,8 +22,8 @@ disputeRouter.use(authenticate);
 /* Self-serve first, ops second; the fixed paths sit above /:disputeId so
  * "my" and "summary" are never read as a case id. */
 disputeRouter.get('/my', asyncHandler(mineHandler));
-disputeRouter.get('/summary', requireRole('ADMIN'), asyncHandler(summaryHandler));
-disputeRouter.get('/', requireRole('ADMIN'), asyncHandler(queueHandler));
+disputeRouter.get('/summary', requireRole('ADMIN'), requirePermission('support.view'), asyncHandler(summaryHandler));
+disputeRouter.get('/', requireRole('ADMIN'), requirePermission('support.view'), asyncHandler(queueHandler));
 disputeRouter.post('/', asyncHandler(raiseHandler));
 
 disputeRouter.get('/:disputeId', asyncHandler(getHandler));
@@ -34,6 +34,6 @@ disputeRouter.post('/:disputeId/reopen', asyncHandler(reopenHandler));
 disputeRouter.post('/:disputeId/rate', asyncHandler(rateResolutionHandler));
 
 /* ADX decides. Every one of these is logged with who did it. */
-disputeRouter.patch('/:disputeId/status', requireRole('ADMIN'), asyncHandler(statusHandler));
-disputeRouter.post('/:disputeId/resolve', requireRole('ADMIN'), asyncHandler(resolveHandler));
-disputeRouter.post('/:disputeId/credit/release', requireRole('ADMIN'), asyncHandler(releaseCreditHandler));
+disputeRouter.patch('/:disputeId/status', requireRole('ADMIN'), requirePermission('support.edit'), asyncHandler(statusHandler));
+disputeRouter.post('/:disputeId/resolve', requireRole('ADMIN'), requirePermission('support.edit'), asyncHandler(resolveHandler));
+disputeRouter.post('/:disputeId/credit/release', requireRole('ADMIN'), requirePermission('finance.approve'), asyncHandler(releaseCreditHandler));

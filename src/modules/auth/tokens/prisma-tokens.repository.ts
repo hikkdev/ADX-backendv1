@@ -47,6 +47,10 @@ export const prismaTokensRepository: TokensRepository = {
     return result.count;
   },
 
+  async setLocation(sessionId: string, location: { city: string | null; region: string | null; country: string | null }) {
+    await prisma.refreshToken.updateMany({ where: { id: sessionId }, data: location });
+  },
+
   listActive(userId: string) {
     return prisma.refreshToken.findMany({
       where: { userId, revokedAt: null, expiresAt: { gt: new Date() } },
@@ -55,6 +59,9 @@ export const prismaTokensRepository: TokensRepository = {
         id: true,
         userAgent: true,
         ipAddress: true,
+        city: true,
+        region: true,
+        country: true,
         lastUsedAt: true,
         createdAt: true,
         expiresAt: true,

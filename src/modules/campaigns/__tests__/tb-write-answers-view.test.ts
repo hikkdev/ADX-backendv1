@@ -30,6 +30,8 @@ const { repository, listings, notifications, orders, audit, spotReviews } = vi.h
     findLandingPage: vi.fn(),
     updateLandingPage: vi.fn(),
     findLandingPageView: vi.fn(),
+    // The Campaigns lot: ADX's GET /campaigns/:id reads the gate facts for its "Placed by" line and waiting banner.
+    campaignGateFacts: vi.fn(async () => []),
   },
   listings: { getContentRules: vi.fn(async () => []), getListingWithPublisher: vi.fn(), listContentCategories: vi.fn() },
   notifications: { createNotification: vi.fn(async () => ({})) },

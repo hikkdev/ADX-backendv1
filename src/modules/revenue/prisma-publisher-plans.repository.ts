@@ -1,6 +1,7 @@
 import { Prisma, prisma } from '../../shared/database';
 import type { PublisherSubscription, SubscriptionTierName } from '../../shared/database';
 import { countsFrom, listArgs } from '../../shared/pagination';
+import { workingPublisherWhere } from '../../shared/party-status';
 import type {
   Activation,
   NewOrder,
@@ -262,7 +263,8 @@ export const prismaPublisherPlansRepository: PublisherPlansRepository = {
 
   async findEndingBetween(from: Date, to: Date) {
     return prisma.publisherSubscription.findMany({
-      where: { endsAt: { gt: from, lte: to } },
+      // Account lifecycle (2 Oct 2026): a suspended, deactivated or closed publisher is neither reminded nor renewed.
+      where: { endsAt: { gt: from, lte: to }, publisher: workingPublisherWhere() },
       include: {
         publisher: { select: { id: true, name: true, userId: true } },
         order: { select: { id: true, cycle: true, paidMethod: true } },

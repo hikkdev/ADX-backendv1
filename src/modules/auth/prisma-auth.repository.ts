@@ -1,4 +1,4 @@
-import { prisma } from '../../shared/database';
+import { prisma, USER_CREDENTIALS } from '../../shared/database';
 import type { AuthRepository } from './auth.repository';
 
 // The full join every non-publisher login response is built from.
@@ -16,21 +16,27 @@ const loginInclude = {
 // Applied only to the login reads, which are the hot path and return one row.
 const JOIN = { relationLoadStrategy: 'join' } as const;
 
+// 2 Oct 2026: the credential columns are omitted from every read by default
+// (shared/database GLOBAL_OMIT). The reads below that check a password or an
+// authenticator, or report `hasPassword`, opt back in by name — and their rows
+// leave only through auth.mapper, which never copies a secret.
+const CREDENTIALS = { omit: USER_CREDENTIALS } as const;
+
 export const prismaAuthRepository: AuthRepository = {
   findLoginUserById(userId: string) {
-    return prisma.user.findUnique({ ...JOIN, where: { id: userId }, include: loginInclude }) as never;
+    return prisma.user.findUnique({ ...JOIN, ...CREDENTIALS, where: { id: userId }, include: loginInclude }) as never;
   },
 
   findLoginUserByEmail(email: string) {
-    return prisma.user.findUnique({ ...JOIN, where: { email }, include: loginInclude }) as never;
+    return prisma.user.findUnique({ ...JOIN, ...CREDENTIALS, where: { email }, include: loginInclude }) as never;
   },
 
   async findLoginUsersByEmailInsensitive(email: string) {
     // Deliberately NOT Prisma's `mode: 'insensitive'`. That compiles to a
     // Postgres ILIKE, which treats `_` and `%` inside the *value* as pattern
     // wildcards — and here the value is an attacker-choosable Google address.
-    // A Workspace user holding `ad_in@adx.co` would match the row
-    // `admin@adx.co`, return exactly one row (so the ambiguity guard stays
+    // A Workspace user holding `ad_in@adx.in` would match the row
+    // `admin@adx.in`, return exactly one row (so the ambiguity guard stays
     // silent), and be handed that account's session.
     //
     // `lower() = lower()` is a true equality with no pattern semantics. The id
@@ -46,6 +52,7 @@ export const prismaAuthRepository: AuthRepository = {
 
     return prisma.user.findMany({
       ...JOIN,
+      ...CREDENTIALS,
       where: { id: { in: rows.map((row) => row.id) } },
       include: loginInclude,
     }) as never;
@@ -57,8 +64,9 @@ export const prismaAuthRepository: AuthRepository = {
 
   findUserWithRoles(userId: string) {
     // Refresh only needs the roles to re-sign an access token, so it
-    // deliberately skips the profile joins.
-    return prisma.user.findUnique({ where: { id: userId }, include: { roles: true } }) as never;
+    // deliberately skips the profile joins. The authenticator columns ride
+    // along for the must-enrol claim the refreshed token carries.
+    return prisma.user.findUnique({ ...CREDENTIALS, where: { id: userId }, include: { roles: true } }) as never;
   },
 
   findPublisherLoginUserById(userId: string) {
@@ -75,7 +83,8 @@ export const prismaAuthRepository: AuthRepository = {
   },
 
   findById(userId: string) {
-    return prisma.user.findUnique({ where: { id: userId } });
+    // The password change checks the current password against this row.
+    return prisma.user.findUnique({ ...CREDENTIALS, where: { id: userId } });
   },
 
   recordLogin(userId: string) {

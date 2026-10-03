@@ -86,4 +86,10 @@ export interface EmployeeRepository {
   create(data: EmployeeRecordInput & { displayId: string }): Promise<Employee>;
   update(userId: string, data: EmployeePatch): Promise<Employee>;
   remove(userId: string): Promise<unknown>;
+  /**
+   * Account lifecycle (2 Oct 2026): what makes an HR record history — its KYC
+   * record, and the desk work done as this person (interviews held, agents
+   * managed, departments headed, actions on other records).
+   */
+  findHistory(employeeId: string, userId: string): Promise<{ kycRecords: number; interviews: number; managedAgents: number; departmentsHeaded: number; actions: number }>;
 }

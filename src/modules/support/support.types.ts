@@ -58,6 +58,8 @@ export type NewTicket = {
   description: string;
   category: string;
   relatedOrderId?: string;
+  /** WG-1: the campaign the request is about. */
+  relatedCampaignId?: string;
   attachmentUrls: string[];
   /** 1–5, on a FEEDBACK ticket only. */
   rating?: number | null;

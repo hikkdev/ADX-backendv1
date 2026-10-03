@@ -10,6 +10,7 @@ import {
   createUser,
   getAllUsers,
   deleteUser,
+  getUserDeletability,
   updateUserByAdmin,
   getMyPreferences,
   saveMyPreferences,
@@ -37,6 +38,7 @@ import {
   listImpersonationsHandler,
 } from './impersonation/impersonation.controller';
 import * as contacts from './users-contacts.controller';
+import { sendMyEmailCode, verifyMyEmail } from './users-email.controller';
 
 export const userRouter = Router();
 
@@ -72,45 +74,50 @@ userRouter.delete('/me/contacts/:contactId', asyncHandler(contacts.removeMyConta
 userRouter.post('/me/contacts/:contactId/send-code', asyncHandler(contacts.sendMyContactCode));
 userRouter.post('/me/contacts/:contactId/verify', asyncHandler(contacts.verifyMyContact));
 userRouter.post('/me/contacts/:contactId/make-primary', asyncHandler(contacts.makeMyContactPrimary));
+/* ED-1: proving the account's own email — the step after a number-first sign-in. */
+userRouter.post('/me/email/send-code', asyncHandler(sendMyEmailCode));
+userRouter.post('/me/email/verify', asyncHandler(verifyMyEmail));
 
 // Admin only
-userRouter.get('/', requireRole('ADMIN'), asyncHandler(getAllUsers));
-userRouter.post('/', requireRole('ADMIN'), asyncHandler(createUser));
-userRouter.post('/roles', requireRole('ADMIN'), asyncHandler(assignRole));
+userRouter.get('/', requireRole('ADMIN'), requirePermission('system.view'), asyncHandler(getAllUsers));
+userRouter.post('/', requireRole('ADMIN'), requirePermission('system.edit'), asyncHandler(createUser));
+userRouter.post('/roles', requireRole('ADMIN'), requirePermission('system.edit'), asyncHandler(assignRole));
 
 /* Invitations to the console (Lot A, Q26). The flow lives in `auth`, which
  * owns credentials and the anonymous half at /auth/accept-invite; these are
  * the console's end of it, mounted where an admin looks for them. Registered
  * before '/:id' so "invites" is never read as a user id. */
-userRouter.post('/invites', requireRole('ADMIN'), asyncHandler(inviteUser));
-userRouter.get('/invites', requireRole('ADMIN'), asyncHandler(listUserInvites));
-userRouter.post('/invites/:id/resend', requireRole('ADMIN'), asyncHandler(resendUserInvite));
-userRouter.delete('/invites/:id', requireRole('ADMIN'), asyncHandler(revokeUserInvite));
+userRouter.post('/invites', requireRole('ADMIN'), requirePermission('system.edit'), asyncHandler(inviteUser));
+userRouter.get('/invites', requireRole('ADMIN'), requirePermission('system.view'), asyncHandler(listUserInvites));
+userRouter.post('/invites/:id/resend', requireRole('ADMIN'), requirePermission('system.edit'), asyncHandler(resendUserInvite));
+userRouter.delete('/invites/:id', requireRole('ADMIN'), requirePermission('system.delete'), asyncHandler(revokeUserInvite));
 
 /* Read-only impersonation (Lot A, Q27). Before '/:id' for the same reason.
  * `system.impersonate` is the permission behind it; the launch rule gives it
  * to an admin with no role config, so this is not a lockout. */
-userRouter.get('/impersonations', requireRole('ADMIN'), asyncHandler(listImpersonationsHandler));
-userRouter.post('/impersonations/:id/end', requireRole('ADMIN'), asyncHandler(endImpersonationHandler));
+userRouter.get('/impersonations', requireRole('ADMIN'), requirePermission('system.view'), asyncHandler(listImpersonationsHandler));
+userRouter.post('/impersonations/:id/end', requireRole('ADMIN'), requirePermission('system.accounts'), asyncHandler(endImpersonationHandler));
 
-userRouter.get('/:id', requireRole('ADMIN'), asyncHandler(getUserById));
-userRouter.patch('/:id', requireRole('ADMIN'), asyncHandler(updateUserByAdmin));
-userRouter.delete('/:id', requireRole('ADMIN'), asyncHandler(deleteUser));
-userRouter.put('/:id/role-config', requireRole('ADMIN'), asyncHandler(setRoleConfig));
-userRouter.post('/:id/2fa/reset', requireRole('ADMIN'), asyncHandler(resetTwoFactorFallback));
+userRouter.get('/:id', requireRole('ADMIN'), requirePermission('system.view'), asyncHandler(getUserById));
+userRouter.patch('/:id', requireRole('ADMIN'), requirePermission('system.edit'), asyncHandler(updateUserByAdmin));
+userRouter.delete('/:id', requireRole('ADMIN'), requirePermission('system.accounts'), asyncHandler(deleteUser));
+/* Account lifecycle (2 Oct 2026): whether the console may offer "Delete account", and why not. */
+userRouter.get('/:id/deletable', requireRole('ADMIN'), requirePermission('system.view'), asyncHandler(getUserDeletability));
+userRouter.put('/:id/role-config', requireRole('ADMIN'), requirePermission('system.roles'), asyncHandler(setRoleConfig));
+userRouter.post('/:id/2fa/reset', requireRole('ADMIN'), requirePermission('system.accounts'), asyncHandler(resetTwoFactorFallback));
 /* E6: the desk's view of one account's sessions and activity, and the reset link. */
-userRouter.get('/:id/sessions', requireRole('ADMIN'), asyncHandler(listUserSessions));
-userRouter.get('/:id/activity', requireRole('ADMIN'), asyncHandler(listUserActivity));
-userRouter.post('/:id/reset-password', requireRole('ADMIN'), asyncHandler(sendResetLink));
+userRouter.get('/:id/sessions', requireRole('ADMIN'), requirePermission('system.view'), asyncHandler(listUserSessions));
+userRouter.get('/:id/activity', requireRole('ADMIN'), requirePermission('system.view'), asyncHandler(listUserActivity));
+userRouter.post('/:id/reset-password', requireRole('ADMIN'), requirePermission('system.accounts'), asyncHandler(sendResetLink));
 /* K-B1: the desk on somebody's contacts — every write with a reason, audited. */
-userRouter.get('/:id/contacts', requireRole('ADMIN'), asyncHandler(contacts.listUserContacts));
-userRouter.post('/:id/contacts', requireRole('ADMIN'), asyncHandler(contacts.addUserContact));
-userRouter.patch('/:id/contacts/:contactId', requireRole('ADMIN'), asyncHandler(contacts.updateUserContact));
-userRouter.delete('/:id/contacts/:contactId', requireRole('ADMIN'), asyncHandler(contacts.removeUserContact));
-userRouter.post('/:id/contacts/:contactId/send-code', requireRole('ADMIN'), asyncHandler(contacts.sendUserContactCode));
-userRouter.post('/:id/contacts/:contactId/verify', requireRole('ADMIN'), asyncHandler(contacts.verifyUserContact));
-userRouter.post('/:id/contacts/:contactId/mark-verified', requireRole('ADMIN'), asyncHandler(contacts.markUserContactVerified));
-userRouter.post('/:id/contacts/:contactId/make-primary', requireRole('ADMIN'), asyncHandler(contacts.makeUserContactPrimary));
+userRouter.get('/:id/contacts', requireRole('ADMIN'), requirePermission('system.view'), asyncHandler(contacts.listUserContacts));
+userRouter.post('/:id/contacts', requireRole('ADMIN'), requirePermission('system.edit'), asyncHandler(contacts.addUserContact));
+userRouter.patch('/:id/contacts/:contactId', requireRole('ADMIN'), requirePermission('system.edit'), asyncHandler(contacts.updateUserContact));
+userRouter.delete('/:id/contacts/:contactId', requireRole('ADMIN'), requirePermission('system.delete'), asyncHandler(contacts.removeUserContact));
+userRouter.post('/:id/contacts/:contactId/send-code', requireRole('ADMIN'), requirePermission('system.edit'), asyncHandler(contacts.sendUserContactCode));
+userRouter.post('/:id/contacts/:contactId/verify', requireRole('ADMIN'), requirePermission('system.edit'), asyncHandler(contacts.verifyUserContact));
+userRouter.post('/:id/contacts/:contactId/mark-verified', requireRole('ADMIN'), requirePermission('system.edit'), asyncHandler(contacts.markUserContactVerified));
+userRouter.post('/:id/contacts/:contactId/make-primary', requireRole('ADMIN'), requirePermission('system.edit'), asyncHandler(contacts.makeUserContactPrimary));
 userRouter.post(
   '/:id/impersonate',
   requireRole('ADMIN'),

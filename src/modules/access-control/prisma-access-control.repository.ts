@@ -74,6 +74,20 @@ export const prismaRoleConfigRepository: RoleConfigRepository = {
     return prisma.userRoleConfig.deleteMany({ where: { userId } });
   },
 
+  findBootstrapAdmin(named: string | null) {
+    const key = named?.trim() || null;
+    return prisma.user.findFirst({
+      where: {
+        roles: { some: { role: 'ADMIN' } },
+        isActive: true,
+        closedAt: null,
+        ...(key ? { OR: [{ mobile: key }, { email: { equals: key, mode: 'insensitive' } }] } : {}),
+      },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true, mobile: true, email: true },
+    });
+  },
+
   async isAdmin(userId: string) {
     return (await prisma.userRole.count({ where: { userId, role: 'ADMIN' } })) > 0;
   },

@@ -11,6 +11,15 @@ export { supportRouter } from './support.routes';
 export { raiseAccountTicket, countOpenTicketsForUser } from './support.service';
 
 /**
+ * FM-1 (27 Sep 2026): a form whose destination is SUPPORT raises an ordinary
+ * ISSUE ticket through the one creation path — the number, the admin
+ * fan-out and the thread are the ones every other ticket gets. `forms`
+ * calls it; nothing else needs the raw door.
+ */
+export { createTicket } from './support.service';
+export type { NewTicket } from './support.types';
+
+/**
  * E7-3: the port bootstrap fills from `publishers`, `advertisers`, `agents`,
  * `wallets`, `listings` and `orders`, so the queue rows and the requester
  * rail can name the party behind a ticket without this module importing six

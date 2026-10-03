@@ -72,6 +72,26 @@ feature('listings.suggested-rate', {
   routes: ['/api/v1/listings/me'],
 });
 
+feature('listings.blocked-dates', {
+  surfaces: ['APP_USER', 'WEBSITE', 'CONSOLE', 'BACKEND'],
+  owner: 'supply',
+  kind: 'FEATURE',
+  launch: 'on',
+  description:
+    'BD-1: the dates a publisher takes a spot off the market by hand — a block holds every slot, so browse, checkout and placement read the days as taken.',
+  routes: ['/api/v1/listings/:listingId/blocked-dates'],
+});
+
+feature('listings.insights', {
+  surfaces: ['CONSOLE'],
+  owner: 'supply',
+  kind: 'FEATURE',
+  launch: 'on',
+  description:
+    'The listing page’s Performance (3 Oct 2026): saves, bookings, enquiries, scans, GMV, occupancy and stars over a window, with the day series.',
+  routes: ['/api/v1/listings/:listingId/insights'],
+});
+
 feature('listings.reprice-log', {
   surfaces: ['CONSOLE'],
   owner: 'supply',
@@ -90,6 +110,26 @@ feature('listings.spot-page', {
   description:
     'E11-2: the public spot page a shared link opens, metered by IP.',
   routes: ['/s/:displayId'],
+});
+
+feature('listings.spot-views', {
+  surfaces: ['WEBSITE', 'APP_USER', 'CONSOLE', 'BACKEND'],
+  owner: 'demand',
+  kind: 'FEATURE',
+  launch: 'on',
+  description:
+    "LD-1 (3 Oct 2026): spot-page views — the website's spot page and marketplace detail and the app's listing screen count a view per open (bots, ADX staff and the spot's own publisher and agent left out, one visitor per day), and the listing page's Performance draws Views and Unique visitors.",
+  routes: ['/api/v1/listings/:displayIdOrId/view'],
+});
+
+feature('listings.vehicle-rc', {
+  surfaces: ['APP_USER', 'CONSOLE'],
+  owner: 'supply',
+  kind: 'FEATURE',
+  launch: 'on',
+  description:
+    "A vehicle put up as an ad spot, checked against the RC register: while the spot is being registered (nothing stored, and the registered owner's name never returned — only how closely it matches the publisher's) and again on the listing afterwards, where the full answer is recorded and audited.",
+  routes: ['/api/v1/listings/vehicle-rc/check', '/api/v1/listings/:listingId/vehicle-rc/verify'],
 });
 
 feature('marketplace.instant-booking', {

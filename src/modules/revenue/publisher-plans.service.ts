@@ -2,6 +2,7 @@ import { randomInt } from 'crypto';
 import type { Request } from 'express';
 import { auditDiff, logActivity } from '../../shared/audit';
 import type { PackageBillingCycle, Prisma, PublisherSubscription, SubscriptionTierName } from '../../shared/database';
+import { assertPartyAdultForOrders } from '../../shared/age-gate';
 import { ApiError } from '../../shared/errors';
 import { logger } from '../../shared/logging';
 import { Decimal, money, type Money } from '../../shared/money';
@@ -599,6 +600,9 @@ export async function createSubscriptionOrder(input: {
   now?: Date;
 }): Promise<{ order: OrderView; term: Term }> {
   const now = input.now ?? new Date();
+  // AGE-1 (the owner, 29 Sep 2026): a plan order is an order — the publisher's
+  // account holder needs a date of birth on file and to be 18 or over.
+  await assertPartyAdultForOrders({ kind: 'PUBLISHER', id: input.publisherId }, { actorUserId: input.userId, now });
   const quote = await quoteSubscriptionOrder({ publisherId: input.publisherId, tier: input.tier, cycle: input.cycle, now });
   const plan = await activePlanOrThrow(input.tier);
   const order = await repository.createOrder({
@@ -688,6 +692,8 @@ export async function paySubscriptionOrderFromWallet(orderId: string, actor: Ord
   assertMayPaySubscriptionOrder(order, actor);
   if (order.status === 'PAID') return orderView(order);
   assertSubscriptionOrderPayable(order);
+  // AGE-1: the money leaves here — the publisher's account holder, 18 or over.
+  await assertPartyAdultForOrders({ kind: 'PUBLISHER', id: order.publisherId }, { actorUserId: actor.userId, now });
   assertWalletOffered(await publisherPolicy());
   // The term rule before the money: a plan that cannot activate must not be charged for.
   await assertSubscriptionOrderActivatable(order, now);
@@ -855,6 +861,8 @@ export async function recordSubscriptionOrderPayment(
   const before = await repository.findOrder(orderId);
   if (!before) throw new ApiError(404, 'NOT_FOUND', 'Subscription order not found');
   if (before.status !== 'PAID') assertSubscriptionOrderPayable(before);
+  // AGE-1: the desk records the publisher's order — the publisher's person is asked, not the admin's.
+  if (before.status !== 'PAID') await assertPartyAdultForOrders({ kind: 'PUBLISHER', id: before.publisherId }, { actorUserId: editor.userId, now });
   const paid = await markSubscriptionOrderPaid(orderId, { method: 'OFFLINE', reference: `${input.method}:${input.reference}` }, now);
   await logActivity(editor.userId, 'SUBSCRIPTION_ORDER_RECORDED', {
     req: editor.req,
@@ -972,6 +980,8 @@ export async function setMySubscriptionAutoRenew(publisherId: string, autoRenew:
   if (autoRenew && isTrialOrder(await repository.findOrderBySubscription(running.id))) {
     throw new ApiError(409, 'AUTO_RENEW_NOT_OFFERED', 'A trial does not renew - buy the plan');
   }
+  // AGE-1: switching auto-renew on buys the next term — an order. Switching it off asks nothing.
+  if (autoRenew && !running.autoRenew) await assertPartyAdultForOrders({ kind: 'PUBLISHER', id: publisherId }, { now });
   const updated = running.autoRenew === autoRenew ? running : await repository.setSubscriptionAutoRenew(running.id, autoRenew);
   return subscriptionView(updated, await publisherPlansByTier());
 }

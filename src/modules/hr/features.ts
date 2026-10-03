@@ -17,8 +17,9 @@ feature('hr.holidays', {
   kind: 'FEATURE',
   launch: 'on',
   description:
-    'The year\'s holidays, seeded at boot, editable by ops; the schedule reads them.',
+    'The year\'s holidays, editable by ops; the schedule reads them. HC-1 (1 Oct 2026): kept in step with a public holiday calendar (Google\'s Holidays in India by default, Settings › Integrations) — weekly, at boot when next year is empty, and on "Sync now"; a person\'s own entry always wins.',
   routes: ['/api/v1/hr/holidays'],
+  jobs: ['holiday-calendar'],
 });
 
 feature('hr.departments', {

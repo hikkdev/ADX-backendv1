@@ -3,13 +3,15 @@ import { ApiError } from '../../shared/errors';
 import { Decimal, money, type Money } from '../../shared/money';
 import { monthWindowIST } from '../../shared/time';
 import { toListPage } from '../../shared/pagination';
+import { accountClosedAt, assertNotClosed } from '../../shared/party-status';
+import { ONBOARDING_SOURCE_LABEL, type OnboardingFacts, type OnboardingSource } from '../../shared/onboarding';
 import { getPlatformSettings } from '../app-config';
 import { normalizeMobile, revokeSessions } from '../auth';
 import { allocateIdentifier } from '../identifiers';
 import { notify } from '../notifications';
 import { assertCityAllows, cityKeyFor, withCityKey } from '../pricing';
 import {
-  addMethod,
+  addOwnMethod,
   listMethods,
   listWithdrawals,
   requestWithdrawal,
@@ -73,9 +75,13 @@ export async function createPartner(input: CreatePartnerInput): Promise<PartnerR
   // Allocated after the checks, before the write: PRT-1209-2601 comes off an
   // atomic daily sequence and is never reissued, so a 409 must not burn one.
   const displayId = await allocateIdentifier('PARTNER');
+  // 28 Sep 2026: the account opened with the partner is a person too, with
+  // their own ADX-… id — the one they are shown once they can sign in.
+  const userDisplayId = await allocateIdentifier('USER');
   // Lot X-B: the city key rides with the typed city (null for a town the catalogue lacks).
   const partner = await repository.createPartner(await withCityKey({
     displayId,
+    userDisplayId,
     mobile,
     name: input.name,
     legalName: input.legalName ?? null,
@@ -85,6 +91,8 @@ export async function createPartner(input: CreatePartnerInput): Promise<PartnerR
     email: input.email ?? null,
     address: input.address ?? null,
     city: input.city ?? null,
+    state: input.state ?? null,
+    postalCode: input.postalCode ?? null,
     latitude: input.latitude ?? null,
     longitude: input.longitude ?? null,
     capabilities: input.capabilities ?? [],
@@ -135,6 +143,8 @@ export async function applyAsPartner(
     email: input.email ?? null,
     address: null,
     city: null,
+    state: null,
+    postalCode: null,
     latitude: null,
     longitude: null,
     capabilities: [],
@@ -171,6 +181,8 @@ export async function completeApplication(partner: PartnerRow, input: Applicatio
   if (input.email !== undefined) patch.email = input.email;
   if (input.address !== undefined) patch.address = input.address;
   if (input.city !== undefined) patch.city = input.city;
+  if (input.state !== undefined) patch.state = input.state;
+  if (input.postalCode !== undefined) patch.postalCode = input.postalCode;
   if (input.latitude !== undefined) patch.latitude = input.latitude;
   if (input.longitude !== undefined) patch.longitude = input.longitude;
   if (input.capabilities !== undefined) patch.capabilities = input.capabilities;
@@ -191,14 +203,35 @@ export async function getPartner(id: string): Promise<PartnerRow> {
   return partner;
 }
 
+/**
+ * 29 Sep 2026 (the party rosters, made uniform): the door a shop came
+ * through, in the block every party roster answers as `onboarding` (QR-14's
+ * shape). A partner keeps no provenance stamp, so the door is read off what
+ * the row does keep: applied from the app (PP-1) is self-serve, created by a
+ * party import is an import, and anything else the desk added. Nobody is
+ * named — the row does not record who.
+ */
+export function partnerDoorFacts(row: Pick<PartnerRow, 'appliedAt' | 'createdAt'> & { importedAt?: Date | null }): OnboardingFacts {
+  const via: OnboardingSource = row.appliedAt ? 'SELF' : row.importedAt ? 'IMPORT' : 'DESK';
+  return {
+    via,
+    viaLabel: ONBOARDING_SOURCE_LABEL[via],
+    byId: null,
+    byName: null,
+    byRole: null,
+    at: row.appliedAt ?? row.importedAt ?? row.createdAt,
+  };
+}
+
 export const listPartners = async (filter: PartnerListFilter) => {
   // Lot X-B: `?city=` is a slug (or a name, for the console's older links) — matched by key, the spelling as the fallback.
   const keyed = filter.city ? { ...filter, cityId: (await cityKeyFor(filter.city))?.cityId ?? null } : filter;
-  const { items, total, counts } = await repository.listPartners(keyed);
-  return toListPage(items, total, counts, filter);
+  const { items, total, counts, statusCounts } = await repository.listPartners(keyed);
+  // Account lifecycle (2 Oct 2026): the Status chips' counts ride beside the page, as on every party roster.
+  return { ...toListPage(items, total, counts, filter), statusCounts };
 };
 
-export async function updatePartner(id: string, input: UpdatePartnerInput): Promise<{ before: PartnerRow; after: PartnerRow }> {
+export async function updatePartner(id: string, input: Omit<UpdatePartnerInput, 'entityType'>): Promise<{ before: PartnerRow; after: PartnerRow }> {
   const before = await getPartner(id);
   if (input.email && input.email !== before.email && (await repository.emailTaken(input.email))) {
     throw new ApiError(409, 'CONFLICT', 'That email belongs to another account');
@@ -212,6 +245,8 @@ export async function updatePartner(id: string, input: UpdatePartnerInput): Prom
   if (input.email !== undefined) patch.email = input.email;
   if (input.address !== undefined) patch.address = input.address;
   if (input.city !== undefined) patch.city = input.city;
+  if (input.state !== undefined) patch.state = input.state;
+  if (input.postalCode !== undefined) patch.postalCode = input.postalCode;
   if (input.latitude !== undefined) patch.latitude = input.latitude;
   if (input.longitude !== undefined) patch.longitude = input.longitude;
   if (input.capabilities !== undefined) patch.capabilities = input.capabilities;
@@ -226,9 +261,10 @@ export async function updatePartner(id: string, input: UpdatePartnerInput): Prom
 }
 
 /** G13-B: when the account behind each partner last signed in — one lookup for a page. */
-export async function withLastLogin<T extends Pick<PartnerRow, 'userId'>>(rows: readonly T[]): Promise<(T & { lastLoginAt: Date | null })[]> {
-  const logins = new Map((await repository.findLastLogins(rows.map((row) => row.userId))).map((row) => [row.userId, row.lastLoginAt]));
-  return rows.map((row) => ({ ...row, lastLoginAt: logins.get(row.userId) ?? null }));
+export async function withLastLogin<T extends Pick<PartnerRow, 'userId'>>(rows: readonly T[]): Promise<(T & { lastLoginAt: Date | null; userDisplayId: string | null })[]> {
+  const logins = new Map((await repository.findLastLogins(rows.map((row) => row.userId))).map((row) => [row.userId, row]));
+  // 28 Sep 2026: the person's own ADX-… id rides the same lookup — the desk shows it beside the shop's PRT- id.
+  return rows.map((row) => ({ ...row, lastLoginAt: logins.get(row.userId)?.lastLoginAt ?? null, userDisplayId: logins.get(row.userId)?.displayId ?? null }));
 }
 
 /**
@@ -258,6 +294,9 @@ export async function deactivatePartner(id: string, reason?: string | null): Pro
  * activation is its own step.
  */
 export async function reactivatePartner(id: string): Promise<PartnerRow> {
+  // Account lifecycle (2 Oct 2026): a closed account stays closed — 409 ACCOUNT_CLOSED, nothing written.
+  const before = await getPartner(id);
+  assertNotClosed(await accountClosedAt(before.userId));
   const after = await repository.updatePartner(id, { isActive: true });
   if (after.activatedAt) await repository.setUserActive(after.userId, true);
   return after;
@@ -291,6 +330,8 @@ export async function activatePartner(
     throw new ApiError(409, 'CONFLICT', 'This partner is off the roster. Reactivate it before switching the account on.');
   }
   if (before.activatedAt) return { before, after: before, activated: false };
+  // Account lifecycle (2 Oct 2026): switching the account on is a reactivation of sorts — never for a closed one.
+  assertNotClosed(await accountClosedAt(before.userId));
   await assertActivationKyc(before);
   // Lot V: activation is the moment the partner starts being asked to quote,
   // so it is gated like the create. Lot X-B: by the key the row carries.
@@ -374,6 +415,8 @@ export async function updateMe(partner: PartnerRow, input: UpdateMeInput): Promi
   if (input.email !== undefined) patch.email = input.email;
   if (input.address !== undefined) patch.address = input.address;
   if (input.city !== undefined) patch.city = input.city;
+  if (input.state !== undefined) patch.state = input.state;
+  if (input.postalCode !== undefined) patch.postalCode = input.postalCode;
   if (input.latitude !== undefined) patch.latitude = input.latitude;
   if (input.longitude !== undefined) patch.longitude = input.longitude;
   if (input.capabilities !== undefined) patch.capabilities = input.capabilities;
@@ -456,6 +499,8 @@ export async function partnerEarnings(partner: PartnerRow, query: { limit?: numb
     listEntries(wallet.id, { limit, ...(query.cursor ? { cursor: query.cursor } : {}) }),
     listWithdrawals({ walletId: wallet.id, limit: 50 }),
   ]);
+  // 26 Sep 2026: each entry names its booking the way the partner is told it (`BKG-…`), one read for the page.
+  const displayIds = await repository.orderDisplayIds(entries.flatMap((entry) => (entry.orderId ? [entry.orderId] : [])));
   return {
     walletId: wallet.id,
     balances,
@@ -466,6 +511,7 @@ export async function partnerEarnings(partner: PartnerRow, query: { limit?: numb
       amount: money(entry.amount),
       balanceAfter: money(entry.balanceAfter),
       orderId: entry.orderId,
+      orderDisplayId: entry.orderId ? (displayIds.get(entry.orderId) ?? null) : null,
       reference: entry.reference,
       note: entry.note,
       createdAt: entry.createdAt,
@@ -497,7 +543,8 @@ export async function requestPartnerWithdrawal(partner: PartnerRow, input: Partn
 
 /** The partner's bank or UPI, verified by the desk like everyone else's. */
 export const listPartnerPayoutMethods = (partner: PartnerRow) => listMethods(partner.userId);
-export const addPartnerPayoutMethod = (partner: PartnerRow, input: AddMethodInput) => addMethod(partner.userId, input);
+/** The partner's own method — a UPI ID is checked as it is added, like any person's own (`addOwnMethod`). */
+export const addPartnerPayoutMethod = (partner: PartnerRow, input: AddMethodInput) => addOwnMethod(partner.userId, input);
 
 /**
  * The month's invoice to ADX (Lot H): a private file under PARTNER_INVOICE,

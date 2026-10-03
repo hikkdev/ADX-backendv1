@@ -5,7 +5,7 @@ import type { ReportData } from '../reports.repository';
 import { renderCsv, renderPdf } from '../render';
 
 /**
- * Lot G (Q129): the twelve kinds are a contract — each names its filters
+ * Lot G (Q129): the thirteen kinds are a contract — each names its filters
  * and columns, and its query answers rows keyed by exactly those columns,
  * with money as two-place strings. Pinned against a fixture data source so
  * the shaping is tested without a database.

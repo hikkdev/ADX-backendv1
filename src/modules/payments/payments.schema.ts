@@ -15,7 +15,14 @@ export const createIntentSchema = z.object({
   packageSaleId: z.string().trim().min(1).max(64).optional(),
   /** Lot J (B2): a publisher's plan order. */
   subscriptionOrderId: z.string().trim().min(1).max(64).optional(),
+  /** LM-1: a display ad the advertiser bought, or a sponsored listing the publisher bought. */
+  adBookingId: z.string().trim().min(1).max(64).optional(),
+  listingBoostId: z.string().trim().min(1).max(64).optional(),
   gateway: gatewaySchema,
+  /** RF-1: on a campaign, the reservation fee rather than the full amount. */
+  purpose: z.enum(['SETTLEMENT', 'RESERVATION_FEE']).optional(),
+  /** UP-1: the payer's UPI id — a collect request on Cashfree, the prefilled VPA on Razorpay. */
+  upiId: z.string().trim().regex(/^[\w.\-]{2,256}@[a-zA-Z][a-zA-Z0-9]{1,63}$/, 'A UPI id looks like name@bank').optional(),
 });
 
 /**
@@ -77,3 +84,24 @@ export type ListPaymentsQuery = z.infer<typeof listPaymentsQuerySchema>;
 export const advertiserPaymentsQuerySchema = listQuerySchema(PAYMENT_STATUSES, ['NEWEST', 'OLDEST', 'AMOUNT_DESC']).extend({
   gateway: gatewaySchema.optional(),
 });
+
+/* BT-1: bank transfer. */
+const calendarDay = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD');
+
+/** POST /payments/:id/bank-transfer/submit — the payer's claim. */
+export const bankTransferSubmitSchema = z.object({
+  utr: z.string().trim().min(6).max(40),
+  paidOn: calendarDay,
+  amount: moneyString,
+  proofFileId: z.string().trim().min(1).max(64).nullable().optional(),
+});
+
+/** POST /payments/:id/bank-transfer/confirm — ops saw it on the statement. */
+export const bankTransferConfirmSchema = z.object({
+  amount: moneyString.optional(),
+  utr: z.string().trim().min(6).max(40).optional(),
+  note: z.string().trim().max(300).optional(),
+});
+
+/** POST /payments/:id/bank-transfer/reject */
+export const bankTransferRejectSchema = z.object({ reason: z.string().trim().min(3).max(300) });

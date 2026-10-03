@@ -145,3 +145,17 @@ joined through `users.findUserLabels` in one query for the whole history
 The same read carries `suspendedBy { id, name } | null` beside
 `suspendedById` on the current case — the same lookup as the history, one
 query; null while nobody has suspended the party.
+
+## Account lifecycle (2 Oct 2026)
+
+- BLOCK_NEW or BLOCK_SIGNIN on a publisher, advertiser or agent also closes
+  the doors: the live access grants (an agent's own; the ones ON a
+  publisher's or advertiser's account) are revoked and the party's QR codes
+  deactivated — `effects.grantsRevoked`, `effects.qrDeactivated`. Neither
+  comes back on reinstatement.
+- STOP_OPEN_WORK on an agent hands their open leads back to the pool
+  (`effects.releasedLeadIds`) beside the offers, visits and milestones.
+- Lifting BLOCK_SIGNIN on a closed account is 409 `ACCOUNT_CLOSED`.
+- `suspendForUserDeactivation` / `reinstateAfterUserReactivation` are the
+  user Deactivate / Reactivate cascade: BLOCK_NEW with `metadata.cause` on
+  the event, lifted only where the newest BLOCK_NEW step is that cause's own.

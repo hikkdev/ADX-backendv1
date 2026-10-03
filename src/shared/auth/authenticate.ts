@@ -32,6 +32,20 @@ function enrolmentAllows(req: Request): boolean {
 }
 
 /**
+ * W1 (24 Sep 2026): the website's public reads. A visitor with no session
+ * may look; one who sends a token is read as themselves — the saved hearts,
+ * their advertiser — and a token that is present but bad is refused exactly
+ * as it is anywhere else. Never a substitute for `authenticate` on a write.
+ */
+export function authenticateOptional(req: Request, res: Response, next: NextFunction): void {
+  if (!req.headers.authorization) {
+    next();
+    return;
+  }
+  authenticate(req, res, next);
+}
+
+/**
  * Verifies the bearer token, then two checks the signature alone cannot make:
  *
  *  - the token was not issued before the user's sessions were revoked
@@ -94,12 +108,24 @@ export function authenticate(req: Request, _res: Response, next: NextFunction): 
 }
 
 export function requireRole(...roles: Role[]) {
-  const guard = (req: Request, _res: Response, next: NextFunction): void => {
+  const guard = (req: Request, res: Response, next: NextFunction): void => {
     const userRoles = req.user?.roles ?? [];
-    const hasRole = roles.some((r) => userRoles.includes(r));
-    if (!hasRole) {
+    const matched = roles.filter((r) => userRoles.includes(r));
+    if (matched.length === 0) {
       throw new ApiError(403, 'FORBIDDEN', 'Insufficient permissions');
     }
+    /* RP-1: an ADMIN reaches an admin route only through a console role.
+       Only Super admin holds every permission; anyone else needs one
+       assigned, and until then their token carries no `perms` and every
+       admin route says so by name. An account that also holds a party
+       role the route accepts passes as that party. */
+    if (matched.every((r) => r === 'ADMIN') && (req.user?.perms ?? []).length === 0) {
+      throw new ApiError(403, 'ROLE_REQUIRED', 'No console role assigned — ask a super admin to assign one');
+    }
+    /* RP-2: which of the route's roles admitted this token, for the
+       permission guard behind it — a party the route accepts is judged by
+       its role, an admin by their console role's list. */
+    res.locals.matchedRoles = matched;
     next();
   };
   // Name encodes the roles so the route-inventory snapshot records which
@@ -109,16 +135,16 @@ export function requireRole(...roles: Role[]) {
 }
 
 /**
- * Whether a token holds one permission id.
- *
- * A token minted before `perms` existed carries none; for the lifetime of
- * such a token the launch rule applies — an ADMIN holds everything — because
- * that is exactly what it would have been given had it been resolved.
+ * Whether a token holds one permission id — exactly what its `perms` claim
+ * carries, resolved at sign-in from the console role (RP-1, 24 Sep 2026).
+ * Super admin's list is the whole catalogue; an admin with no role has
+ * none; a token minted before the claim existed holds none either — its
+ * holder signs in again and gets a resolved one. The launch rule that read
+ * a claimless ADMIN token as holding everything is gone.
  */
 export function hasPermission(user: Pick<AccessTokenPayload, 'roles' | 'perms'> | undefined, id: string): boolean {
   if (!user) return false;
-  if (Array.isArray(user.perms)) return user.perms.includes(id);
-  return (user.roles ?? []).includes('ADMIN');
+  return (user.perms ?? []).includes(id);
 }
 
 /** The ids in `ids` the token lacks. */
@@ -130,9 +156,21 @@ export function missingPermissions(user: Pick<AccessTokenPayload, 'roles' | 'per
  * Refuses a request whose token lacks ANY of the permissions named. The
  * 403 body says which in `details.missing`. Named like requireRole so the
  * route inventory records what guards each route.
+ *
+ * RP-2 (24 Sep 2026): every admin route carries one. On a route a party role
+ * may also call — a publisher accepting an agreement, an agent filing a
+ * claim — the permission is what an ADMIN needs; an account the role guard
+ * admitted as that party passes as the party (`res.locals.matchedRoles`,
+ * stamped by `requireRole`). Without a role guard in front, the check is
+ * strict.
  */
 export function requirePermission(...ids: string[]) {
-  const guard = (req: Request, _res: Response, next: NextFunction): void => {
+  const guard = (req: Request, res: Response, next: NextFunction): void => {
+    const admitted = res.locals.matchedRoles as Role[] | undefined;
+    if (admitted && admitted.some((r) => r !== 'ADMIN')) {
+      next();
+      return;
+    }
     const missing = missingPermissions(req.user, ids);
     if (missing.length > 0) {
       throw new ApiError(403, 'FORBIDDEN', 'Insufficient permissions', { missing });

@@ -6,6 +6,7 @@ import { assertLandingPageQuota, recordLandingPageGeneration } from '../ai';
 import { createNotification } from '../notifications';
 import { prismaCampaignsRepository as repository } from './prisma-campaigns.repository';
 import { getCampaign, type Actor } from './campaigns.service';
+import { landingPageUrl } from './landing-url';
 import { landingBlockSchema, type LandingBlock, type LandingTheme, type LandingPageListQuery } from './campaigns.schema';
 import type { CampaignAggregate, LandingPageRow, LandingPageSummaryRow, LandingPageView } from './campaigns.repository';
 
@@ -269,8 +270,8 @@ export async function getLandingPage(campaignId: string, actor: Actor): Promise<
   return page;
 }
 
-/** The public address of a page — what `GET /p/:slug` answers on. */
-export const landingPageUrl = (slug: string): string => `/p/${slug}`;
+/** The public address of a page — what `GET /p/:slug` answers on (`landing-url.ts`). */
+export { landingPageUrl };
 
 /** The page as every builder read answers it: the row with its `url` beside the blocks. */
 export function withLandingUrl<T extends { slug: string }>(page: T): T & { url: string } {

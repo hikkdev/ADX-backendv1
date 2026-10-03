@@ -30,7 +30,7 @@ const { repository, notifications, sms, audit } = vi.hoisted(() => ({
     writeMarks: vi.fn(),
     markCounts: vi.fn(),
   } satisfies Record<keyof AnnouncementsRepository, ReturnType<typeof vi.fn>>,
-  notifications: { notify: vi.fn(), unsubscribeUrlFor: vi.fn((id: string) => `https://adx.local/api/v1/comms/unsubscribe/${id}.sig`) },
+  notifications: { notify: vi.fn(), unsubscribeUrlFor: vi.fn((id: string) => `https://adx.in/api/v1/comms/unsubscribe/${id}.sig`) },
   sms: { isSmsKindRegistered: vi.fn() },
   audit: { logActivity: vi.fn() },
 }));
@@ -276,7 +276,7 @@ describe('the fan-out', () => {
     expect(u1[3]).not.toHaveProperty('inApp');
     const u3 = notifications.notify.mock.calls.find((c) => c[1] === 'u3')!;
     expect(u3[0]).toBe('ANNOUNCEMENT');
-    expect(u3[2]).toEqual({ title: 'Planned maintenance', body: 'ADX is down 02:00–03:00 IST on Sunday.', unsubscribeUrl: 'https://adx.local/api/v1/comms/unsubscribe/u3.sig' });
+    expect(u3[2]).toEqual({ title: 'Planned maintenance', body: 'ADX is down 02:00–03:00 IST on Sunday.', unsubscribeUrl: 'https://adx.in/api/v1/comms/unsubscribe/u3.sig' });
     expect(u3[3]).toMatchObject({ channels: ['EMAIL', 'SMS'], inApp: { type: 'ANNOUNCEMENT', title: 'Planned maintenance', subtitle: 'Service notice', relatedId: 'ann-1' } });
 
     expect(repository.writeMarks).toHaveBeenNthCalledWith(1, 'ann-1', [

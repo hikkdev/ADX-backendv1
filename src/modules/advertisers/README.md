@@ -255,7 +255,7 @@ city; a company name for anyone but an individual.
 
 | Route | Who | What |
 | --- | --- | --- |
-| `POST /advertisers` | ADMIN (desk), agent (`onBehalf`), the app | takes `firstName`, `lastName`, `dateOfBirth` (YYYY-MM-DD, 18+), `gender` beside the profile fields. **A first name marks an onboarding**: `deskOnboarding` then requires `lastName`, `billingAddress`, `city` (and `companyName` unless INDIVIDUAL); email, date of birth, gender, state, industry and GSTIN stay optional — the app does not ask an advertiser for them. `registerAdvertiser` canonicalises the number (`normalizeMobile`, the OTP door's `+91…`), opens the sign-in account with the ADVERTISER role — or adopts the number's existing account, filling only what is empty — and links the profile to it (`repository.ensureAccount`). The owner's first sign-in is OTP → terms → home, with the profile gate already answered; KYC, the agreement and the funds stay theirs. Without a first name the row is a bare account held for the number, as before |
+| `POST /advertisers` | ADMIN (desk), agent (`onBehalf`), the app | takes `firstName`, `lastName`, `dateOfBirth` (YYYY-MM-DD, any valid date — AGE-1), `gender` beside the profile fields. **A first name marks an onboarding**: `deskOnboarding` then requires `lastName`, `billingAddress`, `city` (and `companyName` unless INDIVIDUAL); email, date of birth, gender, state, industry and GSTIN stay optional — the app does not ask an advertiser for them. `registerAdvertiser` canonicalises the number (`normalizeMobile`, the OTP door's `+91…`), opens the sign-in account with the ADVERTISER role — or adopts the number's existing account, filling only what is empty — and links the profile to it (`repository.ensureAccount`). The owner's first sign-in is OTP → terms → home, with the profile gate already answered; KYC, the agreement and the funds stay theirs. Without a first name the row is a bare account held for the number, as before |
 | `PATCH /advertisers/:id` | owner, their agent, ADMIN | the same four person fields: written to the account behind the profile (`updateAccount`, the display name recomposed), the email with them; a profile nobody has claimed that is given a first name gets its account opened and linked |
 | `GET /advertisers/:id` | as before | now carries `person { displayId, firstName, lastName, dateOfBirth, gender, avatarUrl, consentAcceptedAt } \| null` — null while no account backs the profile — beside `onboarding` |
 | `GET /advertisers?onboardedVia=&onboardedById=` | ADMIN | the roster's two cuts (QR-14's, on this side), and every row carries `onboarding { via, viaLabel, byId, byName, byRole, at }` with one name lookup per page |
@@ -276,3 +276,36 @@ verification) and the package purchase let an unverified advertiser agree and pa
 The launch gate itself lives in `campaigns` (`authorizeCampaign`,
 `runCampaignTransitions`); `activatedAt` still means KYC and the agreement
 both clear. Pinned by `campaigns/__tests__/qr16-launch-gate.test.ts`.
+
+## 29 Sep 2026 — the uniform party roster
+
+`GET /advertisers` (ADMIN) takes the cuts every party roster takes beside
+`q` and the door: **`kycState`** (`shared/kyc-state`'s six, any case —
+`kycRosterStateWhere`), **`type`** (`AdvertiserType`) and **`city`** (a
+catalogue slug or a name — by the key, the spelling for the rows keyed to
+nothing). `q` also matches the city and the phone as the console prints it.
+Every row carries **`campaignCount`** (counted in the same query) beside the
+`kyc` summary, and the cursor page carries **`total`** — every row the cuts
+match. Pinned by `uniform-roster.test.ts` and
+`uniform-roster.repository.test.ts`.
+
+## Phase D (1 Oct 2026) — the legal form the KYC verifies
+
+`Advertiser.entityType` (`KycEntityType`, nullable) picks the Digio workflow
+— the rules, and the Digio routes' `{ entityType? }` body, are in
+`kyc/README.md` under the same heading. On this module's routes:
+
+- `GET /advertisers/me`, `GET /advertisers/:id` and the roster answer
+  **`entityType`** (the stored value, else INDIVIDUAL or NON_PROFIT where the
+  `type` settles it, else null — COMMERCIAL and AGENCY do not) and
+  **`entityTypeStored`**; `GET /users/me/onboarding-manifest` carries the same two.
+- `PATCH /advertisers/:id` takes `entityType` (any of the eight, null clears;
+  audit `KYC_ENTITY_TYPE_SET`) and answers the same two fields. On a
+  VERIFIED advertiser only the upgrade — an individual's business — is
+  taken: it goes to the KYC module through `registerAdvertiserKycUpgradePort`
+  (bootstrap fills it; `kyc` imports this module, so the call cannot go the
+  other way) and leaves as a fresh Digio request. Anything else is **409
+  `KYC_LOCKED`** and the rest of the patch is not written.
+- `setAdvertiserEntityType` is the KYC start's write.
+
+Pinned in `__tests__/phase-d-entity-type.test.ts`.

@@ -1,7 +1,12 @@
+import fs from 'fs';
 import { prisma } from '../database/prisma';
 import { redis } from '../cache/redis';
 import { env } from '../../config/env';
+import { logger } from '../logging';
 import type { SmsRailName, SmsRailTemplates } from '../sms/kinds';
+import type { DigioWorkflowOverrides } from './digio-workflows';
+import { resolveVerificationSettings, type VerificationRoutingConfig, type VerificationSettings } from '../verification/settings';
+import { assertSecretsStorable, openIntegrationSecrets, sealIntegrationSecrets } from './secret-box';
 
 /**
  * Lot E (Q128): the SMS section is a routing table, not one key. `authKey`
@@ -44,7 +49,26 @@ export interface StorageConfig { accountId?: string; accessKeyId?: string; secre
  */
 export type KycProviderState = 'DIGIO' | 'DEGRADED' | 'MANUAL';
 export const KYC_PROVIDER_STATES: readonly KycProviderState[] = ['DIGIO', 'DEGRADED', 'MANUAL'];
-export interface KycConfig { clientId?: string; clientSecret?: string; baseUrl?: string; kycProvider?: KycProviderState }
+/** DR-2: who reads an identity paper at the document door — the vision model (default) or Digio's OCR on this account. */
+export type DocumentReaderChoice = 'MODEL' | 'DIGIO';
+
+export interface KycConfig {
+  clientId?: string;
+  clientSecret?: string;
+  baseUrl?: string;
+  kycProvider?: KycProviderState;
+  documentReader?: DocumentReaderChoice;
+  /** DR-2: Digio's OCR path on `baseUrl`, when theirs differs from the adapter's default. */
+  ocrPath?: string;
+  /**
+   * Phase D (1 Oct 2026): template ids that replace the defaults for some of
+   * the twenty-five Digio KYC workflows (`digio-workflows.ts`) — known keys
+   * only; a key left out uses the id from the owner's document.
+   */
+  workflowTemplates?: DigioWorkflowOverrides;
+  /** The page a person opens to verify — Digio's gateway; the eSign section's gateway when this is not set. */
+  gatewayUrl?: string;
+}
 /**
  * DS-1 (Digio eSign, 22 Sep 2026): the signing rail's own keys and hosts.
  * Empty, the KYC section's Digio credentials (the same account) and the
@@ -495,6 +519,72 @@ export const DEFAULT_IVR = {
   advertiserPrompt: 'Press 2 if you want to advertise.',
 } as const;
 
+/** BT-1: ADX's own receiving account, printed on the bank-transfer pay screen. Not secrets. */
+export interface BankTransferConfig {
+  beneficiary?: string;
+  accountNumber?: string;
+  ifsc?: string;
+  bank?: string;
+  branch?: string;
+  /** A line under the details — "Quote the reference in the remarks", say. */
+  instructions?: string;
+}
+
+/** FB-1: Facebook Login. The app id is public; the secret is masked on read. */
+export interface FacebookConfig {
+  appId?: string;
+  appSecret?: string;
+}
+
+/** SL-1: where a session signed in from — the provider that turns an address into a city. NONE looks nothing up. */
+export interface GeoIpConfig {
+  provider?: 'NONE' | 'IPAPI' | 'IPINFO';
+  token?: string;
+}
+
+/**
+ * Cashfree Phase 1 (the owner, 1 Oct 2026): Cashfree Secure ID — the
+ * verification suite that backs Digio up and answers the single checks (PAN,
+ * bank account, GSTIN, vehicle RC, driving licence, face, name match,
+ * DigiLocker). Its own client pair (Secure ID ids start `CF`; the Payment
+ * Gateway keys do not work here), and the 2FA public key: with it every
+ * call is signed (`x-cf-signature`), without it Cashfree must have
+ * whitelisted the server's IP. `clientSecret` and `publicKey` are secrets —
+ * sealed at rest, masked on the read. `testMode` picks the sandbox host.
+ */
+export interface SecureIdConfig {
+  clientId?: string;
+  clientSecret?: string;
+  /** The PEM text of the public key Cashfree issued (one active key at a time). */
+  publicKey?: string;
+  testMode?: boolean;
+}
+
+/**
+ * HC-1 (1 Oct 2026): the public holiday calendar the Holidays page follows.
+ * Google's "Holidays in India" iCal feed — no key, no cost — read weekly by
+ * `hr`. `includeObservances` brings in the festivals and days the feed marks
+ * "Observance" as OPTIONAL holidays; off, only the gazetted public holidays
+ * come in. Nothing here is a secret.
+ */
+export const HOLIDAY_CALENDAR_DEFAULT_URL =
+  'https://calendar.google.com/calendar/ical/en.indian%23holiday%40group.v.calendar.google.com/public/basic.ics';
+export interface HolidayCalendarConfig {
+  enabled?: boolean;
+  url?: string;
+  includeObservances?: boolean;
+}
+export type EffectiveHolidayCalendarConfig = Required<HolidayCalendarConfig>;
+
+/** The section with its defaults filled in: on, Google's feed, public holidays only. */
+export function resolveHolidayCalendarConfig(stored?: HolidayCalendarConfig | null): EffectiveHolidayCalendarConfig {
+  return {
+    enabled: stored?.enabled ?? true,
+    url: stored?.url?.trim() || HOLIDAY_CALENDAR_DEFAULT_URL,
+    includeObservances: stored?.includeObservances ?? false,
+  };
+}
+
 export interface IntegrationsConfig {
   sms?: SmsConfig;
   email?: EmailConfig;
@@ -509,6 +599,11 @@ export interface IntegrationsConfig {
   ccavenue?: CcavenueConfig;
   stripe?: StripeConfig;
   branding?: BrandingConfig;
+  bankTransfer?: BankTransferConfig;
+  /** FB-1: Facebook Login's app id and secret. */
+  facebook?: FacebookConfig;
+  /** SL-1 */
+  geoIp?: GeoIpConfig;
   ai?: AiConfig;
   hrms?: HrmsConfig;
   workTool?: WorkToolConfig;
@@ -518,6 +613,12 @@ export interface IntegrationsConfig {
   leadFeeds?: LeadFeedsConfig;
   leadForms?: LeadFormsConfig;
   leadChannels?: LeadChannelsConfig;
+  /** Cashfree Phase 1: the Secure ID keys. */
+  secureId?: SecureIdConfig;
+  /** Cashfree Phase 1: which provider answers which check, the breaker, the composites and the three switches. */
+  verificationRouting?: VerificationRoutingConfig;
+  /** HC-1: the public holiday calendar the Holidays page follows. */
+  holidayCalendar?: HolidayCalendarConfig;
 }
 
 const CONFIG_KEY = 'integrations';
@@ -529,7 +630,12 @@ const CACHE_TTL_SECONDS = 300;
 // Cached in Redis rather than a module-level variable, so reads never need a
 // DB round-trip on the hot path (sending an SMS/email, uploading a file) and
 // a write on one instance is immediately visible to every other instance.
-async function loadConfig(): Promise<IntegrationsConfig> {
+//
+// Cashfree Phase 1 (1 Oct 2026): the row is STORED with its secrets sealed
+// (`secret-box.ts`), and the cache holds exactly what the database holds —
+// ciphertext in both. `loadStored` is that form; `loadConfig` opens the
+// secrets in memory on the way to the code that spends them.
+async function loadStored(): Promise<IntegrationsConfig> {
   const cached = await redis.get(CACHE_KEY);
   if (cached) return JSON.parse(cached) as IntegrationsConfig;
 
@@ -537,6 +643,10 @@ async function loadConfig(): Promise<IntegrationsConfig> {
   const value = (row?.value as IntegrationsConfig | undefined) ?? {};
   await redis.set(CACHE_KEY, JSON.stringify(value), 'EX', CACHE_TTL_SECONDS);
   return value;
+}
+
+async function loadConfig(): Promise<IntegrationsConfig> {
+  return openIntegrationSecrets(await loadStored());
 }
 
 export async function getIntegrationsConfig(): Promise<IntegrationsConfig> {
@@ -553,7 +663,11 @@ export async function updateIntegrationsConfig(
   section: keyof IntegrationsConfig,
   patch: Record<string, unknown>,
 ): Promise<IntegrationsConfig> {
-  const current = await loadConfig();
+  // Production with no key refuses to store a credential before anything is read or written.
+  assertSecretsStorable(section, patch);
+  // Merged over the row AS STORED: a secret this machine cannot open (another
+  // key) stays where it is rather than being dropped by an unrelated save.
+  const current = await loadStored();
   const merged: Record<string, unknown> = { ...(current[section] as object ?? {}) };
 
   // LH3: the feed and ad-form sections are cards of cards — a patch to one
@@ -576,7 +690,9 @@ export async function updateIntegrationsConfig(
     }
   }
 
-  const next: IntegrationsConfig = { ...current, [section]: merged };
+  // Every plaintext secret on the row is sealed on the way down — the one in
+  // this patch, and any written before the key existed.
+  const next: IntegrationsConfig = sealIntegrationSecrets({ ...current, [section]: merged });
 
   await prisma.appConfig.upsert({
     where: { key: CONFIG_KEY },
@@ -585,7 +701,30 @@ export async function updateIntegrationsConfig(
   });
 
   await redis.set(CACHE_KEY, JSON.stringify(next), 'EX', CACHE_TTL_SECONDS);
-  return next;
+  return openIntegrationSecrets(next);
+}
+
+/**
+ * For `npm run integrations:encrypt`: the row as it is stored (ciphertext
+ * and any plaintext left from before the key), straight from the database —
+ * and the write that seals what is still plaintext. Nothing else reads the
+ * stored form.
+ */
+export async function readStoredIntegrationsRow(): Promise<IntegrationsConfig> {
+  const row = await prisma.appConfig.findUnique({ where: { key: CONFIG_KEY } });
+  return (row?.value as IntegrationsConfig | undefined) ?? {};
+}
+
+export async function sealStoredIntegrationsRow(): Promise<IntegrationsConfig> {
+  const stored = await readStoredIntegrationsRow();
+  const sealed = sealIntegrationSecrets(stored);
+  await prisma.appConfig.upsert({
+    where: { key: CONFIG_KEY },
+    update: { value: sealed as any },
+    create: { key: CONFIG_KEY, value: sealed as any },
+  });
+  await redis.set(CACHE_KEY, JSON.stringify(sealed), 'EX', CACHE_TTL_SECONDS);
+  return sealed;
 }
 
 // ─── Effective config getters — DB value wins, per field, over .env ──────────
@@ -684,6 +823,12 @@ export async function getEffectiveKycConfig(): Promise<KycConfig> {
     clientSecret: cfg.kyc?.clientSecret || env.DIGIO_CLIENT_SECRET,
     baseUrl: cfg.kyc?.baseUrl || env.DIGIO_BASE_URL,
     kycProvider: cfg.kyc?.kycProvider ?? 'DIGIO',
+    documentReader: cfg.kyc?.documentReader ?? 'MODEL',
+    ...(cfg.kyc?.ocrPath ? { ocrPath: cfg.kyc.ocrPath } : {}),
+    // Phase D: the overrides only — the defaults live with the workflow map.
+    workflowTemplates: cfg.kyc?.workflowTemplates ?? {},
+    // The same gateway serves a KYC request and a document to sign.
+    gatewayUrl: cfg.kyc?.gatewayUrl || cfg.esign?.gatewayUrl || env.DIGIO_ESIGN_GATEWAY_URL,
   };
 }
 
@@ -873,6 +1018,63 @@ export async function getEffectiveHrmsConfig(): Promise<HrmsConfig> {
     apiKey: hrms.apiKey,
     employeeLinkTemplate: hrms.employeeLinkTemplate || defaultTemplate,
   };
+}
+
+/** HC-1: the holiday calendar section as `hr`'s sync reads it — the row only, defaults filled in. */
+export async function getEffectiveHolidayCalendarConfig(): Promise<EffectiveHolidayCalendarConfig> {
+  const cfg = await loadConfig();
+  return resolveHolidayCalendarConfig(cfg.holidayCalendar);
+}
+
+/* ── Cashfree Phase 1: Secure ID and the verification routing ─────────────── */
+
+export type EffectiveSecureIdConfig = { clientId: string | undefined; clientSecret: string | undefined; publicKey: string | undefined; testMode: boolean };
+
+const publicKeyFiles = new Map<string, string | undefined>();
+
+/**
+ * The public key as PEM text. The row holds the text; the environment may
+ * hold the text (a `\n`-escaped single line is fine) or the path of the
+ * downloaded .pem file — Cashfree's own advice is to read the file rather
+ * than paste it. A path that cannot be read is logged by name and reads as
+ * no key, so the provider reports AUTH_CONFIG rather than signing with junk.
+ */
+export function resolveSecureIdPublicKey(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.includes('BEGIN')) return trimmed.replace(/\\n/g, '\n');
+  if (publicKeyFiles.has(trimmed)) return publicKeyFiles.get(trimmed);
+  let pem: string | undefined;
+  try {
+    pem = fs.readFileSync(trimmed, 'utf8').trim() || undefined;
+  } catch {
+    logger.error('CASHFREE_VERIFICATION_PUBLIC_KEY names a file that cannot be read; Secure ID calls go unsigned');
+  }
+  publicKeyFiles.set(trimmed, pem);
+  return pem;
+}
+
+/**
+ * The Secure ID keys in force: the row, then `CASHFREE_VERIFICATION_*`. The
+ * payouts client pair still stands in for a missing verification pair, as
+ * it has since AG-4 (the owner's test pair, 20 Sep 2026). Test mode — the
+ * sandbox host — unless something says `false`.
+ */
+export async function getEffectiveSecureIdConfig(): Promise<EffectiveSecureIdConfig> {
+  const cfg = await getIntegrationsConfig();
+  const testModeRaw = env.CASHFREE_VERIFICATION_TEST_MODE ?? env.CASHFREE_PAYOUT_TEST_MODE ?? 'true';
+  return {
+    clientId: cfg.secureId?.clientId || env.CASHFREE_VERIFICATION_CLIENT_ID || env.CASHFREE_PAYOUT_CLIENT_ID,
+    clientSecret: cfg.secureId?.clientSecret || env.CASHFREE_VERIFICATION_CLIENT_SECRET || env.CASHFREE_PAYOUT_CLIENT_SECRET,
+    publicKey: resolveSecureIdPublicKey(cfg.secureId?.publicKey || env.CASHFREE_VERIFICATION_PUBLIC_KEY),
+    testMode: cfg.secureId?.testMode ?? testModeRaw.toLowerCase() !== 'false',
+  };
+}
+
+/** The verification routing in force: the row's section laid over the defaults in `shared/verification/settings.ts`. */
+export async function getEffectiveVerificationSettings(): Promise<VerificationSettings> {
+  const cfg = await getIntegrationsConfig();
+  return resolveVerificationSettings(cfg.verificationRouting);
 }
 
 export async function getEffectiveStripeConfig(): Promise<StripeConfig> {

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 
-import { authenticate, requireRole } from '../../shared/auth';
+import { authenticate, requireRole, requirePermission } from '../../shared/auth';
 import { asyncHandler } from '../../shared/http';
 import { verifyCaptcha } from '../../shared/security';
 import {
@@ -120,16 +120,16 @@ leadRouter.use(authenticate);
 leadRouter.post('/referrals', asyncHandler(referHandler));
 leadRouter.get('/referrals/me', asyncHandler(myReferralsHandler));
 leadRouter.get('/referrals/me/link', asyncHandler(myReferralLinkHandler));
-leadRouter.get('/referrals', requireRole('ADMIN'), asyncHandler(listReferralsHandler));
+leadRouter.get('/referrals', requireRole('ADMIN'), requirePermission('growth.view'), asyncHandler(listReferralsHandler));
 
 /* LH4: the agent's street capture — a photographed wall or shop, on their own list. */
 leadRouter.post('/capture', requireRole('AGENT_PUBLISHER', 'AGENT_ADVERTISER'), asyncHandler(captureLeadHandler));
 
 /* LH3: the directory feeds — status, a run, the runs. */
-leadRouter.get('/feeds', requireRole('ADMIN'), asyncHandler(feedsStatusHandler));
-leadRouter.get('/feeds/runs', requireRole('ADMIN'), asyncHandler(listFeedRunsHandler));
-leadRouter.get('/feeds/runs/:runId', requireRole('ADMIN'), asyncHandler(getFeedRunHandler));
-leadRouter.post('/feeds/:key/run', requireRole('ADMIN'), asyncHandler(runFeedHandler));
+leadRouter.get('/feeds', requireRole('ADMIN'), requirePermission('growth.view'), asyncHandler(feedsStatusHandler));
+leadRouter.get('/feeds/runs', requireRole('ADMIN'), requirePermission('growth.view'), asyncHandler(listFeedRunsHandler));
+leadRouter.get('/feeds/runs/:runId', requireRole('ADMIN'), requirePermission('growth.view'), asyncHandler(getFeedRunHandler));
+leadRouter.post('/feeds/:key/run', requireRole('ADMIN'), requirePermission('system.jobs'), asyncHandler(runFeedHandler));
 
 /* The agent's own list. Not role-gated beyond a session: a publisher-side and
  * an advertiser-side agent both work leads, and `?side=` is how they differ.
@@ -140,53 +140,53 @@ leadRouter.get('/near', asyncHandler(leadsNearHandler));
  * ops (clusters above sixty square kilometres, pins below); the heat is
  * demand over supply; territories (D8) and priority zones (D7) are the
  * desk's rows; "assign from the polygon" is the desk's bulk move. */
-leadRouter.get('/map', asyncHandler(mapHandler));
+leadRouter.get('/map', requirePermission('marketplace.view'), asyncHandler(mapHandler));
 leadRouter.get('/map/heat', asyncHandler(heatHandler));
-leadRouter.post('/map/assign', requireRole('ADMIN'), asyncHandler(assignInPolygonHandler));
-leadRouter.get('/territories', requireRole('ADMIN'), asyncHandler(listTerritoriesHandler));
-leadRouter.post('/territories', requireRole('ADMIN'), asyncHandler(createTerritoryHandler));
-leadRouter.patch('/territories/:territoryId', requireRole('ADMIN'), asyncHandler(patchTerritoryHandler));
+leadRouter.post('/map/assign', requireRole('ADMIN'), requirePermission('growth.edit'), asyncHandler(assignInPolygonHandler));
+leadRouter.get('/territories', requireRole('ADMIN'), requirePermission('growth.view'), asyncHandler(listTerritoriesHandler));
+leadRouter.post('/territories', requireRole('ADMIN'), requirePermission('growth.edit'), asyncHandler(createTerritoryHandler));
+leadRouter.patch('/territories/:territoryId', requireRole('ADMIN'), requirePermission('growth.edit'), asyncHandler(patchTerritoryHandler));
 /* LH10: the integrity desk — the flags, the QA samples, an agent's quality
  * score, and the three sweeps by hand. ADMIN only: a flag is about an agent,
  * and a score nobody has reviewed is not the agent's to read. */
-leadRouter.get('/flags', requireRole('ADMIN'), asyncHandler(integrity.listFlagsHandler));
-leadRouter.post('/flags/:flagId/decide', requireRole('ADMIN'), asyncHandler(integrity.decideFlagHandler));
-leadRouter.post('/flags/scan', requireRole('ADMIN'), asyncHandler(integrity.scanIntegrityHandler));
-leadRouter.get('/qa', requireRole('ADMIN'), asyncHandler(integrity.listQaHandler));
-leadRouter.post('/qa/:sampleId/review', requireRole('ADMIN'), asyncHandler(integrity.reviewQaHandler));
-leadRouter.post('/qa/sample', requireRole('ADMIN'), asyncHandler(integrity.sampleQaHandler));
-leadRouter.get('/quality/:agentId', requireRole('ADMIN'), asyncHandler(integrity.agentQualityHandler));
-leadRouter.post('/clawbacks/run', requireRole('ADMIN'), asyncHandler(integrity.runClawbacksHandler));
+leadRouter.get('/flags', requireRole('ADMIN'), requirePermission('growth.view'), asyncHandler(integrity.listFlagsHandler));
+leadRouter.post('/flags/:flagId/decide', requireRole('ADMIN'), requirePermission('growth.edit'), asyncHandler(integrity.decideFlagHandler));
+leadRouter.post('/flags/scan', requireRole('ADMIN'), requirePermission('system.jobs'), asyncHandler(integrity.scanIntegrityHandler));
+leadRouter.get('/qa', requireRole('ADMIN'), requirePermission('growth.view'), asyncHandler(integrity.listQaHandler));
+leadRouter.post('/qa/:sampleId/review', requireRole('ADMIN'), requirePermission('growth.edit'), asyncHandler(integrity.reviewQaHandler));
+leadRouter.post('/qa/sample', requireRole('ADMIN'), requirePermission('growth.edit'), asyncHandler(integrity.sampleQaHandler));
+leadRouter.get('/quality/:agentId', requireRole('ADMIN'), requirePermission('growth.view'), asyncHandler(integrity.agentQualityHandler));
+leadRouter.post('/clawbacks/run', requireRole('ADMIN'), requirePermission('system.jobs'), asyncHandler(integrity.runClawbacksHandler));
 
-leadRouter.get('/priority-zones', requireRole('ADMIN'), asyncHandler(listZonesHandler));
-leadRouter.post('/priority-zones', requireRole('ADMIN'), asyncHandler(createZoneHandler));
-leadRouter.patch('/priority-zones/:zoneId', requireRole('ADMIN'), asyncHandler(patchZoneHandler));
+leadRouter.get('/priority-zones', requireRole('ADMIN'), requirePermission('growth.view'), asyncHandler(listZonesHandler));
+leadRouter.post('/priority-zones', requireRole('ADMIN'), requirePermission('growth.edit'), asyncHandler(createZoneHandler));
+leadRouter.patch('/priority-zones/:zoneId', requireRole('ADMIN'), requirePermission('growth.edit'), asyncHandler(patchZoneHandler));
 
 /* LH6: the outreach hub — channel states, the two queues, the funnel by channel, the sequence editor. */
 leadRouter.get('/outreach/channels', asyncHandler(channelsHandler));
 leadRouter.get('/outreach/inbox', asyncHandler(inboxHandler));
-leadRouter.get('/outreach/tele-queue', requireRole('ADMIN'), asyncHandler(teleQueueHandler));
-leadRouter.get('/outreach/funnel', requireRole('ADMIN'), asyncHandler(channelFunnelHandler));
-leadRouter.get('/sequences', requireRole('ADMIN'), asyncHandler(listSequencesHandler));
-leadRouter.post('/sequences', requireRole('ADMIN'), asyncHandler(createSequenceHandler));
-leadRouter.get('/sequences/preview', requireRole('ADMIN'), asyncHandler(previewStepHandler));
-leadRouter.get('/sequences/:sequenceId', requireRole('ADMIN'), asyncHandler(getSequenceHandler));
-leadRouter.patch('/sequences/:sequenceId', requireRole('ADMIN'), asyncHandler(patchSequenceHandler));
+leadRouter.get('/outreach/tele-queue', requireRole('ADMIN'), requirePermission('growth.view'), asyncHandler(teleQueueHandler));
+leadRouter.get('/outreach/funnel', requireRole('ADMIN'), requirePermission('growth.view'), asyncHandler(channelFunnelHandler));
+leadRouter.get('/sequences', requireRole('ADMIN'), requirePermission('growth.view'), asyncHandler(listSequencesHandler));
+leadRouter.post('/sequences', requireRole('ADMIN'), requirePermission('growth.edit'), asyncHandler(createSequenceHandler));
+leadRouter.get('/sequences/preview', requireRole('ADMIN'), requirePermission('growth.view'), asyncHandler(previewStepHandler));
+leadRouter.get('/sequences/:sequenceId', requireRole('ADMIN'), requirePermission('growth.view'), asyncHandler(getSequenceHandler));
+leadRouter.patch('/sequences/:sequenceId', requireRole('ADMIN'), requirePermission('growth.edit'), asyncHandler(patchSequenceHandler));
 /* LH7: the invite landing's copy per side — the ladder in force, for the flow editor. */
-leadRouter.get('/landing-copy', requireRole('ADMIN'), asyncHandler(landingCopyHandler));
+leadRouter.get('/landing-copy', requireRole('ADMIN'), requirePermission('growth.view'), asyncHandler(landingCopyHandler));
 
 /* ADMIN's desk. Declared before '/:leadId' so "near" and the bare list are
  * never read as an id. */
-leadRouter.get('/', requireRole('ADMIN'), asyncHandler(adminLeadsHandler));
-leadRouter.post('/', requireRole('ADMIN'), asyncHandler(createLeadHandler));
-leadRouter.post('/import', requireRole('ADMIN'), asyncHandler(importLeadsHandler));
+leadRouter.get('/', requireRole('ADMIN'), requirePermission('growth.view'), asyncHandler(adminLeadsHandler));
+leadRouter.post('/', requireRole('ADMIN'), requirePermission('growth.edit'), asyncHandler(createLeadHandler));
+leadRouter.post('/import', requireRole('ADMIN'), requirePermission('growth.edit'), asyncHandler(importLeadsHandler));
 
 /* LH2: the funnel — aggregates by stage, source, agent, city, category, channel. */
-leadRouter.get('/funnel', requireRole('ADMIN'), asyncHandler(funnelHandler));
+leadRouter.get('/funnel', requireRole('ADMIN'), requirePermission('growth.view'), asyncHandler(funnelHandler));
 
 /* LH1: the sources — a record per door, with its learned quality. */
-leadRouter.get('/sources', requireRole('ADMIN'), asyncHandler(listSourcesHandler));
-leadRouter.patch('/sources/:sourceId', requireRole('ADMIN'), asyncHandler(patchSourceHandler));
+leadRouter.get('/sources', requireRole('ADMIN'), requirePermission('growth.view'), asyncHandler(listSourcesHandler));
+leadRouter.patch('/sources/:sourceId', requireRole('ADMIN'), requirePermission('growth.edit'), asyncHandler(patchSourceHandler));
 
 leadRouter.get('/:leadId', asyncHandler(getLeadHandler));
 leadRouter.post('/:leadId/contact', asyncHandler(logContactHandler));
@@ -197,12 +197,12 @@ leadRouter.post('/:leadId/flag-hot', asyncHandler(flagHotHandler));
 /* LH5 (D3): the agent's claim on a pin, and letting it go. */
 leadRouter.post('/:leadId/claim', requireRole('AGENT_PUBLISHER', 'AGENT_ADVERTISER'), asyncHandler(claimLeadHandler));
 leadRouter.post('/:leadId/release', requireRole('AGENT_PUBLISHER', 'AGENT_ADVERTISER'), asyncHandler(releaseLeadHandler));
-leadRouter.post('/:leadId/rescore', requireRole('ADMIN'), asyncHandler(rescoreLeadHandler));
+leadRouter.post('/:leadId/rescore', requireRole('ADMIN'), requirePermission('growth.edit'), asyncHandler(rescoreLeadHandler));
 /* LH2: the agent's next steps — they replied, a proposal went out, it is lost — and the desk's stage move. */
 leadRouter.post('/:leadId/engaged', asyncHandler(markEngagedHandler));
 leadRouter.post('/:leadId/proposed', asyncHandler(markProposedHandler));
 leadRouter.post('/:leadId/lost', asyncHandler(markLostHandler));
-leadRouter.patch('/:leadId/stage', requireRole('ADMIN'), asyncHandler(moveStageHandler));
+leadRouter.patch('/:leadId/stage', requireRole('ADMIN'), requirePermission('growth.edit'), asyncHandler(moveStageHandler));
 /* LH6: the unified thread, the composer, the touch log, the calls, the callback, the sequence on this lead. */
 leadRouter.get('/:leadId/thread', asyncHandler(threadHandler));
 leadRouter.get('/:leadId/messages', asyncHandler(messagesHandler));
@@ -219,7 +219,7 @@ leadRouter.post('/:leadId/invite', asyncHandler(issueInviteHandler));
 leadRouter.get('/:leadId/proposals', asyncHandler(listProposalsHandler));
 leadRouter.post('/:leadId/proposals', asyncHandler(sendProposalHandler));
 leadRouter.post('/:leadId/proposals/:proposalId/accept', asyncHandler(markProposalHandler));
-leadRouter.patch('/:leadId', requireRole('ADMIN'), asyncHandler(patchLeadHandler));
+leadRouter.patch('/:leadId', requireRole('ADMIN'), requirePermission('growth.edit'), asyncHandler(patchLeadHandler));
 
 /* LH3: the lead-form ad webhooks — signed by their providers, idempotent by the provider's lead id. Mounted by bootstrap under /webhooks/leads. */
 export const leadWebhookRouter = Router();

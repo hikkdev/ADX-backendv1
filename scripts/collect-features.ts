@@ -3,7 +3,8 @@
  *
  * Loads every `src/modules/<module>/features.ts` and `src/bootstrap/features.ts`
  * (each calls `feature()` at import, and imports nothing but `shared/features`),
- * reads the three package manifests beside this package, and folds them into
+ * reads the four package manifests beside this package (console, user app,
+ * agent app, website), and folds them into
  * the registry document. Used by scripts/features-sync.ts (the writer) and by
  * tests/architecture/feature-registry.test.ts (the gate that fails when the
  * committed document is behind), so both measure the codebase the same way.

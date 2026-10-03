@@ -104,7 +104,7 @@ const NOW = new Date('2026-09-14T10:00:00Z');
 const admin = (over: Record<string, unknown> = {}) => ({
   id: 'adm_1',
   mobile: '+919845012210',
-  email: 'asha.rao@adx.co',
+  email: 'asha.rao@adx.in',
   isActive: true,
   emailOtpFallbackCount: 0,
   emailOtpFallbackResetAt: null,
@@ -157,7 +157,7 @@ describe('enrolment', () => {
   it('keeps the pending secret in Redis for ten minutes and never writes the row until confirmed', async () => {
     const start = await startEnrolment('adm_1');
     expect(start.secret).toMatch(/^[A-Z2-7]{32}$/);
-    expect(start.otpauthUri).toContain('otpauth://totp/ADX%3Aasha.rao%40adx.co?');
+    expect(start.otpauthUri).toContain('otpauth://totp/ADX%3Aasha.rao%40adx.in?');
     expect(start.otpauthUri).toContain(`secret=${start.secret}`);
     expect(start.qrSvg.startsWith('data:image/svg+xml;base64,')).toBe(true);
     expect(start.expiresInSeconds).toBe(TOTP_PENDING_TTL_SECONDS);
@@ -206,13 +206,13 @@ describe('enrolment', () => {
 });
 
 describe('signing in with the app', () => {
-  const challengeFor = async () => (await issueChallenge({ id: 'adm_1', mobile: '+919845012210', email: 'asha.rao@adx.co' })).challengeToken;
+  const challengeFor = async () => (await issueChallenge({ id: 'adm_1', mobile: '+919845012210', email: 'asha.rao@adx.in' })).challengeToken;
 
   it('lists AUTHENTICATOR first once enrolled, and /2fa/send answers the step without sending', async () => {
     expect(TWO_FACTOR_METHODS).toEqual(['AUTHENTICATOR', 'SMS', 'EMAIL']);
-    expect(await availableMethods('adm_1', 'asha.rao@adx.co')).toEqual(['SMS', 'EMAIL']);
+    expect(await availableMethods('adm_1', 'asha.rao@adx.in')).toEqual(['SMS', 'EMAIL']);
     await enrol();
-    expect(await availableMethods('adm_1', 'asha.rao@adx.co')).toEqual(['AUTHENTICATOR', 'SMS', 'EMAIL']);
+    expect(await availableMethods('adm_1', 'asha.rao@adx.in')).toEqual(['AUTHENTICATOR', 'SMS', 'EMAIL']);
     const sent = await sendTwoFactorCode(await challengeFor(), 'AUTHENTICATOR');
     expect(sent).toEqual({ method: 'AUTHENTICATOR', expiresInSeconds: 30 });
     expect(otp.sendOtp).not.toHaveBeenCalled();
@@ -373,15 +373,15 @@ describe('the policy', () => {
 
   it('the challenge still lists SMS/EMAIL while required and un-enrolled — the person has to get in to enrol', async () => {
     settings.auth.adminTwoFactor.authenticatorRequired = true;
-    const challenge = await issueChallenge({ id: 'adm_1', mobile: '+919845012210', email: 'asha.rao@adx.co' });
+    const challenge = await issueChallenge({ id: 'adm_1', mobile: '+919845012210', email: 'asha.rao@adx.in' });
     expect(challenge.methods).toEqual(['SMS', 'EMAIL']);
   });
 
   it('smsAllowedWhenEnrolled off lists AUTHENTICATOR alone, refuses a sent channel, and a recovery code still works', async () => {
     const { done } = await enrol();
     settings.auth.adminTwoFactor.smsAllowedWhenEnrolled = false;
-    expect(await availableMethods('adm_1', 'asha.rao@adx.co')).toEqual(['AUTHENTICATOR']);
-    const challenge = await issueChallenge({ id: 'adm_1', mobile: '+919845012210', email: 'asha.rao@adx.co' });
+    expect(await availableMethods('adm_1', 'asha.rao@adx.in')).toEqual(['AUTHENTICATOR']);
+    const challenge = await issueChallenge({ id: 'adm_1', mobile: '+919845012210', email: 'asha.rao@adx.in' });
     expect(challenge.methods).toEqual(['AUTHENTICATOR']);
     await expect(sendTwoFactorCode(challenge.challengeToken, 'SMS')).rejects.toMatchObject({ statusCode: 403, details: { methods: ['AUTHENTICATOR'] } });
     await expect(sendTwoFactorCode(challenge.challengeToken, 'EMAIL')).rejects.toMatchObject({ statusCode: 403 });
@@ -393,7 +393,7 @@ describe('the policy', () => {
 
 /* M-B: the mobile OTP door. */
 describe('the challenge after a mobile OTP', () => {
-  const who = { id: 'adm_1', mobile: '+919845012210', email: 'asha.rao@adx.co' };
+  const who = { id: 'adm_1', mobile: '+919845012210', email: 'asha.rao@adx.in' };
 
   it('lists the email backup alone for an un-enrolled admin under the default policy — the phone was the SMS factor, never SMS again', async () => {
     const challenge = await issueChallengeAfterMobileOtp(who);
@@ -456,7 +456,7 @@ describe('the challenge after a mobile OTP', () => {
 
 /* M-B: the policy is read when the code is verified, not when it was sent. */
 describe('a policy flip after a code was sent', () => {
-  const challengeFor = async () => (await issueChallenge({ id: 'adm_1', mobile: '+919845012210', email: 'asha.rao@adx.co' })).challengeToken;
+  const challengeFor = async () => (await issueChallenge({ id: 'adm_1', mobile: '+919845012210', email: 'asha.rao@adx.in' })).challengeToken;
 
   it('a live SMS or email code for an enrolled admin opens nothing once smsAllowedWhenEnrolled is off; the app still does', async () => {
     const { secret } = await enrol();

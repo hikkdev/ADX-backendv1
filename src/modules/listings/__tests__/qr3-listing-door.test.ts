@@ -81,9 +81,10 @@ describe('POST /listings as a publisher on their own phone', () => {
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('PROFILE_INCOMPLETE');
     expect(res.body.error.message).toBe(
-      'Add your name, an email address, your address and your date of birth to your profile before listing a spot. Spots you add are reviewed by ADX; verified profiles and their spots are shown first to advertisers.',
+      'Add your name, an email address and your address to your profile before listing a spot. Spots you add are reviewed by ADX; verified profiles and their spots are shown first to advertisers.',
     );
-    expect(res.body.error.details).toEqual({ missing: ['name', 'email', 'address', 'dateOfBirth'] });
+    // AGE-1 (29 Sep 2026): the date of birth is not a basic — listing a space asks no age.
+    expect(res.body.error.details).toEqual({ missing: ['name', 'email', 'address'] });
     expect(service.createListing).not.toHaveBeenCalled();
   });
 

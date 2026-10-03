@@ -106,4 +106,26 @@ describe('getAllListings', () => {
     expect(result.items).toEqual([]);
     expect(result.total).toBe(0);
   });
+
+  it('3 Oct 2026: stamps each row with its cover photograph and its bookings, for the grid view', async () => {
+    repository.findAllForAdmin.mockResolvedValue({
+      items: [
+        {
+          id: 'lst_a',
+          photos: [
+            { url: 'https://cdn/left.jpg', type: 'LEFT' },
+            { url: 'https://cdn/front.jpg', type: 'FRONT' },
+          ],
+        },
+        { id: 'lst_b', photos: [] },
+      ],
+      total: 2,
+      counts: {},
+      bookingCounts: { lst_a: 12 },
+    });
+    const result = await getAllListings(adminListingsQuerySchema.parse({}));
+    expect(result.items[0]).toMatchObject({ id: 'lst_a', coverPhotoUrl: 'https://cdn/front.jpg', bookingCount: 12 });
+    // No photograph is no cover, and a spot nobody booked has none.
+    expect(result.items[1]).toMatchObject({ id: 'lst_b', coverPhotoUrl: null, bookingCount: 0 });
+  });
 });

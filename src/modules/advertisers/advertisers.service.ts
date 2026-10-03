@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { onboardingFactsOf, type OnboardingFacts } from '../../shared/onboarding';
 import type { Request } from 'express';
 import { ApiError } from '../../shared/errors';
-import { logActivity } from '../../shared/audit';
+import { auditDiff, logActivity } from '../../shared/audit';
 import { logger } from '../../shared/logging';
 import { Decimal, money } from '../../shared/money';
 import { dateOfBirthToDate, dateOfBirthToString, normalizeMobile } from '../../shared/validation';
@@ -11,6 +11,7 @@ import type {
   AgreementKind,
   Brand,
   Gender,
+  KycEntityType,
   KycStatus,
   RefundDestination,
   RefundReason,
@@ -20,16 +21,16 @@ import type {
   PartySizeBand,
 } from '../../shared/database';
 import type { ListQuery, PageQuery } from '../../shared/pagination';
-import { kycSummaryOf, type KycSummary } from '../../shared/kyc-state';
-import { findAgentTier } from '../agents';
+import { assertLegacyTypeChange, entityTypeFacts, entityTypeForEdit, kycSummaryOf, type KycSummary } from '../../shared/kyc-state';
+import { findAgentTier, payForNextOnboarding } from '../agents';
 import { acceptInsertionOrder as recordInsertionOrder, isCurrentAcceptance, openInsertionOrderSigning, type SigningView } from '../agreements';
 import { allocateIdentifier } from '../identifiers';
 import { platformAccount, post as postLedger } from '../ledger';
 import { findPayoutMethod, recordIncentiveOnce } from '../payouts';
-import { withCityKey } from '../pricing';
+import { cityKeyFor, withCityKey } from '../pricing';
 import { findWallet, move } from '../wallets';
 import { prismaAdvertisersRepository as repository } from './prisma-advertisers.repository';
-import type { AdvertiserRosterQuery, CreateAdvertiserInput, Money, PersonRow, RefundRequestDeskRow, TopUpDeskQuery, WalletSnapshot } from './advertisers.repository';
+import type { AdvertiserRosterQuery, AdvertiserRosterRow, CreateAdvertiserInput, Money, PersonRow, RefundRequestDeskRow, TopUpDeskQuery, WalletSnapshot } from './advertisers.repository';
 
 /**
  * The demand-side lifecycle. Specification: docs/advertiser-onboarding.md.
@@ -179,7 +180,7 @@ export function findAdvertiser(id: string): Promise<Advertiser | null> {
  */
 export async function getAdvertiserDetail(
   id: string,
-): Promise<Advertiser & { user: { closedAt: Date | null; closeReason: string | null } | null; kyc: KycSummary; onboarding: OnboardingFacts; person: DetailPerson | null }> {
+): Promise<Advertiser & EntityTypeFacts & { user: { closedAt: Date | null; closeReason: string | null } | null; kyc: KycSummary; onboarding: OnboardingFacts; person: DetailPerson | null }> {
   const advertiser = await getAdvertiser(id);
   const [user, record, held] = await Promise.all([
     advertiser.userId ? repository.findUserClosure(advertiser.userId) : Promise.resolve(null),
@@ -191,12 +192,17 @@ export async function getAdvertiserDetail(
   const byName = advertiser.onboardedById ? await repository.findUserLabel(advertiser.onboardedById) : null;
   return {
     ...advertiser,
+    // Phase D: the effective legal form (null when unknown) and whether it was chosen.
+    ...entityTypeFacts('ADVERTISER', advertiser),
     user: user ? { closedAt: user.closedAt, closeReason: user.closeReason } : null,
     kyc: kycSummaryOf(record, advertiser.kycStatus),
     onboarding: onboardingFactsOf(advertiser, byName),
     person: personOf(held),
   };
 }
+
+/** Phase D: what every advertiser read carries of the legal form — see `entityTypeFacts`. */
+export type EntityTypeFacts = { entityType: KycEntityType | null; entityTypeStored: boolean };
 
 /** QR-15: the person's fields as the console reads them — the date of birth as YYYY-MM-DD. */
 export type DetailPerson = {
@@ -304,6 +310,9 @@ export async function registerAdvertiser(input: RegisterInput): Promise<Advertis
     if (rest.userId && existing.userId === null) {
       return repository.attachUser(existing.id, rest.userId);
     }
+    // The caller's own row, opened by a request that raced this one (a
+    // double tap on POST /users/me/party): the same account, not a second.
+    if (rest.userId && existing.userId === rest.userId) return existing;
     throw new ApiError(409, 'CONFLICT', 'An advertiser with this mobile already exists');
   }
 
@@ -356,12 +365,16 @@ export async function setAdvertiserBand(id: string, adminId: string, sizeBand: P
 
 export async function updateProfile(
   id: string,
-  patch: Parameters<typeof repository.updateAdvertiser>[1] & DeskPerson
+  patch: Parameters<typeof repository.updateAdvertiser>[1] & DeskPerson,
+  actor?: { userId: string; req?: Request | undefined },
 ): Promise<Advertiser> {
-  const advertiser = await getAdvertiser(id);
+  let advertiser = await getAdvertiser(id);
   // kycStatus and activatedAt are outcomes of review and acceptance, never of
-  // someone editing their own profile.
-  const { kycStatus: _kyc, activatedAt: _activated, firstName, lastName, dateOfBirth, gender, ...safe } = patch;
+  // someone editing their own profile. Phase D: the entity type is decided
+  // first, on its own rule — a refusal leaves the rest of the patch unwritten.
+  const { kycStatus: _kyc, activatedAt: _activated, entityType, firstName, lastName, dateOfBirth, gender, ...safe } = patch;
+  assertLegacyTypeChange({ party: 'ADVERTISER', stored: advertiser.entityType, legacyType: advertiser.type, verified: advertiser.kycStatus === 'VERIFIED' }, safe.type, entityType);
+  if (entityType !== undefined) advertiser = await editEntityType(advertiser, entityType, actor);
   const person = {
     ...(firstName !== undefined ? { firstName } : {}),
     ...(lastName !== undefined ? { lastName } : {}),
@@ -386,7 +399,61 @@ export async function updateProfile(
       await repository.attachUser(id, account.id);
     }
   }
+  // Phase D: a patch that named only the entity type has nothing left to write.
+  if (entityType !== undefined && Object.keys(safe).length === 0) return getAdvertiser(id);
   return repository.updateAdvertiser(id, await withCityKey(safe));
+}
+
+/* ------------------------------------------------------------------ */
+/* Phase D: the legal form the KYC verifies                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The KYC module's upgrade door, registered by bootstrap: a verified
+ * individual's KYC reopened as the business they registered — a fresh Digio
+ * request on the new workflow, the record and the mirror back to PENDING.
+ * The KYC record belongs to `kyc`, and `kyc` imports this module, so the
+ * edit reaches it through a port.
+ */
+export type AdvertiserKycUpgradePort = (advertiser: Advertiser, entityType: KycEntityType, by: { userId: string; req?: Request | undefined }) => Promise<unknown>;
+let kycUpgradePort: AdvertiserKycUpgradePort | null = null;
+
+export function registerAdvertiserKycUpgradePort(port: AdvertiserKycUpgradePort | null): void {
+  kycUpgradePort = port;
+}
+
+/** Phase D: the entity type stored on the profile — the KYC start's answer, kept whatever Digio says next. */
+export function setAdvertiserEntityType(id: string, entityType: KycEntityType | null): Promise<Advertiser> {
+  return repository.updateAdvertiser(id, { entityType });
+}
+
+/**
+ * Phase D: `PATCH /advertisers/:id { entityType }` — the Edit-details drawer.
+ * An unverified advertiser's type is stored (null clears it back to what
+ * `type` says); a verified one may only take the upgrade, which goes out as
+ * a fresh Digio request; any other change is 409 KYC_LOCKED.
+ */
+async function editEntityType(advertiser: Advertiser, requested: KycEntityType | null, actor?: { userId: string; req?: Request | undefined }): Promise<Advertiser> {
+  const change = entityTypeForEdit({ party: 'ADVERTISER', stored: advertiser.entityType, legacyType: advertiser.type, verified: advertiser.kycStatus === 'VERIFIED' }, requested);
+  if (!change || change.change === 'KEEP') return advertiser;
+  if (change.change === 'UPGRADE') {
+    if (!kycUpgradePort || !actor) throw new ApiError(503, 'SERVICE_UNAVAILABLE', 'The KYC upgrade is not available on this server');
+    await kycUpgradePort(advertiser, change.entityType, actor);
+    return getAdvertiser(advertiser.id);
+  }
+  const next = change.change === 'CLEAR' ? null : change.entityType;
+  const updated = await setAdvertiserEntityType(advertiser.id, next);
+  if (actor) {
+    await logActivity(actor.userId, 'KYC_ENTITY_TYPE_SET', {
+      req: actor.req,
+      targetType: 'Advertiser',
+      targetId: advertiser.id,
+      module: 'advertisers',
+      diff: auditDiff({ entityType: change.previous }, { entityType: next }),
+      metadata: { party: 'ADVERTISER', at: 'EDIT' },
+    });
+  }
+  return updated;
 }
 
 /**
@@ -445,13 +512,20 @@ export type Activated = Advertiser & { incentive: OnboardingIncentive };
 async function recordOnboardingCommission(advertiser: Advertiser): Promise<OnboardingIncentive> {
   if (!advertiser.agentId) return null;
   try {
+    // CP-1: inside the day's quota the salary already paid for it.
+    const pay = await payForNextOnboarding(advertiser.agentId);
+    if (pay.covered || pay.reason === 'UNPRICEABLE') return null;
     const tier = (await findAgentTier(advertiser.agentId)) ?? '*';
     const incentive = await recordIncentiveOnce({
       agentId: advertiser.agentId,
       event: 'ADVERTISER_ONBOARDED',
       tier,
       advertiserId: advertiser.id,
-      note: `Onboarded ${advertiser.displayId ?? advertiser.id}: ${advertiser.companyName ?? advertiser.name}`,
+      ...(pay.amount ? { amount: pay.amount } : {}),
+      note:
+        pay.reason === 'BEYOND_QUOTA'
+          ? `Onboarded ${advertiser.displayId ?? advertiser.id}: ${advertiser.companyName ?? advertiser.name} — beyond the day's quota of ${pay.quota}`
+          : `Onboarded ${advertiser.displayId ?? advertiser.id}: ${advertiser.companyName ?? advertiser.name}`,
       // Lot F: the agent's INCENTIVE_RECORDED notice names the account.
       notice: { partyName: advertiser.companyName ?? advertiser.name },
     });
@@ -475,10 +549,16 @@ async function maybeActivate(advertiser: Advertiser): Promise<Activated> {
 
 /** The roster; E7-3: `q` searches name / company / email / mobile / displayId beside the cursor page. */
 export const listAdvertisers = async (query: AdvertiserRosterQuery) => {
-  const page = await repository.listAdvertisers(query);
+  // 29 Sep 2026 / Lot X-B: `?city=` is a slug (or a name) — matched by the key, the spelling as the fallback.
+  const filter = query.city ? { ...query, cityId: (await cityKeyFor(query.city))?.cityId ?? null } : query;
+  const page = await repository.listAdvertisers(filter);
   // QR-14/15: the roster names who onboarded each row, one lookup for the page.
-  const rows = (page as { rows?: Advertiser[] }).rows;
-  return rows ? { ...page, rows: await withOnboardingFacts(rows) } : page;
+  const rows = (page as { rows?: AdvertiserRosterRow[] }).rows;
+  if (!rows) return page;
+  // 29 Sep 2026: and where each stands on KYC — the detail page's own `kyc` summary, one lookup for the page.
+  const [withFacts, records] = await Promise.all([withOnboardingFacts(rows), repository.findKycSummaries(rows)]);
+  // Phase D: and the effective legal form, as the detail read answers it.
+  return { ...page, rows: withFacts.map((row) => ({ ...row, ...entityTypeFacts('ADVERTISER', row), kyc: kycSummaryOf(records.get(row.id) ?? null, row.kycStatus) })) };
 };
 
 /**
@@ -880,6 +960,33 @@ export async function payForPackage(
   });
   if (!result) throw new ApiError(404, 'NOT_FOUND', 'Wallet not found');
   return { paid: true };
+}
+
+/**
+ * RF-1: the part of a reservation fee ADX keeps when the advertiser walks
+ * away from a reserved booking (or the hold lapses) — wallet − /
+ * platform:revenue +, a PENALTY on the book. The fee's hold was released
+ * just before, so the balance covers it. Idempotent per campaign.
+ */
+export async function retainReservationFee(advertiserId: string, campaignId: string, amount: Money, note: string): Promise<{ retained: boolean }> {
+  assertPositive(amount);
+  const advertiser = await getAdvertiser(advertiserId);
+  const row = await repository.ensureWallet(advertiserId);
+  const result = await move({
+    walletId: row.id,
+    walletLabel: walletLabel(advertiser),
+    amount: money(new Decimal(amount).negated()),
+    entryType: 'ADJUSTMENT',
+    ledgerKind: 'PENALTY',
+    idempotencyKey: `reservation-retain:${campaignId}`,
+    requireFunds: true,
+    campaignId,
+    counterLegs: [{ accountCode: 'platform:revenue', amount: money(amount), note: 'Reservation fee retained' }],
+    reference: campaignId,
+    note,
+  });
+  if (!result) throw new ApiError(404, 'NOT_FOUND', 'Wallet not found');
+  return { retained: true };
 }
 
 /**

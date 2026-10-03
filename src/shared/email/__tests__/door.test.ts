@@ -30,9 +30,9 @@ const RESEND_KEY = 're_live_KEY_9876';
 const smtp = (over: Record<string, unknown> = {}) => ({
   host: 'smtp.gmail.com',
   port: 587,
-  user: 'ops@adx.co',
+  user: 'ops@adx.in',
   password: SMTP_PASSWORD,
-  from: 'ADX <ops@adx.co>',
+  from: 'ADX <ops@adx.in>',
   primary: 'SMTP',
   mode: 'SMTP',
   ...over,
@@ -58,7 +58,7 @@ beforeEach(() => {
   redis.get.mockResolvedValue(null);
   redis.set.mockResolvedValue('OK');
   config.getEffectiveEmailConfig.mockResolvedValue(smtp());
-  config.getEffectiveResendConfig.mockResolvedValue({ apiKey: RESEND_KEY, fromEmail: 'ADX <hello@adx.co>' });
+  config.getEffectiveResendConfig.mockResolvedValue({ apiKey: RESEND_KEY, fromEmail: 'ADX <hello@adx.in>' });
 });
 
 afterEach(() => {
@@ -77,14 +77,14 @@ describe('resolveEmailProvider', () => {
 
 describe('sendEmail — the one door', () => {
   it('SMTP: a transport on the host, secure by the port, the password never in the answer', async () => {
-    const result = await sendEmail('asha@adx.co', 'Hi', '<p>hi</p>');
+    const result = await sendEmail('asha@adx.in', 'Hi', '<p>hi</p>');
     expect(nodemailer.createTransport).toHaveBeenCalledWith({
       host: 'smtp.gmail.com',
       port: 587,
       secure: false,
-      auth: { user: 'ops@adx.co', pass: SMTP_PASSWORD },
+      auth: { user: 'ops@adx.in', pass: SMTP_PASSWORD },
     });
-    expect(sendMailMock).toHaveBeenCalledWith({ from: 'ADX <ops@adx.co>', to: 'asha@adx.co', subject: 'Hi', html: '<p>hi</p>' });
+    expect(sendMailMock).toHaveBeenCalledWith({ from: 'ADX <ops@adx.in>', to: 'asha@adx.in', subject: 'Hi', html: '<p>hi</p>' });
     expect(result).toEqual({ provider: 'SMTP', configured: true, messageId: '<m1@adx>', response: '250 2.0.0 OK queued', previewUrl: null });
     expect(nodemailer.createTestAccount).not.toHaveBeenCalled();
     expect(JSON.stringify(result)).not.toContain(SMTP_PASSWORD);
@@ -92,13 +92,13 @@ describe('sendEmail — the one door', () => {
 
   it('SMTP on 465 is implicit TLS', async () => {
     config.getEffectiveEmailConfig.mockResolvedValue(smtp({ port: 465 }));
-    await sendEmail('asha@adx.co', 'Hi', '<p>hi</p>');
+    await sendEmail('asha@adx.in', 'Hi', '<p>hi</p>');
     expect(nodemailer.createTransport).toHaveBeenCalledWith(expect.objectContaining({ port: 465, secure: true }));
   });
 
   it('SMTP with no host: logged, configured false, nothing sent', async () => {
     config.getEffectiveEmailConfig.mockResolvedValue(smtp({ host: undefined }));
-    const result = await sendEmail('asha@adx.co', 'Hi', '<p>hi</p>');
+    const result = await sendEmail('asha@adx.in', 'Hi', '<p>hi</p>');
     expect(nodemailer.createTransport).not.toHaveBeenCalled();
     expect(result).toEqual({ provider: 'SMTP', configured: false, messageId: null, response: null, previewUrl: null });
   });
@@ -107,7 +107,7 @@ describe('sendEmail — the one door', () => {
     config.getEffectiveEmailConfig.mockResolvedValue(smtp({ primary: 'RESEND', mode: 'ETHEREAL' }));
     const fetchMock = vi.fn(async () => ({ ok: true, status: 200, text: async () => '{"id":"re_1"}' }));
     vi.stubGlobal('fetch', fetchMock);
-    const result = await sendEmail('asha@adx.co', 'Hi', '<p>hi</p>');
+    const result = await sendEmail('asha@adx.in', 'Hi', '<p>hi</p>');
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0]! as unknown as [string, RequestInit];
     expect(url).toBe('https://api.resend.com/emails');
@@ -122,14 +122,14 @@ describe('sendEmail — the one door', () => {
     config.getEffectiveResendConfig.mockResolvedValue({ apiKey: undefined, fromEmail: undefined });
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
-    const result = await sendEmail('asha@adx.co', 'Hi', '<p>hi</p>');
+    const result = await sendEmail('asha@adx.in', 'Hi', '<p>hi</p>');
     expect(fetchMock).not.toHaveBeenCalled();
     expect(result).toMatchObject({ provider: 'RESEND', configured: false, messageId: null });
   });
 
   it('ETHEREAL: a test account is created once, cached in Redis for a day, and the preview URL answered', async () => {
     config.getEffectiveEmailConfig.mockResolvedValue(smtp({ host: undefined, mode: 'ETHEREAL' }));
-    const first = await sendEmail('asha@adx.co', 'Hi', '<p>hi</p>');
+    const first = await sendEmail('asha@adx.in', 'Hi', '<p>hi</p>');
     expect(nodemailer.createTestAccount).toHaveBeenCalledTimes(1);
     expect(redis.set).toHaveBeenCalledWith(
       ETHEREAL_ACCOUNT_KEY,
@@ -154,7 +154,7 @@ describe('sendEmail — the one door', () => {
 
     // The second send finds the account in Redis and creates none.
     redis.get.mockResolvedValue(JSON.stringify({ user: testAccount.user, pass: testAccount.pass, smtp: testAccount.smtp }));
-    const second = await sendEmail('asha@adx.co', 'Again', '<p>again</p>');
+    const second = await sendEmail('asha@adx.in', 'Again', '<p>again</p>');
     expect(nodemailer.createTestAccount).toHaveBeenCalledTimes(1);
     expect(nodemailer.createTransport).toHaveBeenLastCalledWith(expect.objectContaining({ auth: { user: testAccount.user, pass: testAccount.pass } }));
     expect(second.previewUrl).toBe('https://ethereal.email/message/abc123');
@@ -164,7 +164,7 @@ describe('sendEmail — the one door', () => {
     config.getEffectiveEmailConfig.mockResolvedValue(smtp({ mode: 'ETHEREAL' }));
     redis.get.mockRejectedValue(new Error('ECONNREFUSED'));
     redis.set.mockRejectedValue(new Error('ECONNREFUSED'));
-    const result = await sendEmail('asha@adx.co', 'Hi', '<p>hi</p>');
+    const result = await sendEmail('asha@adx.in', 'Hi', '<p>hi</p>');
     expect(nodemailer.createTestAccount).toHaveBeenCalledTimes(1);
     expect(result).toMatchObject({ provider: 'ETHEREAL', configured: true, previewUrl: 'https://ethereal.email/message/abc123' });
   });
@@ -172,7 +172,7 @@ describe('sendEmail — the one door', () => {
   it('ETHEREAL: no preview from nodemailer is a null, not a false', async () => {
     config.getEffectiveEmailConfig.mockResolvedValue(smtp({ mode: 'ETHEREAL' }));
     nodemailer.getTestMessageUrl.mockReturnValue(false);
-    const result = await sendEmail('asha@adx.co', 'Hi', '<p>hi</p>');
+    const result = await sendEmail('asha@adx.in', 'Hi', '<p>hi</p>');
     expect(result.previewUrl).toBeNull();
   });
 });
@@ -180,7 +180,7 @@ describe('sendEmail — the one door', () => {
 describe('testEmailDoor — the verdict', () => {
   it('SMTP with no host: ok false with the sentence, nothing sent, not audited here', async () => {
     config.getEffectiveEmailConfig.mockResolvedValue(smtp({ host: undefined }));
-    const verdict = await testEmailDoor('ops@adx.co');
+    const verdict = await testEmailDoor('ops@adx.in');
     expect(verdict).toEqual({
       provider: 'SMTP',
       configured: false,
@@ -198,7 +198,7 @@ describe('testEmailDoor — the verdict', () => {
     config.getEffectiveResendConfig.mockResolvedValue({ apiKey: undefined });
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
-    const verdict = await testEmailDoor('ops@adx.co');
+    const verdict = await testEmailDoor('ops@adx.in');
     expect(verdict).toMatchObject({ provider: 'RESEND', configured: false, ok: false });
     expect(verdict.message).toMatch(/Resend is not configured/);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -207,30 +207,30 @@ describe('testEmailDoor — the verdict', () => {
   it('Ethereal: ok with the preview URL, the test message naming the door, the from address and the time', async () => {
     config.getEffectiveEmailConfig.mockResolvedValue(smtp({ mode: 'ETHEREAL' }));
     const now = new Date('2026-09-16T10:30:00.000Z');
-    const verdict = await testEmailDoor('ops@adx.co', now);
+    const verdict = await testEmailDoor('ops@adx.in', now);
     expect(verdict).toMatchObject({ provider: 'ETHEREAL', configured: true, ok: true, messageId: '<m1@adx>', previewUrl: 'https://ethereal.email/message/abc123' });
     expect(verdict.message).toMatch(/Ethereal/);
     expect(verdict.message).toMatch(/preview/i);
     const sent = sendMailMock.mock.calls[0]![0] as { to: string; subject: string; html: string };
-    expect(sent.to).toBe('ops@adx.co');
+    expect(sent.to).toBe('ops@adx.in');
     expect(sent.subject).toBe('ADX test message');
     expect(sent.html).toContain('ADX test email');
     expect(sent.html).toContain('Ethereal');
-    expect(sent.html).toContain('ADX &lt;ops@adx.co&gt;');
+    expect(sent.html).toContain('ADX &lt;ops@adx.in&gt;');
     expect(sent.html).toContain('2026-09-16T10:30:00.000Z');
     expect(sent.html).not.toContain(SMTP_PASSWORD);
   });
 
   it('SMTP ok: the host and the from address in the sentence', async () => {
-    const verdict = await testEmailDoor('ops@adx.co');
+    const verdict = await testEmailDoor('ops@adx.in');
     expect(verdict).toMatchObject({ provider: 'SMTP', configured: true, ok: true, messageId: '<m1@adx>', previewUrl: null, response: '250 2.0.0 OK queued' });
     expect(verdict.message).toContain('smtp.gmail.com');
-    expect(verdict.message).toContain('ADX <ops@adx.co>');
+    expect(verdict.message).toContain('ADX <ops@adx.in>');
   });
 
   it('an SMTP refusal is a verdict: ok false with the vendor sentence, the password masked out of it', async () => {
     sendMailMock.mockRejectedValue(new Error(`Invalid login: 535-5.7.8 Username and Password not accepted (${SMTP_PASSWORD})`));
-    const verdict = await testEmailDoor('ops@adx.co');
+    const verdict = await testEmailDoor('ops@adx.in');
     expect(verdict).toMatchObject({ provider: 'SMTP', configured: true, ok: false, messageId: null, previewUrl: null });
     expect(verdict.message).toContain('Username and Password not accepted');
     expect(verdict.message).not.toContain(SMTP_PASSWORD);
@@ -244,7 +244,7 @@ describe('testEmailDoor — the verdict', () => {
       'fetch',
       vi.fn(async () => ({ ok: false, status: 403, text: async () => JSON.stringify({ statusCode: 403, name: 'validation_error', message: `The ${RESEND_KEY} key is restricted to sending emails only` }) })),
     );
-    const verdict = await testEmailDoor('ops@adx.co');
+    const verdict = await testEmailDoor('ops@adx.in');
     expect(verdict).toMatchObject({ provider: 'RESEND', configured: true, ok: false });
     expect(verdict.message).toContain('403');
     expect(verdict.message).toContain('restricted to sending emails only');
@@ -255,7 +255,7 @@ describe('testEmailDoor — the verdict', () => {
   it('a door that does not answer in 15 s is a verdict, not a hang', async () => {
     vi.useFakeTimers();
     sendMailMock.mockImplementation(() => new Promise(() => undefined));
-    const pending = testEmailDoor('ops@adx.co');
+    const pending = testEmailDoor('ops@adx.in');
     await vi.advanceTimersByTimeAsync(EMAIL_TEST_TIMEOUT_MS + 1);
     const verdict = await pending;
     expect(EMAIL_TEST_TIMEOUT_MS).toBe(15_000);

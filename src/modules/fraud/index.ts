@@ -21,3 +21,15 @@ export type { ScanReport } from './fraud-signals.service';
 
 /** G10: bootstrap registers the sharp decoder so DUPLICATE_LISTING_PHOTOS computes. */
 export { installThumbnailDecoder } from './signals/thumbnail-decoder';
+
+/**
+ * Order fraud screening (the owner, 2 Oct 2026). The review desk's routes —
+ * bootstrap mounts them at `/orders`, ahead of the orders router; the
+ * background screening `orders`' port runs on placement and payment; the
+ * nightly re-screen `jobs/order-risk-rescreen.job.ts` runs. Watch mode by
+ * default: flags only, automatic holds off; nothing automatic goes past a
+ * reversible hold.
+ */
+export { orderScreeningRouter } from './order-screening/order-screening.routes';
+export { screenOrderInBackground, runOrderRescreen, scoreOrder } from './order-screening/order-screening.service';
+export type { RescreenReport } from './order-screening/order-screening.service';

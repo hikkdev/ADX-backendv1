@@ -1,13 +1,14 @@
 {
   "generatedBy": "scripts/features-sync.ts",
-  "featureCount": 181,
+  "featureCount": 219,
   "features": [
     {
       "key": "account.closure",
       "surfaces": [
         "APP_USER",
         "APP_AGENT",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "senior",
@@ -25,11 +26,21 @@
       "paths": {
         "CONSOLE": [
           "users/closures"
+        ],
+        "WEBSITE": [
+          "app/advertiser/account",
+          "app/publisher/profile",
+          "app/partner/profile",
+          "app/advertiser/settings",
+          "app/publisher/settings",
+          "app/partner/settings",
+          "components/account"
         ]
       },
       "declaredIn": [
         "backend",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ]
     },
     {
@@ -66,7 +77,8 @@
       "surfaces": [
         "APP_USER",
         "APP_AGENT",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "demand",
@@ -88,20 +100,27 @@
         ],
         "APP_AGENT": [
           "advertisers"
+        ],
+        "WEBSITE": [
+          "app/advertiser",
+          "app/advertiser/account",
+          "components/advertiser"
         ]
       },
       "declaredIn": [
         "backend",
         "CONSOLE",
         "APP_USER",
-        "APP_AGENT"
+        "APP_AGENT",
+        "WEBSITE"
       ]
     },
     {
       "key": "advertisers.brands",
       "surfaces": [
         "APP_USER",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "demand",
@@ -116,11 +135,16 @@
       "paths": {
         "APP_USER": [
           "advertiser/brands"
+        ],
+        "WEBSITE": [
+          "app/advertiser/brands",
+          "components/brands"
         ]
       },
       "declaredIn": [
         "backend",
-        "APP_USER"
+        "APP_USER",
+        "WEBSITE"
       ]
     },
     {
@@ -152,7 +176,8 @@
       "key": "advertisers.wallet",
       "surfaces": [
         "APP_USER",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "finance",
@@ -174,12 +199,17 @@
         ],
         "APP_USER": [
           "advertiser/billing"
+        ],
+        "WEBSITE": [
+          "app/advertiser/billing",
+          "components/billing"
         ]
       },
       "declaredIn": [
         "backend",
         "CONSOLE",
-        "APP_USER"
+        "APP_USER",
+        "WEBSITE"
       ]
     },
     {
@@ -224,7 +254,8 @@
       "surfaces": [
         "APP_USER",
         "APP_AGENT",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "agent-experience",
@@ -240,11 +271,59 @@
       "paths": {
         "CONSOLE": [
           "training/certifications"
+        ],
+        "WEBSITE": [
+          "app/publisher/training"
         ]
       },
       "declaredIn": [
         "backend",
+        "CONSOLE",
+        "WEBSITE"
+      ]
+    },
+    {
+      "key": "agent.compensation",
+      "surfaces": [
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "agent-experience",
+      "launch": "on",
+      "description": "An agent's salary, the daily onboarding quota it covers, and the commission an onboarding past it pays.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/agents/:id/compensation",
+        "/api/v1/agents/:id/standing",
+        "/api/v1/agents/compensation/defaults"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "agent.cost-per-onboarding",
+      "surfaces": [
         "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "agent-experience",
+      "launch": "on",
+      "description": "What an onboarding cost in agent money — salary committed plus the rewards that buy an account, over the accounts agents actually brought. Read per side and blended, on the three section overviews and on the agent.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/section-overviews",
+        "/api/v1/agents/:id/standing"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
       ]
     },
     {
@@ -368,7 +447,7 @@
       "jobs": [],
       "paths": {
         "CONSOLE": [
-          "growth/leaderboard"
+          "analytics/leaderboards"
         ]
       },
       "declaredIn": [
@@ -462,6 +541,28 @@
       ]
     },
     {
+      "key": "agent.quota-tracker",
+      "surfaces": [
+        "APP_AGENT",
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "agent-experience",
+      "launch": "on",
+      "description": "The day's quota on the milestone board — a tracker, not a milestone: the salary pays it, so there is nothing to claim, and a milestone whose target sits inside the quota is flagged as paid twice.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/milestones",
+        "/api/v1/agents/:id/milestones"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
       "key": "agent.routing",
       "surfaces": [
         "CONSOLE",
@@ -520,7 +621,8 @@
       "surfaces": [
         "APP_USER",
         "APP_AGENT",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "agent-experience",
@@ -539,12 +641,17 @@
         ],
         "APP_USER": [
           "training"
+        ],
+        "WEBSITE": [
+          "app/publisher/training",
+          "components/training"
         ]
       },
       "declaredIn": [
         "backend",
         "CONSOLE",
-        "APP_USER"
+        "APP_USER",
+        "WEBSITE"
       ]
     },
     {
@@ -572,7 +679,8 @@
       "surfaces": [
         "APP_USER",
         "APP_AGENT",
-        "BACKEND"
+        "BACKEND",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "platform",
@@ -584,9 +692,14 @@
         "/api/v1/ai"
       ],
       "jobs": [],
-      "paths": {},
+      "paths": {
+        "WEBSITE": [
+          "components/listing-form"
+        ]
+      },
       "declaredIn": [
-        "backend"
+        "backend",
+        "WEBSITE"
       ]
     },
     {
@@ -615,7 +728,8 @@
       "key": "auth.authenticator-app",
       "surfaces": [
         "CONSOLE",
-        "BACKEND"
+        "BACKEND",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "senior",
@@ -629,9 +743,18 @@
         "/api/v1/auth/2fa/status"
       ],
       "jobs": [],
-      "paths": {},
+      "paths": {
+        "WEBSITE": [
+          "app/(auth)/verify-2fa",
+          "app/advertiser/account",
+          "app/publisher/profile",
+          "app/partner/profile",
+          "components/auth"
+        ]
+      },
       "declaredIn": [
-        "backend"
+        "backend",
+        "WEBSITE"
       ]
     },
     {
@@ -639,7 +762,8 @@
       "surfaces": [
         "APP_USER",
         "APP_AGENT",
-        "BACKEND"
+        "BACKEND",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "senior",
@@ -651,30 +775,102 @@
         "/api/v1/auth/change-mobile"
       ],
       "jobs": [],
-      "paths": {},
+      "paths": {
+        "WEBSITE": [
+          "components/account"
+        ]
+      },
       "declaredIn": [
-        "backend"
+        "backend",
+        "WEBSITE"
+      ]
+    },
+    {
+      "key": "auth.email-door",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "BACKEND",
+        "WEBSITE"
+      ],
+      "kind": "FEATURE",
+      "owner": "senior",
+      "launch": "on",
+      "description": "ED-1: sign up or sign in by email — a code to the address, then the number is proved too, so every account holds a verified phone and a verified email. First door on the website, second in the apps.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/auth/send-otp-email",
+        "/api/v1/auth/verify-otp-email"
+      ],
+      "jobs": [],
+      "paths": {
+        "WEBSITE": [
+          "app/(auth)",
+          "app/(auth)/sign-in",
+          "app/(auth)/verify",
+          "app/(auth)/verify-phone",
+          "components/auth"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "WEBSITE"
+      ]
+    },
+    {
+      "key": "auth.facebook-sign-in",
+      "surfaces": [
+        "BACKEND",
+        "WEBSITE"
+      ],
+      "kind": "FEATURE",
+      "owner": "senior",
+      "launch": "on",
+      "description": "FB-1: Continue with Facebook on the website — register-or-login on the mailbox Facebook vouches for; needs the app id and secret under Settings › Integrations.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/auth/facebook"
+      ],
+      "jobs": [],
+      "paths": {
+        "WEBSITE": [
+          "app/(auth)/sign-in",
+          "components/auth"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "WEBSITE"
       ]
     },
     {
       "key": "auth.google-sign-in",
       "surfaces": [
         "APP_USER",
-        "BACKEND"
+        "BACKEND",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "senior",
       "launch": "on",
-      "description": "Sign in with Google on the user app.",
+      "description": "Sign in with Google — and, G-2 (25 Sep 2026), sign up with it: a Google-verified mailbox goes straight to the phone step.",
       "variants": [],
       "aliases": [],
       "routes": [
         "/api/v1/auth/google"
       ],
       "jobs": [],
-      "paths": {},
+      "paths": {
+        "WEBSITE": [
+          "app/(auth)/sign-in",
+          "components/auth"
+        ]
+      },
       "declaredIn": [
-        "backend"
+        "backend",
+        "WEBSITE"
       ]
     },
     {
@@ -682,7 +878,8 @@
       "surfaces": [
         "APP_USER",
         "APP_AGENT",
-        "BACKEND"
+        "BACKEND",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "senior",
@@ -694,9 +891,15 @@
         "/api/v1/auth"
       ],
       "jobs": [],
-      "paths": {},
+      "paths": {
+        "WEBSITE": [
+          "app/(auth)/sign-in",
+          "app/(auth)/verify"
+        ]
+      },
       "declaredIn": [
-        "backend"
+        "backend",
+        "WEBSITE"
       ]
     },
     {
@@ -727,7 +930,8 @@
       "key": "auth.two-factor",
       "surfaces": [
         "CONSOLE",
-        "BACKEND"
+        "BACKEND",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "senior",
@@ -739,9 +943,14 @@
         "/api/v1/auth/2fa"
       ],
       "jobs": [],
-      "paths": {},
+      "paths": {
+        "WEBSITE": [
+          "app/(auth)/verify-2fa"
+        ]
+      },
       "declaredIn": [
-        "backend"
+        "backend",
+        "WEBSITE"
       ]
     },
     {
@@ -749,22 +958,31 @@
       "surfaces": [
         "APP_USER",
         "APP_AGENT",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "demand",
       "launch": "on",
-      "description": "Campaign analytics: digital interactions per campaign and across the book (Q109).",
+      "description": "Campaign analytics: digital interactions per campaign and across the book (Q109); the console campaign page's Performance card (scans, landing views, CTA presses, enquiries — 2 Oct 2026).",
       "variants": [],
       "aliases": [],
       "routes": [
         "/api/v1/campaigns/analytics",
-        "/api/v1/campaigns/:id/analytics"
+        "/api/v1/campaigns/:id/analytics",
+        "/api/v1/campaigns/:id/performance"
       ],
       "jobs": [],
-      "paths": {},
+      "paths": {
+        "WEBSITE": [
+          "app/advertiser",
+          "app/advertiser/analytics",
+          "components/advertiser"
+        ]
+      },
       "declaredIn": [
-        "backend"
+        "backend",
+        "WEBSITE"
       ]
     },
     {
@@ -772,7 +990,8 @@
       "surfaces": [
         "APP_USER",
         "APP_AGENT",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "demand",
@@ -795,13 +1014,42 @@
         ],
         "APP_AGENT": [
           "advertisers/campaigns"
+        ],
+        "WEBSITE": [
+          "app/cart",
+          "app/advertiser/campaigns",
+          "app/advertiser/campaigns/new",
+          "components/booking",
+          "components/planner"
         ]
       },
       "declaredIn": [
         "backend",
         "CONSOLE",
         "APP_USER",
-        "APP_AGENT"
+        "APP_AGENT",
+        "WEBSITE"
+      ]
+    },
+    {
+      "key": "campaigns.creative-analysis",
+      "surfaces": [
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "demand",
+      "launch": "on",
+      "description": "VA-1 (23 Sep 2026): the vision pass over an artwork — appropriate, relevant, legal, its rating, and whether it is unique on the platform — read by the reviewer before deciding; on demand from the desk, never a decision.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/campaigns/creatives"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
       ]
     },
     {
@@ -809,7 +1057,8 @@
       "surfaces": [
         "APP_USER",
         "APP_AGENT",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "demand",
@@ -824,12 +1073,22 @@
       "jobs": [],
       "paths": {
         "CONSOLE": [
-          "moderation"
+          "creatives",
+          "creatives/[id]",
+          "creatives/design-requests",
+          "creatives/awaiting-advertiser",
+          "creatives/print-ready"
+        ],
+        "WEBSITE": [
+          "app/advertiser/campaigns/[id]/artwork",
+          "app/advertiser/campaigns/[id]/creative",
+          "components/creative"
         ]
       },
       "declaredIn": [
         "backend",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ]
     },
     {
@@ -856,11 +1115,17 @@
       "paths": {
         "CONSOLE": [
           "campaigns/landing-pages"
+        ],
+        "WEBSITE": [
+          "app/advertiser/campaigns/[id]/landing-page",
+          "components/advertiser",
+          "components/planner"
         ]
       },
       "declaredIn": [
         "backend",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ]
     },
     {
@@ -868,7 +1133,8 @@
       "surfaces": [
         "APP_USER",
         "APP_AGENT",
-        "BACKEND"
+        "BACKEND",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "demand",
@@ -889,12 +1155,45 @@
         ],
         "APP_AGENT": [
           "advertisers/campaigns"
+        ],
+        "WEBSITE": [
+          "app/advertiser/campaigns/new",
+          "components/planner"
         ]
       },
       "declaredIn": [
         "backend",
         "APP_USER",
-        "APP_AGENT"
+        "APP_AGENT",
+        "WEBSITE"
+      ]
+    },
+    {
+      "key": "campaigns.promo-codes",
+      "surfaces": [
+        "APP_USER",
+        "BACKEND",
+        "WEBSITE"
+      ],
+      "kind": "FEATURE",
+      "owner": "senior",
+      "launch": "on",
+      "description": "PC-1: \"Have a promo code?\" on Review & pay — a code applied to the campaign before it is paid; counted as redeemed when it is.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/campaigns/:id/promo"
+      ],
+      "jobs": [],
+      "paths": {
+        "WEBSITE": [
+          "app/advertiser/campaigns/[id]/review",
+          "components/booking"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "WEBSITE"
       ]
     },
     {
@@ -918,6 +1217,39 @@
       ]
     },
     {
+      "key": "campaigns.reservation-fee",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE",
+        "BACKEND",
+        "WEBSITE"
+      ],
+      "kind": "FEATURE",
+      "owner": "demand",
+      "launch": "on",
+      "description": "RF-1 (the owner, 25 Sep 2026): a big checkout is reserved for 24 hours against a fee of 5% of the total, due within the hour; folded into the checkout when the advertiser goes ahead, 10% kept when they do not. Terms under Settings › booking.reservationFee.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/campaigns/:id/reserve",
+        "/api/v1/campaigns/:id/reserve/pay"
+      ],
+      "jobs": [
+        "campaign-lifecycle"
+      ],
+      "paths": {
+        "WEBSITE": [
+          "app/advertiser/campaigns/[id]/review",
+          "components/booking"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "WEBSITE"
+      ]
+    },
+    {
       "key": "campaigns.tracking",
       "surfaces": [
         "APP_USER",
@@ -937,9 +1269,41 @@
         "/api/v1/campaigns/:id/redemptions"
       ],
       "jobs": [],
-      "paths": {},
+      "paths": {
+        "WEBSITE": [
+          "components/planner"
+        ]
+      },
       "declaredIn": [
-        "backend"
+        "backend",
+        "WEBSITE"
+      ]
+    },
+    {
+      "key": "campaigns.weekly-summary",
+      "surfaces": [
+        "APP_USER",
+        "BACKEND",
+        "WEBSITE"
+      ],
+      "kind": "FEATURE",
+      "owner": "demand",
+      "launch": "on",
+      "description": "WS-1 (DR 12, 25 Sep 2026): the Monday 09:00 IST digest of an advertiser's campaigns — the last seven days' portfolio analytics by email (on by default under the WEEKLY_SUMMARY kind, switchable) and push.",
+      "variants": [],
+      "aliases": [],
+      "routes": [],
+      "jobs": [
+        "weekly-summary"
+      ],
+      "paths": {
+        "WEBSITE": [
+          "components/account"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "WEBSITE"
       ]
     },
     {
@@ -1031,7 +1395,8 @@
       "surfaces": [
         "APP_USER",
         "APP_AGENT",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "platform",
@@ -1049,12 +1414,23 @@
         ],
         "APP_AGENT": [
           "notifications"
+        ],
+        "WEBSITE": [
+          "app/advertiser/notifications",
+          "app/publisher/notifications",
+          "app/partner/notifications",
+          "app/advertiser/account",
+          "app/publisher/profile",
+          "app/partner/profile",
+          "components/notifications",
+          "components/account"
         ]
       },
       "declaredIn": [
         "backend",
         "CONSOLE",
-        "APP_AGENT"
+        "APP_AGENT",
+        "WEBSITE"
       ]
     },
     {
@@ -1126,6 +1502,37 @@
       ]
     },
     {
+      "key": "competitors.sightings",
+      "surfaces": [
+        "APP_AGENT",
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "growth",
+      "launch": "on",
+      "description": "VA-2 (23 Sep 2026): competitors' hoardings photographed by our agents with the GPS camera — filed with the brand and the surface, listed and analysed at the desk, exported as a corpus for analysis and training.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/competitor-sightings"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "leads/competitors"
+        ],
+        "APP_AGENT": [
+          "competitors"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE",
+        "APP_AGENT"
+      ]
+    },
+    {
       "key": "console.analytics",
       "surfaces": [
         "CONSOLE"
@@ -1162,7 +1569,7 @@
       "jobs": [],
       "paths": {
         "CONSOLE": [
-          "bookings"
+          "orders/calendar"
         ]
       },
       "declaredIn": [
@@ -1172,7 +1579,8 @@
     {
       "key": "console.import-formats",
       "surfaces": [
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "platform",
@@ -1187,18 +1595,23 @@
       "paths": {
         "CONSOLE": [
           "settings/import-formats"
+        ],
+        "WEBSITE": [
+          "app/publisher/listings/bulk"
         ]
       },
       "declaredIn": [
         "backend",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ]
     },
     {
       "key": "console.listing-imports",
       "surfaces": [
         "APP_AGENT",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "supply",
@@ -1214,11 +1627,37 @@
       "paths": {
         "CONSOLE": [
           "listings/import"
+        ],
+        "WEBSITE": [
+          "app/publisher/listings/bulk",
+          "components/listings"
         ]
       },
       "declaredIn": [
         "backend",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
+      ]
+    },
+    {
+      "key": "console.metrics-registry",
+      "surfaces": [
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "finance",
+      "launch": "on",
+      "description": "AN-1: the metric registry — every figure Analytics can draw declared once in code with its formula, its roll-up rule and the cuts it supports, served as a catalogue and as a series at day, week or month.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/admin/analytics"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
       ]
     },
     {
@@ -1306,6 +1745,168 @@
       ]
     },
     {
+      "key": "content.forms",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE",
+        "WEBSITE"
+      ],
+      "kind": "FEATURE",
+      "owner": "senior",
+      "launch": "on",
+      "description": "FM-1 (27 Sep 2026): the form builder — screens of fields on the flow vocabulary, versioned draft → publish with history and restore; a public or signed-in door that checks every answer, records consent and sends it to a lead, a support ticket or the inbox; the desk lists, maps, exports and files the answers.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/forms",
+        "/api/v1/app/forms"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "content/forms"
+        ],
+        "WEBSITE": [
+          "components/forms"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE",
+        "WEBSITE"
+      ]
+    },
+    {
+      "key": "content.layouts",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE",
+        "WEBSITE"
+      ],
+      "kind": "FEATURE",
+      "owner": "senior",
+      "launch": "on",
+      "description": "LM-1 (27 Sep 2026): layout management — the sections of the website pages and the app home screens, ordered, targeted by side, city and city stage, scheduled and hidden from the desk; draft, preview, publish, history and restore. Clients draw the published layout and fall back to their own order when there is none.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/layouts",
+        "/api/v1/app/layouts"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "content/layouts"
+        ],
+        "WEBSITE": [
+          "components/layout",
+          "components/layout/blocks",
+          "app/studio/app"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE",
+        "WEBSITE"
+      ]
+    },
+    {
+      "key": "content.media",
+      "surfaces": [
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "senior",
+      "launch": "on",
+      "description": "LM-1 (27 Sep 2026): the media library — every picture a layout block, a tile or an ad draws, checked against its size spec on upload (shape within 1%, a minimum size, a byte cap), with alt text, a title and tags. Archived, never deleted; a picture a published layout draws cannot be archived.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/media"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "content/media"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "content.pages",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE",
+        "WEBSITE"
+      ],
+      "kind": "FEATURE",
+      "owner": "senior",
+      "launch": "on",
+      "description": "CT-1 (24 Sep 2026): pages ADX writes and publishes itself — help articles, guides, a policy the thirteen legal kinds do not cover, a page the website needs. Addressed by slug, versioned draft → published with history and rollback, read without a token.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/content"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "content/articles"
+        ],
+        "WEBSITE": [
+          "app/(site)/[doc]"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE",
+        "WEBSITE"
+      ]
+    },
+    {
+      "key": "content.site-pages",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE",
+        "WEBSITE"
+      ],
+      "kind": "FEATURE",
+      "owner": "senior",
+      "launch": "on",
+      "description": "PB-1 (27 Sep 2026): the site's pages — the nine the website draws itself and the custom pages Studio builds from blocks — each with a public address only an admin with content.addresses may change (every change leaves a permanent redirect), hand-written redirects, the routing table the website's proxy and the apps' deep links consult, the sitemap, and a page resolved per caller like a layout surface.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/site",
+        "/api/v1/app/site",
+        "/api/v1/app/pages"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "content"
+        ],
+        "WEBSITE": [
+          "app/pg",
+          "app/studio/pages",
+          "app/sitemap.ts"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE",
+        "WEBSITE"
+      ]
+    },
+    {
       "key": "finance.desk",
       "surfaces": [
         "CONSOLE"
@@ -1337,7 +1938,8 @@
       "key": "finance.invoices",
       "surfaces": [
         "APP_USER",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "finance",
@@ -1356,11 +1958,17 @@
       "paths": {
         "CONSOLE": [
           "finance/invoices"
+        ],
+        "WEBSITE": [
+          "app/advertiser/billing/invoices",
+          "app/partner/invoices",
+          "components/billing"
         ]
       },
       "declaredIn": [
         "backend",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ]
     },
     {
@@ -1372,7 +1980,7 @@
       "kind": "FEATURE",
       "owner": "finance",
       "launch": "on",
-      "description": "The ledger read, the verify walk and a reversal by finance.",
+      "description": "The ledger read (searchable, paged with totals), its CSV export, the verify walk and a reversal by finance.",
       "variants": [],
       "aliases": [],
       "routes": [
@@ -1420,7 +2028,8 @@
         "APP_USER",
         "APP_AGENT",
         "CONSOLE",
-        "BACKEND"
+        "BACKEND",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "finance",
@@ -1435,9 +2044,14 @@
       "jobs": [
         "monthly-statements"
       ],
-      "paths": {},
+      "paths": {
+        "WEBSITE": [
+          "app/publisher/earnings/statements"
+        ]
+      },
       "declaredIn": [
-        "backend"
+        "backend",
+        "WEBSITE"
       ]
     },
     {
@@ -1579,13 +2193,15 @@
       "kind": "FEATURE",
       "owner": "platform",
       "launch": "on",
-      "description": "The year's holidays, seeded at boot, editable by ops; the schedule reads them.",
+      "description": "The year's holidays, editable by ops; the schedule reads them. HC-1 (1 Oct 2026): kept in step with a public holiday calendar (Google's Holidays in India by default, Settings › Integrations) — weekly, at boot when next year is empty, and on \"Sync now\"; a person's own entry always wins.",
       "variants": [],
       "aliases": [],
       "routes": [
         "/api/v1/hr/holidays"
       ],
-      "jobs": [],
+      "jobs": [
+        "holiday-calendar"
+      ],
       "paths": {
         "CONSOLE": [
           "employees/holidays"
@@ -1645,7 +2261,8 @@
       "key": "kyc.advertiser",
       "surfaces": [
         "APP_USER",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "platform",
@@ -1659,12 +2276,18 @@
       "jobs": [],
       "paths": {
         "CONSOLE": [
-          "kyc/advertisers"
+          "kyc/advertisers",
+          "kyc/advertisers/[id]"
+        ],
+        "WEBSITE": [
+          "app/advertiser/verify",
+          "components/verification"
         ]
       },
       "declaredIn": [
         "backend",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ]
     },
     {
@@ -1724,7 +2347,8 @@
         "APP_USER",
         "APP_AGENT",
         "CONSOLE",
-        "BACKEND"
+        "BACKEND",
+        "WEBSITE"
       ],
       "kind": "KILL_SWITCH",
       "owner": "platform",
@@ -1745,9 +2369,16 @@
       "jobs": [
         "kyc-provider-probe"
       ],
-      "paths": {},
+      "paths": {
+        "WEBSITE": [
+          "app/advertiser/verify",
+          "app/publisher/profile/verify",
+          "components/verification"
+        ]
+      },
       "declaredIn": [
-        "backend"
+        "backend",
+        "WEBSITE"
       ]
     },
     {
@@ -1773,6 +2404,43 @@
       "declaredIn": [
         "backend",
         "CONSOLE"
+      ]
+    },
+    {
+      "key": "kyc.entity-type",
+      "surfaces": [
+        "APP_USER",
+        "CONSOLE",
+        "WEBSITE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "Phase D (1 Oct 2026): the legal form a publisher, advertiser or print partner verifies as — asked at the Digio start (409 ENTITY_TYPE_REQUIRED) and it picks which of the 25 Digio workflows runs.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/kyc"
+      ],
+      "jobs": [],
+      "paths": {
+        "APP_USER": [
+          "onboarding",
+          "partner",
+          "advertiser",
+          "publisher"
+        ],
+        "WEBSITE": [
+          "app/advertiser/verify",
+          "app/publisher/profile/verify",
+          "app/partner/verify",
+          "components/verification"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "APP_USER",
+        "WEBSITE"
       ]
     },
     {
@@ -1821,7 +2489,8 @@
       "surfaces": [
         "APP_USER",
         "APP_AGENT",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "platform",
@@ -1833,9 +2502,61 @@
         "/api/v1/user-kyc"
       ],
       "jobs": [],
-      "paths": {},
+      "paths": {
+        "WEBSITE": [
+          "components/verification"
+        ]
+      },
       "declaredIn": [
-        "backend"
+        "backend",
+        "WEBSITE"
+      ]
+    },
+    {
+      "key": "kyc.verification-backup",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "CONSOLE",
+        "BACKEND",
+        "WEBSITE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "Cashfree Phase 1 (1 Oct 2026): the verification layer — Cashfree Secure ID as Digio's automatic backup (a session of single checks on ADX's own screens, handed out only with the backup ON to a client that says `supports: ['CASHFREE']`), every provider call recorded as an attempt with a breaker per provider, the desk's attempt list, health read and \"Resend on backup\", Cashfree's webhook, and the two-minute status sweep.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/verification",
+        "/api/v1/webhooks/cashfree/verification"
+      ],
+      "jobs": [
+        "verification-status-sweep"
+      ],
+      "paths": {
+        "APP_USER": [
+          "onboarding",
+          "partner",
+          "advertiser"
+        ],
+        "APP_AGENT": [
+          "account",
+          "apply"
+        ],
+        "WEBSITE": [
+          "app/(auth)/verify/digilocker-return",
+          "app/advertiser/verify",
+          "app/publisher/profile/verify",
+          "app/partner/verify",
+          "components/verification"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "APP_USER",
+        "APP_AGENT",
+        "WEBSITE"
       ]
     },
     {
@@ -1929,12 +2650,16 @@
         ],
         "APP_AGENT": [
           "leads"
+        ],
+        "WEBSITE": [
+          "app/j"
         ]
       },
       "declaredIn": [
         "backend",
         "CONSOLE",
-        "APP_AGENT"
+        "APP_AGENT",
+        "WEBSITE"
       ]
     },
     {
@@ -2104,7 +2829,8 @@
         "APP_USER",
         "APP_AGENT",
         "CONSOLE",
-        "BACKEND"
+        "BACKEND",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "agent-experience",
@@ -2123,11 +2849,18 @@
         "CONSOLE": [
           "leads/sources",
           "leads/import"
+        ],
+        "WEBSITE": [
+          "app/j/r",
+          "app/advertiser/refer",
+          "app/publisher/refer",
+          "components/account"
         ]
       },
       "declaredIn": [
         "backend",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ]
     },
     {
@@ -2135,27 +2868,36 @@
       "surfaces": [
         "APP_USER",
         "APP_AGENT",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "senior",
       "launch": "on",
-      "description": "Agreement templates (draft / live / superseded), acceptances per party and per transaction, the stale-terms report.",
+      "description": "Agreement templates (draft / live / superseded), acceptances per party and per transaction, the stale-terms report, the account’s own platform agreements and the public text of the live platform terms.",
       "variants": [],
       "aliases": [],
       "routes": [
         "/api/v1/agreements",
-        "/api/v1/advertisers/:id/agreements"
+        "/api/v1/advertisers/:id/agreements",
+        "/api/v1/legal/agreements"
       ],
       "jobs": [],
       "paths": {
         "CONSOLE": [
-          "agreements"
+          "legal-documents"
+        ],
+        "WEBSITE": [
+          "app/advertiser/agreements",
+          "app/publisher/agreements",
+          "app/partner/agreements",
+          "components/agreements"
         ]
       },
       "declaredIn": [
         "backend",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ]
     },
     {
@@ -2178,12 +2920,16 @@
       "jobs": [],
       "paths": {
         "CONSOLE": [
-          "legal"
+          "content/policies"
+        ],
+        "WEBSITE": [
+          "app/(site)/legal"
         ]
       },
       "declaredIn": [
         "backend",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ]
     },
     {
@@ -2191,7 +2937,8 @@
       "surfaces": [
         "APP_USER",
         "APP_AGENT",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "senior",
@@ -2206,16 +2953,52 @@
       "jobs": [
         "esign-expiry"
       ],
-      "paths": {},
+      "paths": {
+        "WEBSITE": [
+          "app/sign",
+          "components/agreements"
+        ]
+      },
       "declaredIn": [
-        "backend"
+        "backend",
+        "WEBSITE"
+      ]
+    },
+    {
+      "key": "listings.blocked-dates",
+      "surfaces": [
+        "APP_USER",
+        "CONSOLE",
+        "BACKEND",
+        "WEBSITE"
+      ],
+      "kind": "FEATURE",
+      "owner": "supply",
+      "launch": "on",
+      "description": "BD-1: the dates a publisher takes a spot off the market by hand — a block holds every slot, so browse, checkout and placement read the days as taken.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/listings/:listingId/blocked-dates"
+      ],
+      "jobs": [],
+      "paths": {
+        "WEBSITE": [
+          "app/publisher/availability",
+          "components/site"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "WEBSITE"
       ]
     },
     {
       "key": "listings.browse",
       "surfaces": [
         "APP_USER",
-        "APP_AGENT"
+        "APP_AGENT",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "demand",
@@ -2234,11 +3017,36 @@
       "paths": {
         "APP_USER": [
           "advertiser/discover"
+        ],
+        "WEBSITE": [
+          "app/(site)/spaces",
+          "components/site"
         ]
       },
       "declaredIn": [
         "backend",
-        "APP_USER"
+        "APP_USER",
+        "WEBSITE"
+      ]
+    },
+    {
+      "key": "listings.insights",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "supply",
+      "launch": "on",
+      "description": "The listing page’s Performance (3 Oct 2026): saves, bookings, enquiries, scans, GMV, occupancy and stars over a window, with the day series.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/listings/:listingId/insights"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
       ]
     },
     {
@@ -2246,7 +3054,8 @@
       "surfaces": [
         "APP_USER",
         "APP_AGENT",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "supply",
@@ -2264,12 +3073,20 @@
         ],
         "APP_USER": [
           "publisher/listing-flow"
+        ],
+        "WEBSITE": [
+          "app/publisher/inventory",
+          "app/publisher/listings",
+          "components/listing-form",
+          "components/listing-form/flow",
+          "components/listings"
         ]
       },
       "declaredIn": [
         "backend",
         "CONSOLE",
-        "APP_USER"
+        "APP_USER",
+        "WEBSITE"
       ]
     },
     {
@@ -2324,7 +3141,8 @@
       "key": "listings.saved-spaces",
       "surfaces": [
         "APP_USER",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "demand",
@@ -2337,9 +3155,14 @@
         "/api/v1/advertisers/:advertiserId/saved"
       ],
       "jobs": [],
-      "paths": {},
+      "paths": {
+        "WEBSITE": [
+          "app/advertiser/saved"
+        ]
+      },
       "declaredIn": [
-        "backend"
+        "backend",
+        "WEBSITE"
       ]
     },
     {
@@ -2358,9 +3181,42 @@
         "/s/:displayId"
       ],
       "jobs": [],
-      "paths": {},
+      "paths": {
+        "WEBSITE": [
+          "app/s"
+        ]
+      },
       "declaredIn": [
-        "backend"
+        "backend",
+        "WEBSITE"
+      ]
+    },
+    {
+      "key": "listings.spot-views",
+      "surfaces": [
+        "APP_USER",
+        "CONSOLE",
+        "BACKEND",
+        "WEBSITE"
+      ],
+      "kind": "FEATURE",
+      "owner": "demand",
+      "launch": "on",
+      "description": "LD-1 (3 Oct 2026): spot-page views — the website's spot page and marketplace detail and the app's listing screen count a view per open (bots, ADX staff and the spot's own publisher and agent left out, one visitor per day), and the listing page's Performance draws Views and Unique visitors.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/listings/:displayIdOrId/view"
+      ],
+      "jobs": [],
+      "paths": {
+        "WEBSITE": [
+          "app/(site)/spaces/[id]"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "WEBSITE"
       ]
     },
     {
@@ -2385,11 +3241,40 @@
       ]
     },
     {
+      "key": "listings.vehicle-rc",
+      "surfaces": [
+        "APP_USER",
+        "CONSOLE",
+        "WEBSITE"
+      ],
+      "kind": "FEATURE",
+      "owner": "supply",
+      "launch": "on",
+      "description": "A vehicle put up as an ad spot, checked against the RC register: while the spot is being registered (nothing stored, and the registered owner's name never returned — only how closely it matches the publisher's) and again on the listing afterwards, where the full answer is recorded and audited.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/listings/vehicle-rc/check",
+        "/api/v1/listings/:listingId/vehicle-rc/verify"
+      ],
+      "jobs": [],
+      "paths": {
+        "WEBSITE": [
+          "components/listing-form"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "WEBSITE"
+      ]
+    },
+    {
       "key": "marketplace.instant-booking",
       "surfaces": [
         "APP_USER",
         "APP_AGENT",
-        "BACKEND"
+        "BACKEND",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "marketplace",
@@ -2411,12 +3296,18 @@
         ],
         "APP_AGENT": [
           "listing"
+        ],
+        "WEBSITE": [
+          "app/(site)/spaces",
+          "app/publisher/inventory",
+          "components/listing-form"
         ]
       },
       "declaredIn": [
         "backend",
         "APP_USER",
-        "APP_AGENT"
+        "APP_AGENT",
+        "WEBSITE"
       ]
     },
     {
@@ -2424,7 +3315,8 @@
       "surfaces": [
         "APP_USER",
         "APP_AGENT",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "marketplace",
@@ -2441,9 +3333,16 @@
         "/api/v1/agents/:id/reviews"
       ],
       "jobs": [],
-      "paths": {},
+      "paths": {
+        "WEBSITE": [
+          "app/(site)/spaces/[id]",
+          "components/advertiser",
+          "components/publisher"
+        ]
+      },
       "declaredIn": [
-        "backend"
+        "backend",
+        "WEBSITE"
       ]
     },
     {
@@ -2451,7 +3350,8 @@
       "surfaces": [
         "APP_USER",
         "APP_AGENT",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "agent-experience",
@@ -2466,11 +3366,16 @@
       "paths": {
         "CONSOLE": [
           "access"
+        ],
+        "WEBSITE": [
+          "app/publisher/access",
+          "components/access"
         ]
       },
       "declaredIn": [
         "backend",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ]
     },
     {
@@ -2496,7 +3401,8 @@
     {
       "key": "onboarding.ladder",
       "surfaces": [
-        "APP_USER"
+        "APP_USER",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "platform",
@@ -2509,10 +3415,14 @@
       "paths": {
         "APP_USER": [
           "onboarding"
+        ],
+        "WEBSITE": [
+          "app/(auth)/choose-workspace"
         ]
       },
       "declaredIn": [
-        "APP_USER"
+        "APP_USER",
+        "WEBSITE"
       ]
     },
     {
@@ -2520,7 +3430,8 @@
       "surfaces": [
         "APP_USER",
         "APP_AGENT",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "platform",
@@ -2535,11 +3446,16 @@
       "paths": {
         "APP_AGENT": [
           "scan"
+        ],
+        "WEBSITE": [
+          "app/q",
+          "components/access"
         ]
       },
       "declaredIn": [
         "backend",
-        "APP_AGENT"
+        "APP_AGENT",
+        "WEBSITE"
       ]
     },
     {
@@ -2557,14 +3473,9 @@
         "/api/v1/onboarding"
       ],
       "jobs": [],
-      "paths": {
-        "CONSOLE": [
-          "onboarding/submissions"
-        ]
-      },
+      "paths": {},
       "declaredIn": [
-        "backend",
-        "CONSOLE"
+        "backend"
       ]
     },
     {
@@ -2601,7 +3512,8 @@
       "surfaces": [
         "APP_USER",
         "APP_AGENT",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "agent-experience",
@@ -2634,11 +3546,17 @@
       "paths": {
         "APP_AGENT": [
           "jobs"
+        ],
+        "WEBSITE": [
+          "app/advertiser/proofs",
+          "app/publisher/bookings/[id]/track",
+          "components/publisher"
         ]
       },
       "declaredIn": [
         "backend",
-        "APP_AGENT"
+        "APP_AGENT",
+        "WEBSITE"
       ]
     },
     {
@@ -2646,7 +3564,8 @@
       "surfaces": [
         "APP_USER",
         "APP_AGENT",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "marketplace",
@@ -2666,12 +3585,17 @@
         ],
         "APP_USER": [
           "publisher/bookings"
+        ],
+        "WEBSITE": [
+          "app/publisher/bookings",
+          "components/publisher"
         ]
       },
       "declaredIn": [
         "backend",
         "CONSOLE",
-        "APP_USER"
+        "APP_USER",
+        "WEBSITE"
       ]
     },
     {
@@ -2732,7 +3656,8 @@
     {
       "key": "orders.self-install",
       "surfaces": [
-        "APP_USER"
+        "APP_USER",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "marketplace",
@@ -2745,9 +3670,14 @@
         "/api/v1/orders/:id/choose-fulfilment"
       ],
       "jobs": [],
-      "paths": {},
+      "paths": {
+        "WEBSITE": [
+          "app/publisher/bookings/[id]/proof"
+        ]
+      },
       "declaredIn": [
-        "backend"
+        "backend",
+        "WEBSITE"
       ]
     },
     {
@@ -2801,7 +3731,8 @@
       "surfaces": [
         "APP_USER",
         "APP_AGENT",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "demand",
@@ -2824,19 +3755,25 @@
         ],
         "APP_AGENT": [
           "advertisers/packages"
+        ],
+        "WEBSITE": [
+          "app/advertiser/plans",
+          "components/packages"
         ]
       },
       "declaredIn": [
         "backend",
         "CONSOLE",
         "APP_USER",
-        "APP_AGENT"
+        "APP_AGENT",
+        "WEBSITE"
       ]
     },
     {
       "key": "partners.print-floor",
       "surfaces": [
-        "APP_USER"
+        "APP_USER",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "finance",
@@ -2849,18 +3786,30 @@
       "paths": {
         "APP_USER": [
           "partner"
+        ],
+        "WEBSITE": [
+          "app/partner",
+          "app/partner/apply",
+          "app/partner/earnings",
+          "app/partner/invoices",
+          "app/partner/jobs",
+          "app/partner/profile",
+          "app/partner/rate-card",
+          "components/partner"
         ]
       },
       "declaredIn": [
         "backend",
-        "APP_USER"
+        "APP_USER",
+        "WEBSITE"
       ]
     },
     {
       "key": "partners.quotes",
       "surfaces": [
         "APP_USER",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "finance",
@@ -2877,11 +3826,45 @@
       "paths": {
         "APP_USER": [
           "partner/quotes"
+        ],
+        "WEBSITE": [
+          "app/partner/quotes"
         ]
       },
       "declaredIn": [
         "backend",
-        "APP_USER"
+        "APP_USER",
+        "WEBSITE"
+      ]
+    },
+    {
+      "key": "payments.bank-transfer",
+      "surfaces": [
+        "APP_USER",
+        "CONSOLE",
+        "BACKEND",
+        "WEBSITE"
+      ],
+      "kind": "FEATURE",
+      "owner": "finance",
+      "launch": "on",
+      "description": "BT-1 (DR 12): paying by bank transfer — the receiving account shown to the payer, their UTR claim, and ops confirming or rejecting it against the statement under Finance › Payments.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/payments/bank-transfer",
+        "/api/v1/payments/:id/bank-transfer"
+      ],
+      "jobs": [],
+      "paths": {
+        "WEBSITE": [
+          "app/advertiser/billing/methods",
+          "components/packages"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "WEBSITE"
       ]
     },
     {
@@ -2934,7 +3917,8 @@
         "APP_USER",
         "APP_AGENT",
         "CONSOLE",
-        "BACKEND"
+        "BACKEND",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "finance",
@@ -2950,11 +3934,18 @@
       "paths": {
         "CONSOLE": [
           "finance/payments"
+        ],
+        "WEBSITE": [
+          "app/advertiser/campaigns/[id]/pay",
+          "app/advertiser/billing/methods",
+          "app/advertiser/plans",
+          "components/booking"
         ]
       },
       "declaredIn": [
         "backend",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ]
     },
     {
@@ -3086,7 +4077,8 @@
       "surfaces": [
         "APP_USER",
         "APP_AGENT",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "finance",
@@ -3104,18 +4096,23 @@
       "paths": {
         "CONSOLE": [
           "finance/payout-methods"
+        ],
+        "WEBSITE": [
+          "app/publisher/earnings/bank"
         ]
       },
       "declaredIn": [
         "backend",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ]
     },
     {
       "key": "payouts.wallet",
       "surfaces": [
         "APP_USER",
-        "APP_AGENT"
+        "APP_AGENT",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "finance",
@@ -3131,11 +4128,16 @@
       "paths": {
         "APP_USER": [
           "publisher/wallet"
+        ],
+        "WEBSITE": [
+          "app/publisher/earnings",
+          "components/publisher-money"
         ]
       },
       "declaredIn": [
         "backend",
-        "APP_USER"
+        "APP_USER",
+        "WEBSITE"
       ]
     },
     {
@@ -3143,7 +4145,8 @@
       "surfaces": [
         "APP_USER",
         "APP_AGENT",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "finance",
@@ -3159,11 +4162,58 @@
       "paths": {
         "CONSOLE": [
           "finance"
+        ],
+        "WEBSITE": [
+          "components/publisher-money"
         ]
       },
       "declaredIn": [
         "backend",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
+      ]
+    },
+    {
+      "key": "platform.document-reading",
+      "surfaces": [
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "DR-1 (23 Sep 2026): the desk reads what is written on an uploaded document through the vision model — the kind named, the fields held to that kind's list with a confidence each, kept on the file and shown wherever it appears. It prefills and cross-checks; Accept and Flag stay the reviewer's. Aadhaar is never a kind.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/files"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
+      ]
+    },
+    {
+      "key": "platform.gps-camera",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "GC (23 Sep 2026): the ADX camera stamps a photo with where and when it was taken — a band burned into the picture and the EXIF GPS block — when the person has the location stamp on, like a flash switch. Opt-in per photo; evidence flows open with it on, listing photos with it off.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/upload"
+      ],
+      "jobs": [],
+      "paths": {},
+      "declaredIn": [
+        "backend"
       ]
     },
     {
@@ -3216,7 +4266,8 @@
         "APP_USER",
         "APP_AGENT",
         "CONSOLE",
-        "BACKEND"
+        "BACKEND",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "platform",
@@ -3229,9 +4280,14 @@
         "/api/v1/files"
       ],
       "jobs": [],
-      "paths": {},
+      "paths": {
+        "WEBSITE": [
+          "components/files"
+        ]
+      },
       "declaredIn": [
-        "backend"
+        "backend",
+        "WEBSITE"
       ]
     },
     {
@@ -3287,7 +4343,8 @@
         "APP_USER",
         "APP_AGENT",
         "CONSOLE",
-        "BACKEND"
+        "BACKEND",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "demand",
@@ -3304,11 +4361,15 @@
         "CONSOLE": [
           "pricing",
           "pricing/engine-settings"
+        ],
+        "WEBSITE": [
+          "components/listing-form"
         ]
       },
       "declaredIn": [
         "backend",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ]
     },
     {
@@ -3529,7 +4590,8 @@
       "key": "print.partner-kyc",
       "surfaces": [
         "APP_USER",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "platform",
@@ -3545,11 +4607,15 @@
       "paths": {
         "CONSOLE": [
           "kyc/print-partners"
+        ],
+        "WEBSITE": [
+          "app/partner/verify"
         ]
       },
       "declaredIn": [
         "backend",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ]
     },
     {
@@ -3569,7 +4635,7 @@
       "jobs": [],
       "paths": {
         "CONSOLE": [
-          "print-partners/roster",
+          "print-partners/directory",
           "print-partners/quote-requests",
           "print-partners/[id]"
         ]
@@ -3577,6 +4643,161 @@
       "declaredIn": [
         "backend",
         "CONSOLE"
+      ]
+    },
+    {
+      "key": "promo-codes.desk",
+      "surfaces": [
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "senior",
+      "launch": "on",
+      "description": "PC-1: promo codes — percent or flat rupees off a booking's media and production, with caps, windows and limits; made and switched under Growth › Promo codes.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/promo-codes"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "growth/promo-codes"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "promotions.ads",
+      "surfaces": [
+        "APP_USER",
+        "CONSOLE",
+        "BACKEND",
+        "WEBSITE"
+      ],
+      "kind": "KILL_SWITCH",
+      "owner": "growth",
+      "launch": "on",
+      "description": "LM-1: display ads sold in ad slots — an advertiser books a slot for dates, uploads artwork, pays; ADX reviews it; it rotates in the slot, labelled \"Ad\", with impressions and clicks back to the buyer.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/promotions/slots",
+        "/api/v1/promotions/ads"
+      ],
+      "jobs": [],
+      "paths": {
+        "APP_USER": [
+          "advertiser/promote"
+        ],
+        "WEBSITE": [
+          "app/advertiser/promotions",
+          "components/promotions",
+          "components/promotions/ads",
+          "components/layout"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "APP_USER",
+        "WEBSITE"
+      ]
+    },
+    {
+      "key": "promotions.boosts",
+      "surfaces": [
+        "APP_USER",
+        "CONSOLE",
+        "BACKEND",
+        "WEBSITE"
+      ],
+      "kind": "KILL_SWITCH",
+      "owner": "growth",
+      "launch": "on",
+      "description": "LM-1: sponsored listings — a publisher pays to have their own listing shown first at the top of search and/or of the \"Similar listing\" row, labelled \"Sponsored\".",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/promotions/boost",
+        "/api/v1/promotions/boosts"
+      ],
+      "jobs": [],
+      "paths": {
+        "APP_USER": [
+          "publisher/promote"
+        ],
+        "WEBSITE": [
+          "app/publisher/promotions",
+          "components/promotions",
+          "components/promotions/boosts"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "APP_USER",
+        "WEBSITE"
+      ]
+    },
+    {
+      "key": "promotions.desk",
+      "surfaces": [
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "growth",
+      "launch": "on",
+      "description": "LM-1: the Growth desk for paid placements — slots, placements and prices, the artwork review, cancellations and refunds, the numbers — plus the impression and click counter the clients feed and the daily lifecycle sweep.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/promotions",
+        "/api/v1/promotions/admin",
+        "/api/v1/app/promotions"
+      ],
+      "jobs": [
+        "promotions"
+      ],
+      "paths": {
+        "CONSOLE": [
+          "ads"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
+      ]
+    },
+    {
+      "key": "publisher.availability",
+      "surfaces": [
+        "APP_USER",
+        "BACKEND",
+        "WEBSITE"
+      ],
+      "kind": "FEATURE",
+      "owner": "supply",
+      "launch": "on",
+      "description": "BD-1: the publisher's availability calendar — every spot over a window with its bookings, holds and blocked dates.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/publishers/me/availability"
+      ],
+      "jobs": [],
+      "paths": {
+        "WEBSITE": [
+          "app/publisher/availability",
+          "components/publisher"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "WEBSITE"
       ]
     },
     {
@@ -3607,7 +4828,8 @@
     {
       "key": "publisher.dashboard",
       "surfaces": [
-        "APP_USER"
+        "APP_USER",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "supply",
@@ -3623,18 +4845,24 @@
       "paths": {
         "APP_USER": [
           "publisher"
+        ],
+        "WEBSITE": [
+          "app/publisher",
+          "components/publisher-home"
         ]
       },
       "declaredIn": [
         "backend",
-        "APP_USER"
+        "APP_USER",
+        "WEBSITE"
       ]
     },
     {
       "key": "publisher.kyc-desk",
       "surfaces": [
         "APP_USER",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "platform",
@@ -3651,11 +4879,17 @@
       "paths": {
         "CONSOLE": [
           "kyc"
+        ],
+        "WEBSITE": [
+          "app/publisher/profile/verify",
+          "app/publisher/listings/new/verify-business",
+          "components/verification"
         ]
       },
       "declaredIn": [
         "backend",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ]
     },
     {
@@ -3689,7 +4923,8 @@
       "surfaces": [
         "APP_USER",
         "APP_AGENT",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "supply",
@@ -3705,18 +4940,23 @@
         "CONSOLE": [
           "publishers/directory",
           "publishers/[id]"
+        ],
+        "WEBSITE": [
+          "app/publisher/profile"
         ]
       },
       "declaredIn": [
         "backend",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ]
     },
     {
       "key": "publisher.spot-insights",
       "surfaces": [
         "APP_USER",
-        "BACKEND"
+        "BACKEND",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "supply",
@@ -3731,11 +4971,15 @@
       "paths": {
         "APP_USER": [
           "publisher/bookings"
+        ],
+        "WEBSITE": [
+          "app/publisher/bookings/[id]"
         ]
       },
       "declaredIn": [
         "backend",
-        "APP_USER"
+        "APP_USER",
+        "WEBSITE"
       ]
     },
     {
@@ -3774,7 +5018,7 @@
       "kind": "FEATURE",
       "owner": "platform",
       "launch": "on",
-      "description": "Lot G (Q129/Q143): the twelve reports defined in code — run on demand or on a schedule, mailed as a time-limited link.",
+      "description": "Lot G (Q129/Q143): the thirteen reports defined in code — run on demand or on a schedule, mailed as a time-limited link.",
       "variants": [],
       "aliases": [],
       "routes": [
@@ -3785,8 +5029,7 @@
       ],
       "paths": {
         "CONSOLE": [
-          "settings/reports",
-          "settings/reports/onboarding-board"
+          "analytics/reports"
         ]
       },
       "declaredIn": [
@@ -3871,7 +5114,8 @@
       "key": "revenue.publisher-plans",
       "surfaces": [
         "APP_USER",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "KILL_SWITCH",
       "owner": "finance",
@@ -3893,12 +5137,17 @@
         ],
         "APP_USER": [
           "publisher/subscription"
+        ],
+        "WEBSITE": [
+          "app/publisher/subscription",
+          "components/subscriptions"
         ]
       },
       "declaredIn": [
         "backend",
         "CONSOLE",
-        "APP_USER"
+        "APP_USER",
+        "WEBSITE"
       ]
     },
     {
@@ -3946,12 +5195,43 @@
       ],
       "paths": {
         "CONSOLE": [
-          "disputes/fraud"
+          "disputes/fraud",
+          "orders/fraud-review",
+          "settings/fraud"
         ]
       },
       "declaredIn": [
         "backend",
         "CONSOLE"
+      ]
+    },
+    {
+      "key": "safety.order-screening",
+      "surfaces": [
+        "CONSOLE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "Order fraud screening: every order scored and explained signal by signal, flagged for review, held (reversibly) by a person or — when switched on — automatically; cleared, or cancelled as fraud by a person; the nightly re-screen of open orders.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/orders/fraud-review",
+        "/api/v1/orders/:id/hold",
+        "/api/v1/orders/:id/release",
+        "/api/v1/orders/:id/clear",
+        "/api/v1/orders/:id/confirm-fraud",
+        "/api/v1/orders/:id/cancel-impact",
+        "/api/v1/orders/:id/fraud-case",
+        "/api/v1/orders/:id/rescore"
+      ],
+      "jobs": [
+        "order-risk-rescreen"
+      ],
+      "paths": {},
+      "declaredIn": [
+        "backend"
       ]
     },
     {
@@ -3981,6 +5261,66 @@
       "paths": {},
       "declaredIn": [
         "backend"
+      ]
+    },
+    {
+      "key": "settings.custom-fields",
+      "surfaces": [
+        "APP_USER",
+        "CONSOLE",
+        "WEBSITE"
+      ],
+      "kind": "FEATURE",
+      "owner": "senior",
+      "launch": "on",
+      "description": "CF-1 (27 Sep 2026): custom fields per record type — definitions made under Settings › Custom fields (kind, options, required, where shown, whether the owner may answer), values kept beside the publisher, advertiser, listing or lead; the desk answers on every detail page, the owner answers their own in the apps and on the website.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/custom-fields",
+        "/api/v1/app/custom-fields"
+      ],
+      "jobs": [],
+      "paths": {
+        "CONSOLE": [
+          "settings/custom-fields"
+        ],
+        "WEBSITE": [
+          "components/custom-fields"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE",
+        "WEBSITE"
+      ]
+    },
+    {
+      "key": "settings.storage",
+      "surfaces": [
+        "CONSOLE",
+        "BACKEND"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "ST-3 / ST-4 (28 Sep 2026): Settings › Storage — space per purpose (public and private apart), the largest files, the files nothing on the platform refers to, and the weekly sweep that marks them. Removal of a file unreferenced past the grace period is OFF by default and only the owner turns it on; the retention-governed purposes are never touched.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/storage"
+      ],
+      "jobs": [
+        "storage-sweep"
+      ],
+      "paths": {
+        "CONSOLE": [
+          "settings/storage"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "CONSOLE"
       ]
     },
     {
@@ -4114,7 +5454,8 @@
       "key": "supply.verification",
       "surfaces": [
         "APP_AGENT",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "supply",
@@ -4135,12 +5476,16 @@
         ],
         "APP_AGENT": [
           "verification"
+        ],
+        "WEBSITE": [
+          "components/listing-form"
         ]
       },
       "declaredIn": [
         "backend",
         "CONSOLE",
-        "APP_AGENT"
+        "APP_AGENT",
+        "WEBSITE"
       ]
     },
     {
@@ -4148,7 +5493,8 @@
       "surfaces": [
         "APP_USER",
         "APP_AGENT",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "platform",
@@ -4163,11 +5509,17 @@
       "paths": {
         "CONSOLE": [
           "disputes"
+        ],
+        "WEBSITE": [
+          "app/advertiser/disputes",
+          "app/publisher/disputes",
+          "components/disputes"
         ]
       },
       "declaredIn": [
         "backend",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ]
     },
     {
@@ -4175,7 +5527,8 @@
       "surfaces": [
         "APP_USER",
         "APP_AGENT",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "KILL_SWITCH",
       "owner": "platform",
@@ -4197,13 +5550,22 @@
         ],
         "APP_AGENT": [
           "support"
+        ],
+        "WEBSITE": [
+          "app/advertiser/help/chat",
+          "app/advertiser/requests",
+          "app/publisher/help/chat",
+          "app/publisher/help/[id]",
+          "app/partner/help/chat",
+          "components/support"
         ]
       },
       "declaredIn": [
         "backend",
         "CONSOLE",
         "APP_USER",
-        "APP_AGENT"
+        "APP_AGENT",
+        "WEBSITE"
       ]
     },
     {
@@ -4211,7 +5573,8 @@
       "surfaces": [
         "APP_USER",
         "APP_AGENT",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "platform",
@@ -4227,11 +5590,19 @@
         "CONSOLE": [
           "support",
           "support/assignments"
+        ],
+        "WEBSITE": [
+          "app/advertiser/help",
+          "app/advertiser/requests",
+          "app/publisher/help",
+          "app/partner/help",
+          "components/support"
         ]
       },
       "declaredIn": [
         "backend",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ]
     },
     {
@@ -4239,7 +5610,8 @@
       "surfaces": [
         "APP_USER",
         "APP_AGENT",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "platform",
@@ -4255,11 +5627,15 @@
       "paths": {
         "CONSOLE": [
           "settings/app-status"
+        ],
+        "WEBSITE": [
+          "components/platform"
         ]
       },
       "declaredIn": [
         "backend",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ]
     },
     {
@@ -4369,7 +5745,8 @@
       "surfaces": [
         "APP_USER",
         "APP_AGENT",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "platform",
@@ -4384,11 +5761,15 @@
       "paths": {
         "CONSOLE": [
           "flows"
+        ],
+        "WEBSITE": [
+          "components/listing-form/flow"
         ]
       },
       "declaredIn": [
         "backend",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ]
     },
     {
@@ -4455,7 +5836,7 @@
       "kind": "FEATURE",
       "owner": "platform",
       "launch": "on",
-      "description": "The integrations row: SMS rails, email, HRMS, work tool, KYC provider mode, maps, audience vendors, the QR engine (QR-1: Local or GenQR, with its connection test) — secrets masked on the way out.",
+      "description": "The integrations row: SMS rails, email, HRMS, work tool, KYC provider mode, maps, audience vendors, the QR engine (QR-1: Local or GenQR, with its connection test), Cashfree Secure ID and the verification routing (Cashfree Phase 1) — secrets sealed at rest under INTEGRATIONS_ENCRYPTION_KEY and masked on the way out.",
       "variants": [],
       "aliases": [],
       "routes": [
@@ -4516,7 +5897,7 @@
       "jobs": [],
       "paths": {
         "CONSOLE": [
-          "roles"
+          "users/roles"
         ]
       },
       "declaredIn": [
@@ -4541,9 +5922,14 @@
         "/status"
       ],
       "jobs": [],
-      "paths": {},
+      "paths": {
+        "WEBSITE": [
+          "app/status"
+        ]
+      },
       "declaredIn": [
-        "backend"
+        "backend",
+        "WEBSITE"
       ]
     },
     {
@@ -4593,7 +5979,8 @@
       "surfaces": [
         "APP_USER",
         "APP_AGENT",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "senior",
@@ -4606,9 +5993,14 @@
         "/api/v1/users/:id/contacts"
       ],
       "jobs": [],
-      "paths": {},
+      "paths": {
+        "WEBSITE": [
+          "components/account"
+        ]
+      },
       "declaredIn": [
-        "backend"
+        "backend",
+        "WEBSITE"
       ]
     },
     {
@@ -4616,7 +6008,8 @@
       "surfaces": [
         "APP_USER",
         "CONSOLE",
-        "BACKEND"
+        "BACKEND",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "senior",
@@ -4628,9 +6021,20 @@
       "jobs": [
         "data-export"
       ],
-      "paths": {},
+      "paths": {
+        "WEBSITE": [
+          "app/advertiser/account",
+          "app/publisher/profile",
+          "app/partner/profile",
+          "app/advertiser/settings",
+          "app/publisher/settings",
+          "app/partner/settings",
+          "components/account"
+        ]
+      },
       "declaredIn": [
-        "backend"
+        "backend",
+        "WEBSITE"
       ]
     },
     {
@@ -4661,6 +6065,34 @@
       ]
     },
     {
+      "key": "users.email-verification",
+      "surfaces": [
+        "APP_USER",
+        "APP_AGENT",
+        "BACKEND",
+        "WEBSITE"
+      ],
+      "kind": "FEATURE",
+      "owner": "senior",
+      "launch": "on",
+      "description": "ED-1: proving the account's own email with a code after a number-first sign-in — the address becomes the verified primary email.",
+      "variants": [],
+      "aliases": [],
+      "routes": [
+        "/api/v1/users/me/email"
+      ],
+      "jobs": [],
+      "paths": {
+        "WEBSITE": [
+          "app/(auth)/verify-email"
+        ]
+      },
+      "declaredIn": [
+        "backend",
+        "WEBSITE"
+      ]
+    },
+    {
       "key": "users.impersonation",
       "surfaces": [
         "CONSOLE"
@@ -4686,7 +6118,8 @@
       "surfaces": [
         "APP_USER",
         "APP_AGENT",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "senior",
@@ -4701,11 +6134,23 @@
       "paths": {
         "CONSOLE": [
           "account"
+        ],
+        "WEBSITE": [
+          "app/(auth)/choose-workspace",
+          "app/advertiser/account",
+          "app/publisher/profile",
+          "app/partner/profile",
+          "app/advertiser/settings",
+          "app/publisher/settings",
+          "app/partner/settings",
+          "components/account",
+          "components/checkout"
         ]
       },
       "declaredIn": [
         "backend",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ]
     },
     {
@@ -4713,7 +6158,8 @@
       "surfaces": [
         "APP_USER",
         "APP_AGENT",
-        "CONSOLE"
+        "CONSOLE",
+        "WEBSITE"
       ],
       "kind": "FEATURE",
       "owner": "senior",
@@ -4726,9 +6172,118 @@
         "/api/v1/users/:id/sessions"
       ],
       "jobs": [],
-      "paths": {},
+      "paths": {
+        "WEBSITE": [
+          "app/advertiser/account",
+          "app/publisher/profile",
+          "app/partner/profile",
+          "components/account"
+        ]
+      },
       "declaredIn": [
-        "backend"
+        "backend",
+        "WEBSITE"
+      ]
+    },
+    {
+      "key": "website.landing",
+      "surfaces": [
+        "WEBSITE"
+      ],
+      "kind": "FEATURE",
+      "owner": "growth",
+      "launch": "on",
+      "description": "DR 12: the public website's own pages — the home, How it works, Advertise on ADX, For publishers, the help centre, the categories and formats guides and the 404 — with the site's header and footer; their sections are laid out from content.layouts and fall back to the page's own order.",
+      "variants": [],
+      "aliases": [],
+      "routes": [],
+      "jobs": [],
+      "paths": {
+        "WEBSITE": [
+          "app/page.tsx",
+          "app/not-found.tsx",
+          "app/(site)",
+          "app/(site)/advertise",
+          "app/(site)/categories",
+          "app/(site)/formats",
+          "app/(site)/help",
+          "app/(site)/how-it-works",
+          "app/(site)/publishers",
+          "components/site"
+        ]
+      },
+      "declaredIn": [
+        "WEBSITE"
+      ]
+    },
+    {
+      "key": "website.seo",
+      "surfaces": [
+        "WEBSITE"
+      ],
+      "kind": "FEATURE",
+      "owner": "growth",
+      "launch": "on",
+      "description": "PB-5: what the search engines read — /sitemap.xml (the live, indexable site pages, the static documents and the policies index) and /robots.txt (previews, workspaces and sign-in kept out).",
+      "variants": [],
+      "aliases": [],
+      "routes": [],
+      "jobs": [],
+      "paths": {
+        "WEBSITE": [
+          "app/sitemap.ts",
+          "app/robots.ts"
+        ]
+      },
+      "declaredIn": [
+        "WEBSITE"
+      ]
+    },
+    {
+      "key": "website.shell",
+      "surfaces": [
+        "WEBSITE"
+      ],
+      "kind": "FEATURE",
+      "owner": "platform",
+      "launch": "on",
+      "description": "The signed-in workspace on adx.in — the header, the sidebar with each side's pages, \"Go to a page…\", the account menu and the switch between the advertiser, publisher and print-partner workspaces — and the shared UI kit every page draws with.",
+      "variants": [],
+      "aliases": [],
+      "routes": [],
+      "jobs": [],
+      "paths": {
+        "WEBSITE": [
+          "components/workspace",
+          "components/ui",
+          "components/platform"
+        ]
+      },
+      "declaredIn": [
+        "WEBSITE"
+      ]
+    },
+    {
+      "key": "website.studio",
+      "surfaces": [
+        "WEBSITE"
+      ],
+      "kind": "FEATURE",
+      "owner": "senior",
+      "launch": "on",
+      "description": "PB-1/PB-2: Studio on adx.in — the visual editor where ops lay out the website's own pages, build custom pages from blocks and arrange the four app homes, preview a draft in place, and publish or restore it; signed in with a console account.",
+      "variants": [],
+      "aliases": [],
+      "routes": [],
+      "jobs": [],
+      "paths": {
+        "WEBSITE": [
+          "app/studio",
+          "components/studio"
+        ]
+      },
+      "declaredIn": [
+        "WEBSITE"
       ]
     },
     {

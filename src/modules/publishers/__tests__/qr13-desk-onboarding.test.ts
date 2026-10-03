@@ -78,7 +78,11 @@ describe('the create schema', () => {
     const missing = createPublisherSchema.safeParse({ name: 'Sharma Hoardings', mobile: '9876543210', firstName: 'Rakesh', type: 'BUSINESS' });
     expect(missing.success).toBe(false);
     const paths = missing.success ? [] : missing.error.issues.map((i) => i.path.join('.'));
-    expect(paths).toEqual(expect.arrayContaining(['lastName', 'email', 'dateOfBirth', 'address', 'city', 'state', 'gstin', 'contactName', 'contactMobile']));
+    expect(paths).toEqual(expect.arrayContaining(['lastName', 'email', 'address', 'city', 'state', 'gstin', 'contactName', 'contactMobile']));
+    // AGE-1 (29 Sep 2026): the date of birth is offered, never required.
+    expect(paths).not.toContain('dateOfBirth');
+    const { dateOfBirth: _dob, ...withoutDate } = full;
+    expect(createPublisherSchema.safeParse(withoutDate).success).toBe(true);
 
     expect(createPublisherSchema.safeParse(full).success).toBe(true);
     // An individual needs no GSTIN and no contact person.
@@ -89,8 +93,9 @@ describe('the create schema', () => {
     expect(createPublisherSchema.safeParse({ ...individual, type: 'NGO', contactName: 'A', contactMobile: '9876500000' }).success).toBe(true);
   });
 
-  it('refuses a minor, a bad GSTIN and a half pin', () => {
-    expect(createPublisherSchema.safeParse({ ...full, dateOfBirth: '2015-01-01' }).success).toBe(false);
+  it('takes a minor (AGE-1), and refuses a date in the future, a bad GSTIN and a half pin', () => {
+    expect(createPublisherSchema.safeParse({ ...full, dateOfBirth: '2015-01-01' }).success).toBe(true);
+    expect(createPublisherSchema.safeParse({ ...full, dateOfBirth: '2999-01-01' }).success).toBe(false);
     expect(createPublisherSchema.safeParse({ ...full, gstin: 'nope' }).success).toBe(false);
     const half = createPublisherSchema.safeParse({ ...full, longitude: undefined });
     expect(half.success).toBe(false);
@@ -100,6 +105,14 @@ describe('the create schema', () => {
 });
 
 describe('a desk onboarding', () => {
+  it('takes the precise entity type at creation (a school is GOVERNMENT_EDUCATION from the start) and refuses one that is not a kind', async () => {
+    expect(createPublisherSchema.safeParse({ ...full, type: 'NGO', entityType: 'government_education' }).data?.entityType).toBe('GOVERNMENT_EDUCATION');
+    expect(createPublisherSchema.safeParse({ ...full, entityType: 'SCHOOL' }).success).toBe(false);
+    const { firstName, lastName, dateOfBirth, gender, ...rest } = full;
+    await createPublisher({ ...rest, agentId: null, type: 'NGO', entityType: 'GOVERNMENT_EDUCATION', firstName, lastName, dateOfBirth, gender: gender as never } as never);
+    expect(repository.create.mock.calls[repository.create.mock.calls.length - 1]![0]).toEqual(expect.objectContaining({ type: 'NGO', entityType: 'GOVERNMENT_EDUCATION' }));
+  });
+
   it('opens the account, links it, and opens the publisher complete when the basics are in', async () => {
     const { firstName, lastName, dateOfBirth, gender, ...rest } = full;
     const created = await createPublisher({ ...rest, agentId: null, type: 'BUSINESS', firstName, lastName, dateOfBirth, gender: gender as never } as never);
@@ -183,5 +196,41 @@ describe('the detail read', () => {
     expect(joined.user).toEqual({ closedAt: null, closeReason: null });
     const bare = withDetailFacts({ listings: [], user: { closedAt: null, closeReason: null } });
     expect(bare).not.toHaveProperty('person');
+  });
+});
+
+describe('onboarding addresses (1 Oct 2026): the PIN code beside the address', () => {
+  it('is never required by the ladder: a full desk onboarding without one passes, and one with one keeps it trimmed', () => {
+    expect(createPublisherSchema.safeParse(full).success).toBe(true);
+    expect(createPublisherSchema.safeParse({ ...full, postalCode: ' 600001 ' }).data?.postalCode).toBe('600001');
+    expect(updatePublisherSchema.safeParse({ postalCode: '600001' }).data?.postalCode).toBe('600001');
+  });
+
+  it('refuses a PIN that is not six digits or starts with 0, with a message a person can act on', () => {
+    for (const bad of ['60001', '0600001', '060001', 'ABC123', '6000011']) {
+      const parsed = createPublisherSchema.safeParse({ ...full, postalCode: bad });
+      expect(parsed.success).toBe(false);
+      const issue = parsed.error!.issues.find((i) => i.path.join('.') === 'postalCode');
+      expect(issue?.message).toBe('A PIN code is six digits and does not start with 0 — 560001, say.');
+    }
+  });
+
+  it('reads a blank box as null, and null clears', () => {
+    expect(updatePublisherSchema.safeParse({ postalCode: '' }).data?.postalCode).toBeNull();
+    expect(updatePublisherSchema.safeParse({ postalCode: '   ' }).data?.postalCode).toBeNull();
+    expect(updatePublisherSchema.safeParse({ postalCode: null }).data?.postalCode).toBeNull();
+    expect(updatePublisherSchema.safeParse({ name: 'X' }).data).not.toHaveProperty('postalCode');
+  });
+
+  it('rides the desk onboarding onto the row beside the address and its pin', async () => {
+    const { firstName, lastName, dateOfBirth, gender, ...rest } = full;
+    await createPublisher({ ...rest, postalCode: '600001', agentId: null, type: 'BUSINESS', firstName, lastName, dateOfBirth, gender: gender as never } as never);
+    expect(repository.create.mock.calls[0]![0]).toEqual(expect.objectContaining({ address: '12 Mount Road', postalCode: '600001', latitude: 13.06, longitude: 80.27 }));
+  });
+
+  it("rides the desk's edit onto the row", async () => {
+    repository.findById.mockResolvedValue({ id: 'pub_1', mobile: '+919876543210', userId: 'usr_1', user: { closedAt: null, closeReason: null, firstName: 'Rakesh', lastName: 'Sharma' } });
+    await updatePublisherAtDesk('pub_1', 'usr_admin', { address: '14 Mount Road', postalCode: '600002' } as never);
+    expect(repository.update).toHaveBeenCalledWith('pub_1', { address: '14 Mount Road', postalCode: '600002', cityId: null });
   });
 });

@@ -1,15 +1,19 @@
 import type { Request, Response } from 'express';
 import { ApiError } from '../../../shared/errors';
+import { includesInactive } from '../../../shared/party-status';
 import type { KycStatus } from '../../../shared/database';
+import { kycSupportsSchema } from '../../../shared/kyc-state';
 import { kycRequestSchema, pagination, reviewSchema } from '../kyc.schema';
 import { agentKycDocumentsSchema, agentKycSearchSchema, agentKycStateFilterSchema, agentKycStatusFilterSchema } from './agent-kyc.schema';
 import { getAgentKyc, getMyAgentKyc, initiateMyAgentDigioKyc, listAgentKycs, myAgentDigioStatus, recordAgentKyc, requestAgentKyc, reviewAgentKyc } from './agent-kyc.service';
 
 const agentId = (req: Request) => req.params['agentId'] as string;
 
-/** KYC-D: `POST /agent-kyc/me/digio/initiate` — the agent's own Digio session. */
+/** KYC-D: `POST /agent-kyc/me/digio/initiate` — the agent's own Digio session. Cashfree Phase 1: body `{ supports? }`. */
 export async function initiateMyAgentDigioHandler(req: Request, res: Response): Promise<void> {
-  res.json({ success: true, data: await initiateMyAgentDigioKyc(req.user!.sub) });
+  const supports = kycSupportsSchema.safeParse((req.body as { supports?: unknown } | undefined)?.supports);
+  if (!supports.success) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid request', supports.error.flatten());
+  res.json({ success: true, data: await initiateMyAgentDigioKyc(req.user!.sub, new Date(), supports.data) });
 }
 
 /** KYC-D: `GET /agent-kyc/me/digio/status` — what ADX has heard; 404 before any record. */
@@ -34,6 +38,8 @@ export async function listAgentKycsHandler(req: Request, res: Response): Promise
   const where = {
     ...(state.data ? { state: state.data } : parsed.data ? { status: parsed.data as KycStatus } : {}),
     ...(q.success && q.data ? { q: q.data } : {}),
+    // Account lifecycle (2 Oct 2026): `?include=inactive` puts the suspended, deactivated, closed and departed back on the queue.
+    ...(includesInactive(req.query['include']) ? { includeInactive: true } : {}),
   };
   const { items, meta } = await listAgentKycs(where, page, pageSize);
   res.json({ success: true, data: items, meta });

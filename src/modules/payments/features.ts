@@ -56,6 +56,16 @@ feature('payments.ccavenue', {
   routes: ['/api/v1/webhooks/ccavenue'],
 });
 
+feature('payments.bank-transfer', {
+  surfaces: ['APP_USER', 'WEBSITE', 'CONSOLE', 'BACKEND'],
+  owner: 'finance',
+  kind: 'FEATURE',
+  launch: 'on',
+  description:
+    'BT-1 (DR 12): paying by bank transfer — the receiving account shown to the payer, their UTR claim, and ops confirming or rejecting it against the statement under Finance › Payments.',
+  routes: ['/api/v1/payments/bank-transfer', '/api/v1/payments/:id/bank-transfer'],
+});
+
 feature('payments.refunds', {
   surfaces: ['CONSOLE', 'BACKEND'],
   owner: 'finance',

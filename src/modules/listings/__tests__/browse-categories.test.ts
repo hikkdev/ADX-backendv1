@@ -21,6 +21,7 @@ const { repository } = vi.hoisted(() => ({
     findActiveForCategories: vi.fn(),
     savedListingIds: vi.fn(),
     slotsHeld: vi.fn(async () => new Map()),
+    datedHolds: vi.fn(async () => []),
   },
 }));
 

@@ -1,3 +1,4 @@
+import { accountClosedAt, assertNotClosed } from '../../shared/party-status';
 import { ApiError } from '../../shared/errors';
 import { toListPage } from '../../shared/pagination';
 import { kycSummaryOf } from '../../shared/kyc-state';
@@ -162,6 +163,8 @@ export async function inviteEmployeeToConsole(
 
 export async function updateEmployee(userId: string, data: UpdateEmployeeInput) {
   const before = await requireEmployee(userId);
+  // Account lifecycle (2 Oct 2026): a closed account's HR record is never switched back on.
+  if (data.isActive === true && !before.isActive) assertNotClosed(await accountClosedAt(userId));
   // The HR-tool id is unique: two records pointing at one person in the tool
   // is the drift the link exists to prevent, so it is a 409 here rather than
   // a constraint error from Postgres.
@@ -176,8 +179,33 @@ export async function updateEmployee(userId: string, data: UpdateEmployeeInput) 
   return { before, after };
 }
 
+const EMPLOYEE_HISTORY_LABELS = {
+  kycRecords: 'KYC record',
+  interviews: 'interviews held',
+  managedAgents: 'agents managed',
+  departmentsHeaded: 'departments headed',
+  actions: 'actions on the desk',
+} as const;
+
+/**
+ * Account lifecycle (2 Oct 2026): "Remove HR record" is for a record made by
+ * mistake. One with a KYC record or desk work behind it is history — refused
+ * 409 EMPLOYEE_HAS_HISTORY with the blockers, and ops deactivate it instead.
+ */
 export async function deleteEmployee(userId: string) {
   const employee = await requireEmployee(userId);
+  const history = await repository.findHistory(employee.id, employee.userId);
+  const blockers = (Object.keys(history) as (keyof typeof history)[])
+    .filter((key) => history[key] > 0)
+    .map((key) => ({ kind: key, label: EMPLOYEE_HISTORY_LABELS[key], count: history[key] }));
+  if (blockers.length > 0) {
+    throw new ApiError(
+      409,
+      'EMPLOYEE_HAS_HISTORY',
+      `This HR record has ${blockers.map((row) => `${row.count} ${row.label}`).join(', ')} behind it and cannot be removed. Deactivate it instead.`,
+      { userId, blockers, instead: 'DEACTIVATE' },
+    );
+  }
   await repository.remove(userId);
   return employee;
 }

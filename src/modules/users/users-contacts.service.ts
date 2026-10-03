@@ -79,9 +79,11 @@ async function requireContact(userId: string, contactId: string): Promise<Contac
 export async function listContacts(userId: string): Promise<ContactsView> {
   const user = await requireUser(userId);
   const rows = await repository.findContacts(userId);
+  // ED-1: `User.emailVerifiedAt` answers first; the codes answered before
+  // the column existed still vouch for an address (`hasProvenEmail`).
   const [labels, emailVerified] = await Promise.all([
     findUserLabels(rows.map((row) => row.addedById)),
-    user.email ? hasProvenEmail(userId, user.email) : Promise.resolve(false),
+    user.emailVerifiedAt ? Promise.resolve(true) : user.email ? hasProvenEmail(userId, user.email) : Promise.resolve(false),
   ]);
   return {
     primary: {

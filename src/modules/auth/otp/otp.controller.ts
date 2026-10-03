@@ -1,3 +1,4 @@
+import { isWorkingUser } from '../../../shared/party-status';
 import type { Request, Response } from 'express';
 import { ApiError } from '../../../shared/errors';
 import { logActivity } from '../../../shared/audit';
@@ -12,8 +13,9 @@ import { emailOtpLoginUser, mobileOtpLoginUser } from '../auth.mapper';
 import { prismaAuthRepository as repository } from '../prisma-auth.repository';
 import { sessionMeta, startSession } from '../auth.session';
 import { OtpError } from './otp-security';
-import { sendEmailOtp, sendOtp, verifyEmailOtp, verifyOtp } from './otp.service';
-import { adminSignInRequired, isAdmin, issueChallengeAfterMobileOtp } from '../two-factor/two-factor.service';
+import { attachSignupEmail, sendEmailOtp, sendOtp, verifyEmailDoor, verifyOtp } from './otp.service';
+import { adminSignInRequired, isAdmin, issueChallenge, issueChallengeAfterMobileOtp } from '../two-factor/two-factor.service';
+import { isEnrolled } from '../two-factor/authenticator.service';
 
 /**
  * Runs an OTP operation and, if it is refused with a wait, also says so in
@@ -54,8 +56,13 @@ export async function verifyOtpHandler(req: Request, res: Response): Promise<voi
   // Either passes through to the error handler as it is.
   const userId = await withRetryAfter(res, () => verifyOtp(parsed.data.mobile, parsed.data.otp));
 
+  // ED-1: the phone step at the end of an email sign-up — the address the
+  // token vouches for is written onto this account, before the account is
+  // read for the answer, so the payload already carries it.
+  const signup = parsed.data.signupToken ? await attachSignupEmail(userId, parsed.data.signupToken) : null;
+
   const user = await repository.findLoginUserById(userId);
-  if (!user || !user.isActive) {
+  if (!user || !isWorkingUser(user)) {
     throw new ApiError(401, 'UNAUTHORIZED', 'Account not active');
   }
 
@@ -71,18 +78,27 @@ export async function verifyOtpHandler(req: Request, res: Response): Promise<voi
     res.json({ success: true, data: { challenge } });
     return;
   }
+  // 2FA-A (the owner, 25 Sep 2026): any account that set up an authenticator
+  // answers it after the phone — the app, or a recovery code; never SMS again.
+  if (isEnrolled(user)) {
+    const challenge = await issueChallenge(user, { methods: ['AUTHENTICATOR'] });
+    await logActivity(userId, 'LOGIN_2FA_CHALLENGED', req, { method: 'otp', authenticator: true });
+    res.json({ success: true, data: { challenge } });
+    return;
+  }
 
   const { accessToken, refreshToken } = await startSession(userId, roles, sessionMeta(req));
   await logActivity(userId, 'LOGIN_OTP', req);
 
   res.json({
     success: true,
-    data: { accessToken, refreshToken, user: mobileOtpLoginUser(user, roles) },
+    data: { accessToken, refreshToken, user: mobileOtpLoginUser(user, roles), ...(signup ? { signup } : {}) },
   });
 }
 
-// Email-delivered OTP login (via Resend) — an alternative to the phone/SMS
-// OTP flow above, for accounts that already have an email on file.
+// Email-delivered OTP (via Resend). ED-1: register-or-login like the mobile
+// door — a known address signs its account in; an unknown one is a sign-up
+// whose phone is proved next on /verify-otp with the signup token.
 export async function sendOtpEmailHandler(req: Request, res: Response): Promise<void> {
   const parsed = sendOtpEmailSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -100,15 +116,16 @@ export async function verifyOtpEmailHandler(req: Request, res: Response): Promis
     throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid request', parsed.error.flatten());
   }
 
-  let userId: string;
-  try {
-    userId = await verifyEmailOtp(parsed.data.email, parsed.data.otp);
-  } catch (err: any) {
-    throw new ApiError(401, 'UNAUTHORIZED', err.message);
+  const answer = await withRetryAfter(res, () => verifyEmailDoor(parsed.data.email, parsed.data.otp));
+  if (answer.kind === 'signup') {
+    const { signupToken, email, expiresInSeconds } = answer;
+    res.json({ success: true, data: { signup: { signupToken, email, expiresInSeconds } } });
+    return;
   }
+  const { userId } = answer;
 
   const user = await repository.findLoginUserById(userId);
-  if (!user || !user.isActive) {
+  if (!user || !isWorkingUser(user)) {
     throw new ApiError(401, 'UNAUTHORIZED', 'Account not active');
   }
 
@@ -120,6 +137,13 @@ export async function verifyOtpEmailHandler(req: Request, res: Response): Promis
   if (isAdmin(roles)) {
     await logActivity(userId, 'LOGIN_FAILED', req, { method: 'otp_email', reason: 'ADMIN_SIGN_IN_REQUIRED' });
     throw adminSignInRequired();
+  }
+  // 2FA-A: the mailbox is one factor; an enrolled account answers the app before tokens.
+  if (isEnrolled(user)) {
+    const challenge = await issueChallenge(user, { methods: ['AUTHENTICATOR'] });
+    await logActivity(userId, 'LOGIN_2FA_CHALLENGED', req, { method: 'otp_email', authenticator: true });
+    res.json({ success: true, data: { challenge } });
+    return;
   }
 
   const { accessToken, refreshToken } = await startSession(userId, roles, sessionMeta(req));

@@ -9,6 +9,9 @@ export { userRouter } from './users.routes';
 /** PP-1: the print shop's application door, filled by `print-partners` at bootstrap (see users.ports.ts). */
 export { registerPartnerApplicationPort } from './users.ports';
 export type { PartnerApplicationPort } from './users.ports';
+/** Account lifecycle (2 Oct 2026): Deactivate / Reactivate cascaded onto the profiles — `suspension` answers, bootstrap wires. */
+export { registerAccountLifecyclePort } from './users.ports';
+export type { AccountLifecyclePort } from './users.ports';
 
 /**
  * Narrow lookups for modules that would otherwise query the User table:

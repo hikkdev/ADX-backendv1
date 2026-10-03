@@ -2,6 +2,7 @@ import type { Request } from 'express';
 import { ApiError } from '../../shared/errors';
 import { logActivity } from '../../shared/audit';
 import { formatCsv, parseCsv } from '../../shared/csv';
+import { XlsxError, looksLikeXlsx, readXlsxRows } from '../../shared/xlsx';
 import type { ImportParty } from '../../shared/database';
 import { normalizeMobile } from '../auth';
 import { citySupport, resolveCity } from '../pricing';
@@ -38,13 +39,33 @@ export const columnsOf = (key: ImportKey): readonly string[] => (isListingKind(k
 
 /** The CSV by header name, in any order; row numbers count the header as line 1. */
 export function parseImportCsv(text: string): RawImportRow[] {
-  const [header, ...lines] = parseCsv(text);
+  return rowsFromTable(parseCsv(text));
+}
+
+/** A table (header first) by header name; row numbers count the header as line 1. */
+function rowsFromTable([header, ...lines]: string[][], options: { skipBlank?: boolean } = {}): RawImportRow[] {
   if (!header) return [];
   const names = header.map((cell) => cell.trim());
-  return lines.map((cells, index) => ({
-    rowNumber: index + 2,
-    data: Object.fromEntries(names.map((name, column) => [name, (cells[column] ?? '').trim()])),
-  }));
+  return lines.flatMap((cells, index) =>
+    options.skipBlank && cells.every((cell) => cell.trim() === '')
+      ? []
+      : [{ rowNumber: index + 2, data: Object.fromEntries(names.map((name, column) => [name, (cells[column] ?? '').trim()])) }],
+  );
+}
+
+/**
+ * 26 Sep 2026: the first worksheet of an .xlsx, by header name — the same
+ * rows `parseImportCsv` makes of the same sheet saved as CSV. A blank line
+ * in the sheet is skipped (its number is not reused); 400 for a file that
+ * is not a readable workbook.
+ */
+export function parseImportXlsx(buffer: Buffer): RawImportRow[] {
+  try {
+    return rowsFromTable(readXlsxRows(buffer), { skipBlank: true });
+  } catch (err) {
+    if (err instanceof XlsxError) throw new ApiError(400, 'BAD_REQUEST', `${err.message}. Save it again from Excel or Google Sheets as .xlsx, or upload a .csv.`);
+    throw err;
+  }
 }
 
 type Plan =

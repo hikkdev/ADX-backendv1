@@ -1,7 +1,7 @@
-import type {
+import type { ListingBlockedDate,
   ContentCategory,
   ContentStance,
-  Listing,
+  ListingRead as Listing,
   ListingCategory,
   ListingDocumentKind,
   ListingDocumentStatus,
@@ -9,7 +9,7 @@ import type {
   ListingStatus,
   PricingUnit, Prisma } from '../../shared/database';
 import type { AdminListingsQuery, ReviewQueueQuery } from './listings.schema';
-import type { SlotHoldOptions, SlotWindow } from './slot-holds';
+import type { SlotHoldOptions, SlotWindow, DatedHold } from './slot-holds';
 
 /** A listing's position on one content category. */
 export type ContentRule = { contentCategoryId: string; stance: ContentStance };
@@ -27,6 +27,8 @@ export type AdminListingsPage = {
   items: Listing[];
   total: number;
   counts: Record<string, number>;
+  /** 3 Oct 2026: bookings (orders past DRAFT) per row on the page, one groupBy — the grid card's "12 bookings". */
+  bookingCounts?: Record<string, number>;
 };
 
 /**
@@ -48,12 +50,9 @@ export type SpotAttributes = {
   targetAudience: string;
   uniqueSellingPoint: string;
   footfallNote: string;
-  /** Physical attributes a pricing factor can key on. */
+  /** Physical attributes a pricing factor can key on (LD-1: elevation, visibility and traffic are in `ListingExtras`). */
   illumination: string;
   facing: string;
-  elevation: string;
-  visibility: string;
-  trafficGrade: string;
   /** Step 7 — the publisher's own unit and figure. `ratePerDay` is derived. */
   pricingUnit: PricingUnit;
   basePrice: string;
@@ -67,7 +66,42 @@ export type SpotAttributes = {
   vehicleNumber: string;
 };
 
-export type NewListing = Partial<SpotAttributes> & {
+/** WG-1: the website wizard's extra claims — see `listingExtras` in the schema. */
+export type ListingExtras = Partial<{
+  installationByAdx: boolean | null;
+  /** LD-1: stored as codes — see `shared/listing-vocabulary`. */
+  vehicleType: string | null;
+  trafficGrade: string | null;
+  visibility: string | null;
+  elevation: string | null;
+  estimatedDailyFootfall: number | null;
+  coverage: string | null;
+  operatingHoursFrom: string | null;
+  operatingHoursTo: string | null;
+  locationAccuracyM: number | null;
+  /** LD-1: `[{ key, label, value }]`; null clears (JsonNull in the repository). */
+  extraAnswers: Prisma.InputJsonValue | null;
+  /** LD-1: `[{ kind, reason?, at }]`; null clears. */
+  documentWaivers: Prisma.InputJsonValue | null;
+  ownershipDeclaredAt: Date | null;
+  vehicleModel: string | null;
+  broadcastLanguage: string | null;
+  contentFormat: string | null;
+  /** Null clears; the repository writes Prisma's JsonNull for it. */
+  audienceDemographics: Prisma.InputJsonValue | null;
+  maxBookingDays: number | null;
+  advanceBookingDays: number | null;
+  cancellationNoticeDays: number | null;
+  cancellationPolicy: string | null;
+  availableYearRound: boolean | null;
+  rateCardValidFrom: Date | null;
+  rateCardValidTo: Date | null;
+  seasonalVariationNote: string | null;
+  widthPx: number | null;
+  heightPx: number | null;
+}>;
+
+export type NewListing = Partial<SpotAttributes> & ListingExtras & {
   publisherId: string;
   /** QR-8: the reference (`LST-DDMM-YYNN`), minted by the service at creation or carried over from a draft. */
   displayId?: string;
@@ -108,11 +142,21 @@ export type NewListing = Partial<SpotAttributes> & {
   instantBooking?: boolean;
   /** Lot G (Q116/136): the loop — how many advertisers at once, 1..24. Gated in the service; see `slots.service`. */
   slotsTotal?: number;
-  photos?: { url: string; type: string }[];
+  /** LD-1: with the upload register's id and the capture time where known. */
+  photos?: NewListingPhoto[];
   planId?: string;
+  /** LD-1: the terms tick, stamped at create. */
+  termsAcceptedAt?: Date | null;
+  termsVersion?: string | null;
 };
 
-export type ListingPatch = Partial<SpotAttributes> & Partial<{
+/** LD-1: a photograph as it is filed — `uploadedFileId`/`takenAt` resolved by the service from the register when the client did not send them. */
+export type NewListingPhoto = { url: string; type: string; uploadedFileId?: string | null; takenAt?: Date | null };
+
+/** LD-1: what the upload register knows about a photograph's URL. */
+export type UploadedPhotoFacts = { id: string; url: string; takenAt: Date | null };
+
+export type ListingPatch = Partial<SpotAttributes> & ListingExtras & Partial<{
   /** AG-4: Cashfree's RC lookup, when the desk ran it. */
   vehicleRcVerifiedAt: Date | null;
   vehicleRcPayload: Prisma.InputJsonValue;
@@ -123,6 +167,8 @@ export type ListingPatch = Partial<SpotAttributes> & Partial<{
   /** Lot G: patchable, because it is half the evidence the loop rule reads. */
   subType: string;
   description: string;
+  /** LD-1: the slot duration; the website's edit sends it. */
+  size: string | null;
   ratePerDay: string;
   availableNow: boolean;
   instantBooking: boolean;
@@ -167,6 +213,9 @@ export type ListingWithPublisher = Listing & {
 /** `RATING` (Lot D, Q104): best-rated first, the unrated last. */
 export type BrowseSort = 'NEWEST' | 'PRICE_ASC' | 'PRICE_DESC' | 'NAME' | 'RATING';
 
+/** SIM-1: the listing a "similar" read is anchored on. */
+export type SimilarTo = { excludeId: string; cityId: string | null; city: string | null; category: 'INDOOR' | 'OUTDOOR' | 'TRANSIT' | 'MEDIA'; monthlyPrice: number };
+
 export type BrowseFilter = {
   /** Free text against the title, address and city. */
   q?: string;
@@ -184,6 +233,15 @@ export type BrowseFilter = {
   venueTypeId?: string;
   /** QR-27: one publisher's spaces — an advertiser who scanned their code, or a shared profile. */
   publisherId?: string;
+  /**
+   * SIM-1 (the owner, 27 Sep 2026): the spaces like one listing — its
+   * category, in its city, within ±30% of its monthly price, never itself.
+   * The listing page's "Similar listing" row and its "View all" read the
+   * same rule (`similarWhere`), so the full page is the row, continued.
+   */
+  similar?: SimilarTo;
+  /** SIM-1: the anchor as the caller named it (id or LST- display id); the service resolves it to `similar`. */
+  similarToId?: string;
   /** DIGITAL matches a sub-type naming a screen; STATIC is everything else. */
   display?: 'DIGITAL' | 'STATIC';
   minRate?: string;
@@ -195,10 +253,18 @@ export type BrowseFilter = {
   /** Daily footfall floor — the drawer's 25K+ / 50K+ / 1L+. */
   minFootfall?: number;
   illuminated?: boolean;
+  /** 26 Sep 2026: how the face is lit — any of the kinds named. */
+  illumination?: readonly ('FRONTLIT' | 'BACKLIT' | 'DIGITAL' | 'NONE')[];
   /** A bounding box around a point; the service sorts by exact distance. */
   near?: { latitude: number; longitude: number; radiusKm: number };
   /** Lot D (Q105): only spots that accept a booking without the publisher's tap. */
   instant?: boolean;
+  /**
+   * LM-1: only these listings, with every other facet still applied — how
+   * browse asks which of today's sponsored listings belong to the filtered
+   * set before it puts them first.
+   */
+  onlyIds?: readonly string[];
   sort: BrowseSort;
 };
 
@@ -275,6 +341,8 @@ export type ReviewCaseListing = ReviewQueueListing & {
   material: { id: string; name: string } | null;
   venueType: { id: string; name: string } | null;
   contentRules: { stance: ContentStance; category: { id: string; name: string } }[];
+  /** The RC lookup's answer — the review desk shows it; the read opts back in for it alone. */
+  vehicleRcPayload: Prisma.JsonValue | null;
 };
 
 /**
@@ -332,7 +400,8 @@ export interface ListingsRepository {
    * Lot X-L: "same city" is by the key when the listing carries one (a spot
    * typed 'Bangalore' compares with the Bengaluru ones), else the string.
    */
-  findSimilar(listing: Listing): Promise<Listing[]>;
+  /** 26 Sep 2026: with what a browse card needs (photos, publisher, media type), live and in rights only. */
+  findSimilar(listing: Listing, take?: number): Promise<BrowseListing[]>;
   agentExists(agentId: string): Promise<boolean>;
   /**
    * The publisher record behind a login, for a publisher listing their own spot.
@@ -360,6 +429,14 @@ export interface ListingsRepository {
   contentRulesFor(listingId: string): Promise<ContentRule[]>;
   /** Listing joined to its publisher and that publisher's user, for orders. */
   findWithPublisher(listingId: string): Promise<ListingWithPublisher | null>;
+  /* WG-1: photographs on a live listing. */
+  addPhoto(listingId: string, data: NewListingPhoto): Promise<{ id: string; url: string; type: string; uploadedFileId: string | null; takenAt: Date | null; createdAt: Date }>;
+  /** LD-1: the upload register's id and capture time for each of these URLs that has a row (indexed on `url`); one query. */
+  uploadedPhotoFacts(urls: string[]): Promise<UploadedPhotoFacts[]>;
+  findPhoto(photoId: string): Promise<{ id: string; listingId: string; url: string; type: string; createdAt: Date } | null>;
+  deletePhoto(photoId: string): Promise<unknown>;
+  /** WG-1: every open admin's id — the desk to tell about a clarification. A read, not an import of `users`. */
+  adminUserIds(): Promise<string[]>;
   /* ── Slots — Lot G (Q116/136) ─────────────────────────────────────
    * The rule — which order holds a slot, which reservation does — is
    * `slots.service`'s; the repository only counts. */
@@ -374,6 +451,13 @@ export interface ListingsRepository {
    * answer, the way checkout's clash check always has.
    */
   slotsHeld(listingIds: string[], window: SlotWindow, options?: SlotHoldOptions): Promise<Map<string, number>>;
+  /** AV-1: every hold touching the window, with its days. */
+  datedHolds(listingIds: string[], window: SlotWindow): Promise<DatedHold[]>;
+  /* BD-1: the publisher's blocked dates on a spot, oldest first. */
+  findBlockedDates(listingId: string): Promise<ListingBlockedDate[]>;
+  findBlockedDate(id: string): Promise<ListingBlockedDate | null>;
+  createBlockedDate(data: { listingId: string; from: Date; to: Date; reason: string | null; createdById: string }): Promise<ListingBlockedDate>;
+  deleteBlockedDate(id: string): Promise<unknown>;
   /** DR 01 browse: ACTIVE listings matching the drawer's facets, a page at a time. */
   findActive(filter: BrowseFilter, page: number, pageSize: number): Promise<{ items: BrowseListing[]; total: number }>;
   /** One ACTIVE listing with its photographs; null when it is not live. */

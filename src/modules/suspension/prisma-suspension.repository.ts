@@ -1,4 +1,4 @@
-import { prisma } from '../../shared/database';
+import { prisma, type Prisma } from '../../shared/database';
 import type {
   NewSuspensionEvent,
   PartyRow,
@@ -210,8 +210,22 @@ export const prismaSuspensionRepository: SuspensionRepository = {
         reason: input.reason,
         byUserId: input.byUserId,
         ...(input.at ? { at: input.at } : {}),
+        ...(input.metadata ? { metadata: input.metadata as Prisma.InputJsonValue } : {}),
       },
     });
+  },
+
+  async partiesOfUser(userId: string) {
+    const [publisher, advertiser, agent] = await Promise.all([
+      prisma.publisher.findUnique({ where: { userId }, select: { id: true } }),
+      prisma.advertiser.findUnique({ where: { userId }, select: { id: true } }),
+      prisma.agentProfile.findUnique({ where: { userId }, select: { id: true } }),
+    ]);
+    return [
+      ...(publisher ? [{ partyType: 'PUBLISHER' as const, partyId: publisher.id }] : []),
+      ...(advertiser ? [{ partyType: 'ADVERTISER' as const, partyId: advertiser.id }] : []),
+      ...(agent ? [{ partyType: 'AGENT' as const, partyId: agent.id }] : []),
+    ];
   },
 
   listEvents(partyType: PartyType, partyId: string, limit: number) {

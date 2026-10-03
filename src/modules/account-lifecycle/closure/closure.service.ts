@@ -75,6 +75,9 @@ export type ClosureOutcome = {
   closedAt: Date;
   suspended: { partyType: PartyType; partyId: string; scopes: SuspensionScope[] }[];
   listingsRetired: string[];
+  /** Account lifecycle (2 Oct 2026): the print shop taken off the roster, the HR record switched off — null when the person had none. */
+  printPartnerRetired: string | null;
+  employeeDeactivated: string | null;
   payouts: ClosurePayout[];
   /**
    * What the closure could not finish -- a balance left frozen because no
@@ -269,7 +272,13 @@ export async function closeAccount(
     suspended.push({ ...target, scopes: admitted });
   }
 
-  /* 2. Mark the person closed, and 3. end the sessions BLOCK_SIGNIN cannot. */
+  /* Account lifecycle (2 Oct 2026): the print shop off the roster, the HR record off. */
+  const printPartnerRetired = parties.printPartnerId ?? null;
+  if (printPartnerRetired) await repository.retirePrintPartner(printPartnerRetired);
+  const employeeDeactivated = parties.employeeId ?? null;
+  if (employeeDeactivated) await repository.deactivateEmployee(employeeDeactivated);
+
+  /* 2. Mark the person closed (sign-in off with it), and 3. end the sessions BLOCK_SIGNIN cannot. */
   await repository.closeUser(userId, { reason, byUserId: adminId, at });
   await revokeSessions(userId, 'ACCOUNT_CLOSED');
 
@@ -318,6 +327,8 @@ export async function closeAccount(
     closedAt: at,
     suspended,
     listingsRetired,
+    printPartnerRetired,
+    employeeDeactivated,
     payouts,
     note,
   };

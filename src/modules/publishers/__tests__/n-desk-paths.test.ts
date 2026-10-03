@@ -48,7 +48,7 @@ const { repository, kyc, notifications, audit, agents, digio } = vi.hoisted(() =
   notifications: { createNotification: vi.fn(), notify: vi.fn(async () => ({ notificationId: 'ntf_1', templateKey: 'kyc-requested', deliveries: [] })) },
   audit: { logActivity: vi.fn(), auditDiff: vi.fn(() => ({})) },
   agents: { getAgentWithUser: vi.fn(), findAgentProfile: vi.fn(), requireAgentProfile: vi.fn(), findAgentTier: vi.fn() },
-  digio: { initiateDigioKyc: vi.fn(), getDigioKycStatus: vi.fn(), handleDigioWebhook: vi.fn(), onUnmatchedDigioWebhook: vi.fn() },
+  digio: { initiateDigioKyc: vi.fn(), noteEntityTypeForManualRequest: vi.fn(), getDigioKycStatus: vi.fn(), handleDigioWebhook: vi.fn(), onUnmatchedDigioWebhook: vi.fn() },
 }));
 
 vi.mock('../prisma-publishers.repository', () => ({ prismaPublishersRepository: repository }));
@@ -107,7 +107,8 @@ describe('the queue query', () => {
 describe('POST /publishers/kyc-queue/:publisherId/request', () => {
   it('DIGIO: initiates Digio on the publisher’s behalf, stamps the request, tells the publisher with the deep link, and audits', async () => {
     const result = await requestKycFromDesk('pub_1', { channel: 'DIGIO', note: 'Please finish this week' }, 'usr_admin', undefined, NOW);
-    expect(digio.initiateDigioKyc).toHaveBeenCalledWith('pub_1', 'Asha Rao', 'asha@example.com', '+919876543210');
+    // Phase D: the publisher row itself goes in — its entity type picks the workflow.
+    expect(digio.initiateDigioKyc).toHaveBeenCalledWith(publisher, { byUserId: 'usr_admin', entityType: undefined, req: undefined }, NOW);
     expect(repository.requestKyc).toHaveBeenCalledWith('pub_1', { requestedById: 'usr_admin', requestedChannel: 'DIGIO', at: NOW });
     expect(notifications.notify).toHaveBeenCalledWith(
       'KYC_REQUESTED',
@@ -123,9 +124,35 @@ describe('POST /publishers/kyc-queue/:publisherId/request', () => {
     expect(result).toMatchObject({ kyc: { requestedById: 'usr_admin', requestedChannel: 'DIGIO' }, digio: { kycId: 'dg_1' }, notified: true });
   });
 
+  it('Phase D: passes the desk’s entity type through, and stamps nothing when the start answers 409 ENTITY_TYPE_REQUIRED', async () => {
+    await requestKycFromDesk('pub_1', { channel: 'DIGIO', entityType: 'COMPANY' }, 'usr_admin', undefined, NOW);
+    expect(digio.initiateDigioKyc).toHaveBeenLastCalledWith(publisher, { byUserId: 'usr_admin', entityType: 'COMPANY', req: undefined }, NOW);
+
+    vi.clearAllMocks();
+    digio.initiateDigioKyc.mockRejectedValueOnce(Object.assign(new Error('Say what kind of publisher this is'), { statusCode: 409, code: 'ENTITY_TYPE_REQUIRED' }));
+    await expect(requestKycFromDesk('pub_1', { channel: 'DIGIO' }, 'usr_admin', undefined, NOW)).rejects.toMatchObject({ statusCode: 409, code: 'ENTITY_TYPE_REQUIRED' });
+    expect(repository.requestKyc).not.toHaveBeenCalled();
+    expect(notifications.notify).not.toHaveBeenCalled();
+    expect(audit.logActivity).not.toHaveBeenCalled();
+  });
+
+  it('Phase D: a verified individual may be sent the upgrade (a business form); anything else on a verified publisher stays 409', async () => {
+    const verified = { ...publisher, type: 'INDIVIDUAL', entityType: null, kycStatus: 'VERIFIED', kyc: { ...publisher.kyc, status: 'VERIFIED' } };
+    repository.findKycDetail.mockResolvedValue(verified);
+    await expect(requestKycFromDesk('pub_1', { channel: 'DIGIO', entityType: 'SOLE_PROPRIETOR' }, 'usr_admin', undefined, NOW)).resolves.toMatchObject({ digio: { kycId: 'dg_1' } });
+    expect(digio.initiateDigioKyc).toHaveBeenCalledWith(verified, { byUserId: 'usr_admin', entityType: 'SOLE_PROPRIETOR', req: undefined }, NOW);
+
+    vi.clearAllMocks();
+    await expect(requestKycFromDesk('pub_1', { channel: 'DIGIO' }, 'usr_admin', undefined, NOW)).rejects.toMatchObject({ statusCode: 409, code: 'KYC_ALREADY_VERIFIED' });
+    await expect(requestKycFromDesk('pub_1', { channel: 'MANUAL', entityType: 'COMPANY' }, 'usr_admin', undefined, NOW)).rejects.toMatchObject({ code: 'KYC_ALREADY_VERIFIED' });
+    expect(digio.initiateDigioKyc).not.toHaveBeenCalled();
+  });
+
   it('MANUAL: only stamps, tells and audits — Digio is never asked', async () => {
     const result = await requestKycFromDesk('pub_1', { channel: 'MANUAL' }, 'usr_admin', undefined, NOW);
     expect(digio.initiateDigioKyc).not.toHaveBeenCalled();
+    // Phase D: a manual request stores an entity type only when one is sent.
+    expect(digio.noteEntityTypeForManualRequest).toHaveBeenCalledWith(publisher, { byUserId: 'usr_admin', entityType: undefined, req: undefined });
     expect(repository.requestKyc).toHaveBeenCalledWith('pub_1', { requestedById: 'usr_admin', requestedChannel: 'MANUAL', at: NOW });
     expect(notifications.notify).toHaveBeenCalledWith('KYC_REQUESTED', 'usr_pub', expect.objectContaining({ channel: 'at the ADX desk', note: '' }), expect.anything());
     expect(audit.logActivity).toHaveBeenCalledWith('usr_admin', 'PUBLISHER_KYC_REQUESTED', expect.objectContaining({ metadata: expect.objectContaining({ channel: 'MANUAL' }) }));

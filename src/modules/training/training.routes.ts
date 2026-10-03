@@ -1,6 +1,6 @@
 import { Router } from 'express';
 
-import { authenticate, requireRole } from '../../shared/auth';
+import { authenticate, requireRole, requirePermission } from '../../shared/auth';
 import { asyncHandler } from '../../shared/http';
 import {
   createModuleHandler,
@@ -25,7 +25,7 @@ trainingRouter.use(authenticate);
 
 /* The library both apps already read. Unchanged — guarded by a session, no role. */
 trainingRouter.get('/', asyncHandler(getTrainingHandler));
-trainingRouter.post('/', requireRole('ADMIN'), asyncHandler(createTrainingHandler));
+trainingRouter.post('/', requireRole('ADMIN'), requirePermission('agents.edit'), asyncHandler(createTrainingHandler));
 
 /* The curriculum, for the signed-in agent. */
 trainingRouter.get('/curriculum', asyncHandler(getCurriculumHandler));
@@ -33,13 +33,13 @@ trainingRouter.get('/certification', asyncHandler(getCertificationHandler));
 
 /* ADMIN CRUD — the console had no training screen at all. Static paths
  * before the parameterised ones, so "modules" is never read as an id. */
-trainingRouter.get('/modules', requireRole('ADMIN'), asyncHandler(listModulesHandler));
-trainingRouter.post('/modules', requireRole('ADMIN'), asyncHandler(createModuleHandler));
-trainingRouter.get('/modules/:moduleId/admin', requireRole('ADMIN'), asyncHandler(getModuleAdminHandler));
-trainingRouter.patch('/modules/:moduleId', requireRole('ADMIN'), asyncHandler(patchModuleHandler));
-trainingRouter.put('/modules/:moduleId/questions', requireRole('ADMIN'), asyncHandler(putQuestionsHandler));
-trainingRouter.get('/certifications', requireRole('ADMIN'), asyncHandler(listCertificationsHandler));
-trainingRouter.post('/certifications/:certificationId/revoke', requireRole('ADMIN'), asyncHandler(revokeCertificationHandler));
+trainingRouter.get('/modules', requireRole('ADMIN'), requirePermission('agents.view'), asyncHandler(listModulesHandler));
+trainingRouter.post('/modules', requireRole('ADMIN'), requirePermission('agents.edit'), asyncHandler(createModuleHandler));
+trainingRouter.get('/modules/:moduleId/admin', requireRole('ADMIN'), requirePermission('agents.view'), asyncHandler(getModuleAdminHandler));
+trainingRouter.patch('/modules/:moduleId', requireRole('ADMIN'), requirePermission('agents.edit'), asyncHandler(patchModuleHandler));
+trainingRouter.put('/modules/:moduleId/questions', requireRole('ADMIN'), requirePermission('agents.edit'), asyncHandler(putQuestionsHandler));
+trainingRouter.get('/certifications', requireRole('ADMIN'), requirePermission('agents.view'), asyncHandler(listCertificationsHandler));
+trainingRouter.post('/certifications/:certificationId/revoke', requireRole('ADMIN'), requirePermission('agents.edit'), asyncHandler(revokeCertificationHandler));
 
 /* One module: the lesson, the progress, the quiz. */
 trainingRouter.get('/modules/:moduleId', asyncHandler(getModuleHandler));

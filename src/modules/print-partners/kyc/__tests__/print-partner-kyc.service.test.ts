@@ -73,7 +73,10 @@ const { repository, partners, kyc, notifications, uploads, audit, digio } = vi.h
     fileIdFromUrl: (url: string | null) => (url ? (/\/files\/([A-Za-z0-9_-]+)/.exec(url)?.[1] ?? null) : null),
   },
   audit: { logActivity: vi.fn<AnyFn>(async () => undefined), auditDiff: vi.fn<AnyFn>(() => ({})) },
-  digio: { initiatePrintPartnerDigioKyc: vi.fn<AnyFn>(async () => ({ kycId: 'dg_1', accessToken: 'tok', validTill: '2026-09-15T00:00:00.000Z', sdkUrl: 'https://digio/#dg_1' })) },
+  digio: {
+    initiatePrintPartnerDigioKyc: vi.fn<AnyFn>(async () => ({ kycId: 'dg_1', accessToken: 'tok', validTill: '2026-09-15T00:00:00.000Z', sdkUrl: 'https://digio/#dg_1' })),
+    noteEntityTypeForManualRequest: vi.fn<AnyFn>(async () => undefined),
+  },
 }));
 
 vi.mock('../prisma-print-partner-kyc.repository', () => ({ prismaPrintPartnerKycRepository: repository }));
@@ -84,6 +87,10 @@ vi.mock('../../../uploads', () => uploads);
 vi.mock('../../../../shared/audit', () => audit);
 vi.mock('../../../app-config', () => ({ getPlatformSettings: vi.fn(async () => ({ kyc: { reviewSlaHours: 48, escalationSlaMultiplier: 2 } })) }));
 vi.mock('../print-partner-digio.service', () => digio);
+vi.mock('../../../../shared/integrations', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  digioAvailability: vi.fn(async () => ({ available: true, provider: 'DIGIO', retryAfter: null })),
+}));
 
 import {
   PRINT_PARTNER_KYC_DEEP_LINK,
@@ -127,7 +134,7 @@ const row = (over: Record<string, unknown> = {}) => ({
   escalatedToUserId: null,
   escalatedById: null,
   panNumber: 'ABCDE1234F',
-  govIdFrontUrl: 'https://adx.local/api/v1/files/f_front',
+  govIdFrontUrl: 'https://adx.in/api/v1/files/f_front',
   digioVerifiedAt: null,
   digioPayload: null,
   printPartner: slice,
@@ -151,8 +158,8 @@ beforeEach(() => {
 
 describe('the partner on their own phone (SELF)', () => {
   it('a first submission goes PENDING with recordedVia SELF, the files checked, audited under the partner', async () => {
-    const created = await submitMyPrintPartnerKyc(partner, { govIdFrontUrl: 'https://adx.local/api/v1/files/f_front', panNumber: 'ABCDE1234F' }, undefined, NOW);
-    expect(repository.submit).toHaveBeenCalledWith('prt_1', { govIdFrontUrl: 'https://adx.local/api/v1/files/f_front', panNumber: 'ABCDE1234F' }, { recordedById: 'usr_prt', recordedVia: 'SELF', method: 'MANUAL' }, NOW);
+    const created = await submitMyPrintPartnerKyc(partner, { govIdFrontUrl: 'https://adx.in/api/v1/files/f_front', panNumber: 'ABCDE1234F' }, undefined, NOW);
+    expect(repository.submit).toHaveBeenCalledWith('prt_1', { govIdFrontUrl: 'https://adx.in/api/v1/files/f_front', panNumber: 'ABCDE1234F' }, { recordedById: 'usr_prt', recordedVia: 'SELF', method: 'MANUAL' }, NOW);
     expect(created).toMatchObject({ status: 'PENDING', recordedVia: 'SELF', submittedAt: NOW });
     expect(kyc.clearDocumentReviews).toHaveBeenCalledWith('PRINT_PARTNER', 'ppk_1', ['govIdFrontUrl']);
     expect(audit.logActivity).toHaveBeenCalledWith('usr_prt', 'PRINT_PARTNER_KYC_SUBMITTED', expect.objectContaining({ targetType: 'PrintPartnerKyc', targetId: 'ppk_1', module: 'print-partners' }));
@@ -160,9 +167,9 @@ describe('the partner on their own phone (SELF)', () => {
 
   it('refuses a document that is not the partner\'s own private PRINT_PARTNER_KYC file', async () => {
     uploads.findUploadedFile.mockResolvedValueOnce(file('f_other', { userId: 'usr_someone_else' }));
-    await expect(submitMyPrintPartnerKyc(partner, { selfieUrl: 'https://adx.local/api/v1/files/f_other' }, undefined, NOW)).rejects.toMatchObject({ statusCode: 404 });
+    await expect(submitMyPrintPartnerKyc(partner, { selfieUrl: 'https://adx.in/api/v1/files/f_other' }, undefined, NOW)).rejects.toMatchObject({ statusCode: 404 });
     uploads.findUploadedFile.mockResolvedValueOnce(file('f_rc', { purpose: 'PARTNER_RATE_CARD' }));
-    await expect(submitMyPrintPartnerKyc(partner, { selfieUrl: 'https://adx.local/api/v1/files/f_rc' }, undefined, NOW)).rejects.toMatchObject({ statusCode: 400 });
+    await expect(submitMyPrintPartnerKyc(partner, { selfieUrl: 'https://adx.in/api/v1/files/f_rc' }, undefined, NOW)).rejects.toMatchObject({ statusCode: 400 });
     // A public URL names no file at all.
     await expect(submitMyPrintPartnerKyc(partner, { selfieUrl: 'https://cdn.example/selfie.png' }, undefined, NOW)).rejects.toMatchObject({ statusCode: 404 });
     expect(repository.submit).not.toHaveBeenCalled();
@@ -173,7 +180,7 @@ describe('the partner on their own phone (SELF)', () => {
     await expect(submitMyPrintPartnerKyc(partner, { panNumber: 'ABCDE1234F' }, undefined, NOW)).rejects.toMatchObject({ statusCode: 400, code: 'EMPTY_RESUBMISSION' });
     expect(repository.submit).not.toHaveBeenCalled();
 
-    const back = await submitMyPrintPartnerKyc(partner, { selfieUrl: 'https://adx.local/api/v1/files/f_selfie' }, undefined, NOW);
+    const back = await submitMyPrintPartnerKyc(partner, { selfieUrl: 'https://adx.in/api/v1/files/f_selfie' }, undefined, NOW);
     expect(back.status).toBe('PENDING');
     expect(kyc.clearDocumentReviews).toHaveBeenCalledWith('PRINT_PARTNER', 'ppk_1', ['selfieUrl']);
     expect(audit.logActivity).toHaveBeenCalledWith('usr_prt', 'PRINT_PARTNER_KYC_SUBMITTED', expect.objectContaining({ metadata: expect.objectContaining({ resubmission: true }) }));
@@ -181,12 +188,12 @@ describe('the partner on their own phone (SELF)', () => {
 
   it('N2-B: a VERIFIED partner re-submitting is refused 409 KYC_ALREADY_VERIFIED — unless the desk has moved the record to NEEDS_INFO', async () => {
     repository.findByPartnerId.mockResolvedValue(row({ status: 'VERIFIED' }));
-    await expect(submitMyPrintPartnerKyc(partner, { selfieUrl: 'https://adx.local/api/v1/files/f_selfie' }, undefined, NOW)).rejects.toMatchObject({ statusCode: 409, code: 'KYC_ALREADY_VERIFIED' });
+    await expect(submitMyPrintPartnerKyc(partner, { selfieUrl: 'https://adx.in/api/v1/files/f_selfie' }, undefined, NOW)).rejects.toMatchObject({ statusCode: 409, code: 'KYC_ALREADY_VERIFIED' });
     expect(repository.submit).not.toHaveBeenCalled();
     expect(audit.logActivity).not.toHaveBeenCalled();
 
     repository.findByPartnerId.mockResolvedValue(row({ status: 'NEEDS_INFO' }));
-    await expect(submitMyPrintPartnerKyc(partner, { selfieUrl: 'https://adx.local/api/v1/files/f_selfie' }, undefined, NOW)).resolves.toMatchObject({ status: 'PENDING' });
+    await expect(submitMyPrintPartnerKyc(partner, { selfieUrl: 'https://adx.in/api/v1/files/f_selfie' }, undefined, NOW)).resolves.toMatchObject({ status: 'PENDING' });
   });
 
   it('the rule stands on its own: only NEEDS_INFO asks for a document', () => {
@@ -204,13 +211,21 @@ describe('the partner on their own phone (SELF)', () => {
     repository.findByPartnerId.mockResolvedValue(null);
     await expect(getMyPrintPartnerKyc(partner)).rejects.toMatchObject({ statusCode: 404 });
   });
+
+  /* 26 Sep 2026: whether the Digio door is open rides on the partner's own read, and on its 404. */
+  it('GET /me/kyc carries digio { available, provider } — on the record and on the 404', async () => {
+    repository.findByPartnerId.mockResolvedValue(row());
+    await expect(getMyPrintPartnerKyc(partner)).resolves.toMatchObject({ digio: { available: true, provider: 'DIGIO' } });
+    repository.findByPartnerId.mockResolvedValue(null);
+    await expect(getMyPrintPartnerKyc(partner)).rejects.toMatchObject({ statusCode: 404, details: { digio: { available: true, provider: 'DIGIO' } } });
+  });
 });
 
 describe('the desk recording it (DESK)', () => {
   it('writes the documents on the partner\'s behalf — recordedVia DESK, the admin\'s own upload accepted — and audits PRINT_PARTNER_KYC_RECORDED_AT_DESK', async () => {
     uploads.findUploadedFile.mockResolvedValueOnce(file('f_desk', { userId: 'usr_admin', ownerUserId: 'usr_prt' }));
-    const result = await recordPrintPartnerKycAtDesk('ppk_1', { govIdBackUrl: 'https://adx.local/api/v1/files/f_desk' }, 'usr_admin', undefined, NOW);
-    expect(repository.submit).toHaveBeenCalledWith('prt_1', { govIdBackUrl: 'https://adx.local/api/v1/files/f_desk' }, { recordedById: 'usr_admin', recordedVia: 'DESK', method: 'MANUAL' }, NOW);
+    const result = await recordPrintPartnerKycAtDesk('ppk_1', { govIdBackUrl: 'https://adx.in/api/v1/files/f_desk' }, 'usr_admin', undefined, NOW);
+    expect(repository.submit).toHaveBeenCalledWith('prt_1', { govIdBackUrl: 'https://adx.in/api/v1/files/f_desk' }, { recordedById: 'usr_admin', recordedVia: 'DESK', method: 'MANUAL' }, NOW);
     expect(audit.logActivity).toHaveBeenCalledWith('usr_admin', 'PRINT_PARTNER_KYC_RECORDED_AT_DESK', expect.objectContaining({ targetType: 'PrintPartnerKyc', targetId: 'ppk_1', metadata: expect.objectContaining({ recordedVia: 'DESK', fields: ['govIdBackUrl'] }) }));
     expect(audit.auditDiff).toHaveBeenCalled();
     expect(result).toMatchObject({ id: 'ppk_1', documentReviews: [], liveness: { id: 'ukyc_1' } });
@@ -222,7 +237,7 @@ describe('the desk recording it (DESK)', () => {
     // The desk's read after the write resolves by the new record's id.
     repository.findById.mockImplementation(async (id: string) => (id === 'ppk_1' ? row({ recordedVia: 'DESK', recordedById: 'usr_admin' }) : null));
     uploads.findUploadedFile.mockResolvedValueOnce(file('f_desk', { userId: 'usr_admin' }));
-    await recordPrintPartnerKycAtDesk('prt_1', { panFrontUrl: 'https://adx.local/api/v1/files/f_desk' }, 'usr_admin', undefined, NOW);
+    await recordPrintPartnerKycAtDesk('prt_1', { panFrontUrl: 'https://adx.in/api/v1/files/f_desk' }, 'usr_admin', undefined, NOW);
     expect(partners.findPartner).toHaveBeenCalledWith('prt_1');
     expect(repository.submit).toHaveBeenCalledWith('prt_1', expect.anything(), { recordedById: 'usr_admin', recordedVia: 'DESK', method: 'MANUAL' }, NOW);
   });
@@ -235,8 +250,8 @@ describe('the desk recording it (DESK)', () => {
     repository.findById.mockImplementation(async (id: string) => (id === 'ppk_1' ? row({ status: 'VERIFIED' }) : null));
     repository.findByPartnerId.mockImplementation(async (id: string) => (id === 'prt_1' ? row({ status: 'VERIFIED' }) : null));
     uploads.findUploadedFile.mockResolvedValue(file('f_desk', { userId: 'usr_admin', ownerUserId: 'usr_prt' }));
-    await expect(recordPrintPartnerKycAtDesk('ppk_1', { govIdBackUrl: 'https://adx.local/api/v1/files/f_desk' }, 'usr_admin', undefined, NOW)).rejects.toMatchObject({ statusCode: 409, code: 'KYC_ALREADY_VERIFIED' });
-    await expect(recordPrintPartnerKycAtDesk('prt_1', { govIdBackUrl: 'https://adx.local/api/v1/files/f_desk' }, 'usr_admin', undefined, NOW)).rejects.toMatchObject({ statusCode: 409, code: 'KYC_ALREADY_VERIFIED' });
+    await expect(recordPrintPartnerKycAtDesk('ppk_1', { govIdBackUrl: 'https://adx.in/api/v1/files/f_desk' }, 'usr_admin', undefined, NOW)).rejects.toMatchObject({ statusCode: 409, code: 'KYC_ALREADY_VERIFIED' });
+    await expect(recordPrintPartnerKycAtDesk('prt_1', { govIdBackUrl: 'https://adx.in/api/v1/files/f_desk' }, 'usr_admin', undefined, NOW)).rejects.toMatchObject({ statusCode: 409, code: 'KYC_ALREADY_VERIFIED' });
     expect(repository.submit).not.toHaveBeenCalled();
     expect(audit.logActivity).not.toHaveBeenCalled();
   });
@@ -247,6 +262,8 @@ describe('the desk asking for it (the request)', () => {
     const result = await requestPrintPartnerKyc('prt_1', { channel: 'MANUAL', note: 'Bring the GST certificate too' }, 'usr_admin', undefined, NOW);
     expect(repository.markRequested).toHaveBeenCalledWith('prt_1', { requestedAt: NOW, requestedById: 'usr_admin', requestedChannel: 'MANUAL' });
     expect(digio.initiatePrintPartnerDigioKyc).not.toHaveBeenCalled();
+    // Phase D: a manual request stores an entity type only when one is sent.
+    expect(digio.noteEntityTypeForManualRequest).toHaveBeenCalledWith(partner, { onBehalf: true, byUserId: 'usr_admin', entityType: undefined, req: undefined });
     expect(notifications.notify).toHaveBeenCalledWith(
       'KYC_REQUESTED',
       'usr_prt',
@@ -259,9 +276,24 @@ describe('the desk asking for it (the request)', () => {
 
   it('DIGIO: opens the session on the partner\'s behalf (the link goes to the partner) and answers its id', async () => {
     const result = await requestPrintPartnerKyc('ppk_1', { channel: 'DIGIO' }, 'usr_admin', undefined, NOW);
-    expect(digio.initiatePrintPartnerDigioKyc).toHaveBeenCalledWith(partner, { onBehalf: true }, NOW);
+    expect(digio.initiatePrintPartnerDigioKyc).toHaveBeenCalledWith(partner, { onBehalf: true, byUserId: 'usr_admin', entityType: undefined, req: undefined }, NOW);
     expect(notifications.notify).toHaveBeenCalledWith('KYC_REQUESTED', 'usr_prt', expect.objectContaining({ channel: 'Digio', note: '' }), expect.anything());
     expect(result.digio).toEqual({ kycId: 'dg_1', validTill: '2026-09-15T00:00:00.000Z' });
+    // Phase D: Digio first, the stamp after — so a refused request never reads as requested.
+    expect(digio.initiatePrintPartnerDigioKyc.mock.invocationCallOrder[0]!).toBeLessThan(repository.markRequested.mock.invocationCallOrder[0]!);
+  });
+
+  it('Phase D: passes the entity type the desk sent through; a 409 ENTITY_TYPE_REQUIRED (or Digio refusing) leaves the row unstamped and nobody told', async () => {
+    await requestPrintPartnerKyc('ppk_1', { channel: 'DIGIO', entityType: 'COMPANY' }, 'usr_admin', undefined, NOW);
+    expect(digio.initiatePrintPartnerDigioKyc).toHaveBeenLastCalledWith(partner, { onBehalf: true, byUserId: 'usr_admin', entityType: 'COMPANY', req: undefined }, NOW);
+
+    vi.clearAllMocks();
+    repository.findById.mockImplementation(async (id: string) => (id === 'ppk_1' ? row() : null));
+    digio.initiatePrintPartnerDigioKyc.mockRejectedValueOnce(Object.assign(new Error('Say what kind of print partner this is'), { statusCode: 409, code: 'ENTITY_TYPE_REQUIRED' }));
+    await expect(requestPrintPartnerKyc('ppk_1', { channel: 'DIGIO' }, 'usr_admin', undefined, NOW)).rejects.toMatchObject({ statusCode: 409, code: 'ENTITY_TYPE_REQUIRED' });
+    expect(repository.markRequested).not.toHaveBeenCalled();
+    expect(notifications.notify).not.toHaveBeenCalled();
+    expect(audit.logActivity).not.toHaveBeenCalled();
   });
 
   it('is refused 409 KYC_ALREADY_VERIFIED on a verified record', async () => {
@@ -286,7 +318,7 @@ describe('the decision', () => {
   it('documents uploaded by hand after a desk Digio request that never finished put the row back on the manual path, so the gate applies (verifier)', async () => {
     // The desk asked on Digio: the row is method DIGIO, digioStatus pending, nothing back.
     repository.findByPartnerId.mockResolvedValue(row({ method: 'DIGIO', digioStatus: 'pending', submittedAt: null, requestedAt: NOW, requestedById: 'usr_admin', requestedChannel: 'DIGIO' }));
-    const submitted = await submitMyPrintPartnerKyc(partner, { govIdFrontUrl: 'https://adx.local/api/v1/files/f_front' }, undefined, NOW);
+    const submitted = await submitMyPrintPartnerKyc(partner, { govIdFrontUrl: 'https://adx.in/api/v1/files/f_front' }, undefined, NOW);
     expect(repository.submit).toHaveBeenCalledWith('prt_1', expect.anything(), expect.objectContaining({ method: 'MANUAL' }), NOW);
     expect(submitted.method).toBe('MANUAL');
 
@@ -398,7 +430,7 @@ describe('the queue and the case', () => {
 describe('the purge', () => {
   it('removes the private files of a Digio-path record, masks and trims, audits KYC_IMAGES_PURGED against the record', async () => {
     repository.findPurgeable.mockResolvedValue([
-      row({ method: 'DIGIO', status: 'VERIFIED', digioVerifiedAt: new Date('2026-08-01T00:00:00.000Z'), selfieUrl: 'https://cdn.example/legacy.png', bankProofUrl: 'https://adx.local/api/v1/files/f_bank', digioPayload: { id: 'dg_1', status: 'approved' } }),
+      row({ method: 'DIGIO', status: 'VERIFIED', digioVerifiedAt: new Date('2026-08-01T00:00:00.000Z'), selfieUrl: 'https://cdn.example/legacy.png', bankProofUrl: 'https://adx.in/api/v1/files/f_bank', digioPayload: { id: 'dg_1', status: 'approved' } }),
     ]);
     const cutoff = new Date('2026-08-15T00:00:00.000Z');
     await expect(purgeVerifiedPrintPartnerImages(cutoff, 'usr_system')).resolves.toEqual(['ppk_1']);

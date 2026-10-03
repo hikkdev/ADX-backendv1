@@ -239,16 +239,17 @@ describe('a campaign invoice', () => {
     expect(data.createdById).toBe('usr_adv');
   });
 
-  it('is PAID when the hold was captured, and carries the discount at 0% so the total is what was held', async () => {
-    campaigns.findCampaignForInvoice.mockResolvedValue(campaign({ status: 'LIVE', discount: '500.00', total: '24398.00' }));
+  it('is PAID when the hold was captured, and carries the discount with its share of the tax (GST-D) so the total is what was held', async () => {
+    // 21,100 taxable carrying 3,798 of tax; a 500 discount takes 3,798 × 500 / 21,100 = 90.00 of tax with it.
+    campaigns.findCampaignForInvoice.mockResolvedValue(campaign({ status: 'LIVE', discount: '500.00', total: '24308.00' }));
     await issueInvoiceForCampaign('cmp_1', { now: NOW });
     const data = repository.createNumbered.mock.calls[0]![0] as Record<string, any>;
     expect(data.status).toBe('PAID');
     expect(data.dueAt).toBeNull();
     const discount = data.lines.find((line: { kind: string }) => line.kind === 'DISCOUNT');
     expect(discount.taxableValue.toFixed(2)).toBe('-500.00');
-    expect(discount.gstAmount.toFixed(2)).toBe('0.00');
-    expect(data.total.toFixed(2)).toBe('24398.00');
+    expect(discount.gstAmount.toFixed(2)).toBe('-90.00');
+    expect(data.total.toFixed(2)).toBe('24308.00');
   });
 
   it('is a PROFORMA in its own series until the entity has a GSTIN', async () => {

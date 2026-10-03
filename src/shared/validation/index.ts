@@ -1,3 +1,4 @@
 export * from './zod';
 export * from './person';
-export { normalizeMobile } from './mobile';
+export { mobileSearchNeedle, normalizeMobile } from './mobile';
+export * from './address';

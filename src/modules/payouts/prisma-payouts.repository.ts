@@ -76,6 +76,13 @@ function withdrawalWhere(filter: Omit<WithdrawalListFilter, 'limit'>): Prisma.Wi
 }
 
 export const prismaPayoutsRepository: PayoutsRepository = {
+  async findHolderName(userId) {
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { name: true, firstName: true, lastName: true } });
+    if (!user) return null;
+    const full = [user.firstName, user.lastName].filter((part) => part && part.trim()).join(' ').trim();
+    return full || user.name?.trim() || null;
+  },
+
   /* ── Who the wallet belongs to ─────────────────────────────────── */
 
   async findPartyContext(walletId) {
@@ -637,7 +644,10 @@ export const prismaPayoutsRepository: PayoutsRepository = {
         // Lot A STOP_ACCRUAL: the daily earning skips a suspended listing. A
         // publisher's STOP_ACCRUAL is cascaded onto their listings, so the
         // listing's scopes are the one place to look.
-        NOT: { listing: { suspensionScopes: { has: 'STOP_ACCRUAL' } } },
+        // Order fraud screening (2 Oct 2026): and a spot whose order ADX has
+        // held for review. The days are caught up after a release — the run
+        // accrues every elapsed day not yet written.
+        AND: [{ NOT: { listing: { suspensionScopes: { has: 'STOP_ACCRUAL' } } } }, { NOT: { order: { is: { heldAt: { not: null } } } } }],
       },
       select: {
         id: true,
@@ -646,6 +656,7 @@ export const prismaPayoutsRepository: PayoutsRepository = {
         commissionPct: true,
         commissionSource: true,
         orderId: true,
+        order: { select: { heldAt: true } },
         campaign: { select: { id: true, startDate: true, endDate: true } },
         listing: { select: { id: true, publisherId: true, title: true, suspensionScopes: true } },
       },
@@ -791,6 +802,7 @@ export const prismaPayoutsRepository: PayoutsRepository = {
         event: data.event,
         tier: data.tier,
         amount: data.amount,
+        paysNothing: data.paysNothing ?? false,
         effectiveFrom: data.effectiveFrom,
       },
     });

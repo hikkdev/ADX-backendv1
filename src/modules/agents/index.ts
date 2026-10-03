@@ -27,6 +27,9 @@ export type { AgentLabelRow } from './agents.repository';
 
 /** Directory lookups `orders` needs for assignment and notification. */
 export { getAgentWithUser, findAssignableAgent, agentExists, getAgentZone } from './agents.service';
+/** 3 Oct 2026: the same pick from one city's agents — `supply`'s "Send an agent" on the verification queue. */
+export { findAssignableAgentInCity } from './agents.service';
+export type { AssignablePlace } from './agents.repository';
 // AG-5: routing by grade — the ask a dispatcher makes, the desk's override check, the settings.
 export { dispatchAskFor, isBelowRequiredGrade, agentMeetsGrade, getRoutingSettings, saveRoutingSettings } from './agents.service';
 
@@ -100,7 +103,27 @@ export type { UpdateAgentInput } from './agents.schema';
 
 /** Lot E (Q99): ACTIVE agents for `hr`'s people registry — the other half is `employees`. */
 export { listActiveAgentsForDirectory } from './agents.service';
+/**
+ * CP-1: what an agent's next onboarding earns. The party modules call this
+ * before recording the onboarding commission — within the day's quota the
+ * salary already paid for it and nothing is recorded; past the quota it pays
+ * the planned unit cost plus the uplift. `NO_TERMS` means the agent is not on
+ * the quota model and the caller keeps the flat rate table.
+ */
+export { payForNextOnboarding, setCompensation, compensationFor, compensationDefaults, standingFor, compensationView } from './compensation/compensation.service';
+export type { CompensationView, NextOnboardingPay, SetCompensationInput } from './compensation/compensation.service';
+export { plannedUnitCost, commissionPerExtra, payForOnboarding, salaryPerOnboarding, istDayWindow, istMonthWindow } from './compensation/compensation.rules';
+export type { CompensationTerms, OnboardingPay, SalarySpan } from './compensation/compensation.rules';
+export { salaryCostOverWindow, costPerOnboarding } from './compensation/compensation.rules';
+/* CP-2: what agent money a window cost — the aggregate the section overviews
+   divide by their own onboarding counts. Rows stay inside this module. */
+export { agentCostOverWindow } from './compensation/cost.service';
+export type { AgentCostView, CostCityRow } from './compensation/cost.service';
+export type { CostSide } from './compensation/compensation.repository';
 export type { AgentDirectoryEntry } from './agents.service';
 
 // Lot G (answer 144): the module's feature declarations, loaded with the module so the registry sees them at boot.
 import './features';
+
+/** Account lifecycle (2 Oct 2026): an exited agent's sign-in, ended when the final payout is paid — bootstrap's payouts hook asks. */
+export { endExitedAgentSignIn } from './application/application.service';

@@ -1,5 +1,7 @@
+import { withdrawalPaidPort } from './withdrawal-paid.port';
 import { ApiError } from '../../shared/errors';
-import { lookupIfsc, normaliseIfsc, verifyBankAccount, type IfscAnswer } from '../../shared/integrations';
+import { lookupIfsc, normaliseIfsc, type IfscAnswer } from '../../shared/integrations';
+import { routedBankAccount, routedUpiVpa, verificationRuntime, type UpiVpaAnswer } from '../../shared/verification';
 import { Decimal, money, type Money } from '../../shared/money';
 import { monthWindowIST } from '../../shared/time';
 import { platformAccount, post as postLedger } from '../ledger';
@@ -10,6 +12,7 @@ import { syncBatchStatus } from './batch-status';
 import { prismaPayoutsRepository as repository } from './prisma-payouts.repository';
 import { railFor, availableRails } from './rail';
 import { DEFAULT_MINIMUM_WITHDRAWAL, dailyCapFor, withholdingFor } from './rules.service';
+import { attemptCheckView, bankCheckView, upiCheckView, type MethodCheckView } from './payouts.shape';
 import type { MethodRow, PaidWithdrawalFilter, WithdrawalListFilter, WithdrawalRow } from './payouts.repository';
 import type { PayoutMethod as PayoutMethodRow } from '../../shared/database';
 import type { PayoutMethodType, PayoutRailName } from '../../shared/database';
@@ -126,11 +129,85 @@ export async function addMethod(userId: string, input: NewMethodInput): Promise<
     bankBranch,
     ifscVerifiedAt,
     upiVpa: input.type === 'UPI' ? input.upiVpa!.trim() : null,
+    // A UPI method keeps the holder's name when the form sent one: it is the
+    // name the UPI check compares against.
+    ...(input.type === 'UPI' && input.accountHolder?.trim() ? { accountHolder: input.accountHolder.trim() } : {}),
     // The first method a party adds is their default; nobody should have to
     // choose one when they only have one.
     isDefault: existing === 0,
   });
 }
+
+/**
+ * A person adds their OWN payout method (the app, the website, a print
+ * partner's own screen) — 2 Oct 2026. Saved exactly as `addMethod` saves
+ * it; then, for a UPI ID while the UPI check is Digio's VPA lookup, the
+ * check runs at once:
+ *
+ *   VERIFIED                          the method is marked verified, recorded
+ *                                     as the desk's check would record it;
+ *   NOT_FOUND / NAME_MISMATCH / REFUSED  FLAGGED — saved, unverified, the
+ *                                     answer on record for the desk;
+ *   UNAVAILABLE                       unverified, for the desk to check.
+ *
+ * The method saves either way: a check that could not run never stops a
+ * person adding where their money goes. No consent is captured here, so
+ * Cashfree's penny drop (the backup) is never asked from this door.
+ */
+/**
+ * The name a UPI check matches against: the holder the method names, else the
+ * owner's own name — the app and website forms ask for no holder on a UPI ID,
+ * and without a name Digio gives no match score (2 Oct 2026). A failed read
+ * sends no name rather than failing the check.
+ */
+async function upiNameFor(method: MethodRow): Promise<string | undefined> {
+  if (method.accountHolder?.trim()) return method.accountHolder.trim();
+  try {
+    return (await repository.findHolderName(method.userId)) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function addOwnMethod(userId: string, input: NewMethodInput, now = new Date()): Promise<{ method: MethodRow; check: MethodCheckView | null }> {
+  const method = await addMethod(userId, input);
+  if (method.type !== 'UPI' || !method.upiVpa) return { method, check: null };
+  const { upiCheck } = await verificationRuntime().settings();
+  if (upiCheck !== 'VPA_LOOKUP') return { method, check: null };
+
+  let answer: UpiVpaAnswer;
+  try {
+    answer = await routedUpiVpa({ vpa: method.upiVpa, name: await upiNameFor(method) }, { caseType: 'PAYOUT_METHOD', caseId: method.id });
+  } catch (err) {
+    // The router does not throw for a provider; a store that did must not undo the save.
+    logger.error('The UPI check on a new payout method could not run; left for the desk', { methodId: method.id, reason: err instanceof Error ? err.name : 'unknown' });
+    return { method, check: null };
+  }
+  const check = upiCheckView(answer, now);
+  if (answer.outcome !== 'VERIFIED') return { method, check };
+  const verified = await recordVerified(method.id, { via: answer.via ?? 'NAME_LOOKUP', reference: answer.reference, nameMatchPct: scoreOf(answer.nameMatchScore), byUserId: null }, now);
+  return { method: verified, check };
+}
+
+/** The last UPI check of each UPI method, read off the attempts — what the desk's queue shows beside it. */
+export async function lastUpiChecks(methods: readonly MethodRow[]): Promise<Map<string, MethodCheckView>> {
+  const out = new Map<string, MethodCheckView>();
+  const attempts = verificationRuntime().attempts;
+  await Promise.all(
+    methods
+      .filter((method) => method.type === 'UPI')
+      .map(async (method) => {
+        const rows = await attempts.listForCase('PAYOUT_METHOD', method.id, 10);
+        const last = rows
+          .filter((row) => row.checkType === 'UPI_VPA' && row.status !== 'PENDING')
+          .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
+        if (last) out.set(method.id, attemptCheckView(last));
+      }),
+  );
+  return out;
+}
+
+const scoreOf = (score: number | null): Money | null => (score === null ? null : String(score));
 
 export async function removeMethod(methodId: string, userId: string): Promise<void> {
   const method = await assertMethodOwned(methodId, userId);
@@ -166,31 +243,105 @@ export async function verifyMethod(
   },
   now = new Date()
 ): Promise<MethodRow> {
+  return (await verifyMethodChecked(methodId, input, now)).method;
+}
+
+/**
+ * `verifyMethod`, with the provider's answer beside the method — what the
+ * desk's "Check UPI ID" / penny drop shows (the name at the bank, the score).
+ * `check` is null when nothing was asked (MANUAL, NAME_LOOKUP by hand, or a
+ * method already verified).
+ */
+export async function verifyMethodChecked(
+  methodId: string,
+  input: {
+    via: 'PENNY_DROP' | 'NAME_LOOKUP' | 'MANUAL';
+    reference?: string | null;
+    nameMatchPct?: Money | null;
+    byUserId: string;
+  },
+  now = new Date()
+): Promise<{ method: MethodRow; check: MethodCheckView | null }> {
   const method = await repository.findMethod(methodId);
   if (!method) throw new ApiError(404, 'NOT_FOUND', 'Payout method not found');
-  if (method.status === 'VERIFIED') return method;
+  if (method.status === 'VERIFIED') return { method, check: null };
 
   // AG-4: a PENNY_DROP on a bank method runs Cashfree's bank-account check
   // (a rupee sent, the name at the bank read back). Cashfree saying the
   // account is not live, refusing, or being unconfigured is a 409 the desk
   // reads and may answer by hand; nothing is marked verified then.
+  //
+  // Cashfree Phase 1 (1 Oct 2026): the check goes through the verification
+  // router (an attempt on record against the method), and a PENNY_DROP that
+  // can run no check is refused rather than marking the method verified:
+  //
+  //   - a UPI method (2 Oct 2026): with the UPI check on Digio's VPA lookup
+  //     (`verificationRouting.upiCheck: 'VPA_LOOKUP'`, the default) the
+  //     desk's PENNY_DROP runs the routed UPI_VPA check — no consent needed
+  //     through Digio; Cashfree's penny drop, the backup, is skipped without
+  //     the holder's consent. Live with a matching name → VERIFIED, recorded
+  //     as a NAME_LOOKUP (Digio) or a PENNY_DROP (Cashfree); not found, a
+  //     name under `nameMatchMin` or a refusal → 409 VERIFICATION_UNAVAILABLE
+  //     with the answer; nobody could answer → 503 VERIFICATION_UNAVAILABLE.
+  //     With NONE, or a check that needs the holder themself (their consent
+  //     for a penny drop, their ₹1 for a reverse one), it stays the 409
+  //     UPI_CHECK_NOT_CONFIGURED, and the desk verifies by hand.
+  //   - a bank method with no account number or IFSC on it had nothing to
+  //     check. It is a 409 now, not a verification.
   let reference = input.reference ?? null;
   let nameMatchPct = input.nameMatchPct ?? null;
-  if (input.via === 'PENNY_DROP' && method.type === 'BANK' && method.accountNumber && method.ifscCode) {
-    const answer = await verifyBankAccount({ accountNumber: method.accountNumber, ifsc: method.ifscCode, name: method.accountHolder });
+  let via: 'PENNY_DROP' | 'NAME_LOOKUP' | 'MANUAL' = input.via;
+  let check: MethodCheckView | null = null;
+  if (input.via === 'PENNY_DROP' && method.type !== 'BANK') {
+    const { upiCheck } = await verificationRuntime().settings();
+    if (upiCheck !== 'VPA_LOOKUP') {
+      throw new ApiError(
+        409,
+        'UPI_CHECK_NOT_CONFIGURED',
+        upiCheck === 'NONE'
+          ? 'No UPI check has been chosen yet, so a UPI id cannot be penny-dropped. Verify it by hand, or choose a check under Settings › Integrations › Verification routing.'
+          : 'A UPI check needs the account holder themself — their consent for a penny drop, or their ₹1 for a reverse penny drop — so it cannot be run from the desk. Verify this UPI id by hand.',
+        { upiCheck, reason: upiCheck === 'NONE' ? 'NOT_CHOSEN' : 'NEEDS_ACCOUNT_HOLDER' },
+      );
+    }
+    if (!method.upiVpa) {
+      throw new ApiError(409, 'VERIFICATION_UNAVAILABLE', 'This method has no UPI ID to check', { code: 'NOTHING_TO_CHECK' });
+    }
+    const answer = await routedUpiVpa({ vpa: method.upiVpa, name: await upiNameFor(method) }, { caseType: 'PAYOUT_METHOD', caseId: method.id });
+    check = upiCheckView(answer, now);
+    if (answer.outcome === 'UNAVAILABLE') throw new ApiError(503, 'VERIFICATION_UNAVAILABLE', answer.message, { code: 'UNAVAILABLE', check });
+    if (answer.outcome !== 'VERIFIED') throw new ApiError(409, 'VERIFICATION_UNAVAILABLE', answer.message, { code: answer.outcome, check });
+    via = answer.via ?? 'NAME_LOOKUP';
+    reference = answer.reference ?? reference;
+    nameMatchPct = scoreOf(answer.nameMatchScore) ?? nameMatchPct;
+  } else if (input.via === 'PENNY_DROP') {
+    if (!method.accountNumber || !method.ifscCode) {
+      throw new ApiError(409, 'VERIFICATION_UNAVAILABLE', 'This method has no account number and IFSC to check', { code: 'NOTHING_TO_CHECK' });
+    }
+    const answer = await routedBankAccount({ accountNumber: method.accountNumber, ifsc: method.ifscCode, name: method.accountHolder }, { caseType: 'PAYOUT_METHOD', caseId: method.id });
     if (!answer.ok) throw new ApiError(409, 'VERIFICATION_UNAVAILABLE', answer.message, { code: answer.code });
     if (!answer.facts.valid) {
       throw new ApiError(409, 'VERIFICATION_UNAVAILABLE', `Cashfree says the account is ${answer.facts.accountStatus ?? 'not live'}${answer.facts.nameAtBank ? ` (name at bank: ${answer.facts.nameAtBank})` : ''}`, { code: 'INVALID', facts: answer.facts });
     }
     reference = answer.facts.referenceId ?? answer.facts.utr ?? reference;
     nameMatchPct = answer.facts.nameMatchScore !== null ? String(answer.facts.nameMatchScore) : nameMatchPct;
+    check = bankCheckView(answer.facts, now);
   }
 
+  return { method: await recordVerified(methodId, { via, reference, nameMatchPct, byUserId: input.byUserId }, now), check };
+}
+
+/** How a verified method is written — by the desk's check, by hand, or by the check run when a person added their own UPI ID (no desk user). */
+async function recordVerified(
+  methodId: string,
+  input: { via: 'PENNY_DROP' | 'NAME_LOOKUP' | 'MANUAL'; reference: string | null; nameMatchPct: Money | null; byUserId: string | null },
+  now: Date
+): Promise<MethodRow> {
   return repository.updateMethod(methodId, {
     status: 'VERIFIED',
     verifiedVia: input.via,
-    verificationReference: reference,
-    nameMatchPct: nameMatchPct ? new Decimal(nameMatchPct) : null,
+    verificationReference: input.reference,
+    nameMatchPct: input.nameMatchPct ? new Decimal(input.nameMatchPct) : null,
     verifiedAt: now,
     verifiedByUserId: input.byUserId,
     rejectionReason: null,
@@ -718,6 +869,10 @@ export async function markWithdrawalPaid(
   });
   if (paid.batchId) await syncBatchStatus(paid.batchId, now);
   await tellPartyPaid(paid, railReference);
+  // Account lifecycle (2 Oct 2026): an exited agent's sign-in ends with their final payout.
+  await withdrawalPaidPort()
+    ?.onPaid(paid, input.byUserId)
+    .catch((err: unknown) => logger.warn('Withdrawal-paid hook failed', { withdrawalId: paid.id, reason: err instanceof Error ? err.message : String(err) }));
   return paid;
 }
 

@@ -37,6 +37,19 @@ export interface FileAccessPort {
    * unregistered, the answer is no.
    */
   supportPartyMayView?(viewerUserId: string, fileId: string): Promise<boolean>;
+  /**
+   * ST-2 (28 Sep 2026): may `viewerUserId` open the LISTING_DOCUMENT file
+   * `fileId` because of the listing it is filed on? True when a listing's
+   * document (`ListingDocument.url`) names the file, by `/files/:id` or by
+   * the public URL it had before it was adopted, and the viewer is that
+   * listing's publisher, a field agent sent to that listing (an open or
+   * recent site visit, verification milestone or order of theirs on it), or
+   * an agent holding a live PROFILE grant on the publisher. Asked after the
+   * owner, the desk and the grant on the file's own owner. Optional:
+   * unregistered, the answer is no — the file stays its owner's and the
+   * desk's.
+   */
+  listingDocumentMayView?(viewerUserId: string, fileId: string): Promise<boolean>;
 }
 
 let port: FileAccessPort | null = null;
@@ -58,4 +71,9 @@ export async function disputePartyMayViewFile(viewerUserId: string, fileId: stri
 export async function supportPartyMayViewFile(viewerUserId: string, fileId: string): Promise<boolean> {
   if (!port?.supportPartyMayView) return false;
   return port.supportPartyMayView(viewerUserId, fileId);
+}
+
+export async function listingDocumentMayViewFile(viewerUserId: string, fileId: string): Promise<boolean> {
+  if (!port?.listingDocumentMayView) return false;
+  return port.listingDocumentMayView(viewerUserId, fileId);
 }

@@ -11,8 +11,8 @@ import { getManagerHandler, listReleasesHandler, publishHandler, putDraftHandler
 export const brandingRouter = Router();
 brandingRouter.use(authenticate, requireRole('ADMIN'));
 
-brandingRouter.get('/', asyncHandler(getManagerHandler));
+brandingRouter.get('/', requirePermission('settings.view'), asyncHandler(getManagerHandler));
 brandingRouter.put('/draft', requirePermission('settings.edit'), asyncHandler(putDraftHandler));
-brandingRouter.post('/publish', requirePermission('settings.edit'), asyncHandler(publishHandler));
-brandingRouter.get('/releases', asyncHandler(listReleasesHandler));
+brandingRouter.post('/publish', requirePermission('content.approve'), requirePermission('settings.edit'), asyncHandler(publishHandler));
+brandingRouter.get('/releases', requirePermission('settings.view'), asyncHandler(listReleasesHandler));
 brandingRouter.post('/releases/:number/restore', requirePermission('settings.edit'), asyncHandler(restoreHandler));

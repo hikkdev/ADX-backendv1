@@ -9,10 +9,12 @@ import { registerPublisher, updateMyPublisherProfile } from '../publishers';
 import { registerAdvertiser, updateProfile as updateAdvertiserProfile } from '../advertisers';
 import { selfProvenance } from '../../shared/onboarding';
 import { currentLegalDocument } from '../legal';
+import { allocateIdentifier } from '../identifiers';
 import { prismaUsersRepository as repository } from './prisma-users.repository';
-import type { AdminListFilter, AdminUserDetail, WithRoles } from './users.repository';
+import type { AdminListFilter, AdminUserDetail, DeletionHistory, WithRoles } from './users.repository';
 import { assertIdentityFree } from './users-identity';
-import { applyAsPrintPartner } from './users.ports';
+import { applyAsPrintPartner, cascadeDeactivation, cascadeReactivation, type ProfileRef } from './users.ports';
+import { assertNotClosed } from '../../shared/party-status';
 import type {
   AccountType,
   ChoosePartyInput,
@@ -67,6 +69,11 @@ export async function chooseParty(userId: string, input: ChoosePartyInput): Prom
 
   const { party, accountType } = input;
   const name = input.name ?? user.name ?? undefined;
+  // 28 Sep 2026: the account's own email goes onto the side it opens. The
+  // website proves the email before the side exists, and the basics mirror
+  // only fills a row that is already there — so a web publisher's row sat
+  // without one and the readiness card asked for the address again.
+  const email = user.email ?? undefined;
 
   if (party === 'PUBLISHER') {
     const existing = user.publisherProfile as PartyProfile | null;
@@ -75,6 +82,7 @@ export async function chooseParty(userId: string, input: ChoosePartyInput): Prom
     }
     const { publisher, created } = await registerPublisher(userId, {
       name,
+      ...(email ? { email } : {}),
       type: PUBLISHER_TYPE[accountType],
     });
     await repository.grantRole(userId, 'PUBLISHER');
@@ -103,12 +111,22 @@ export async function chooseParty(userId: string, input: ChoosePartyInput): Prom
   const advertiser = await registerAdvertiser({
     userId,
     name: name ?? user.mobile,
+    ...(email ? { email } : {}),
+    // 28 Sep 2026: a business or organisation named on the side form is the
+    // registered name the billing step asks for — carried there, so the
+    // set-up card opens with it instead of asking for it a second time.
+    ...(accountType !== 'INDIVIDUAL' && input.name ? { companyName: input.name } : {}),
     type: ADVERTISER_TYPE[accountType],
     // QR-14/15: the app's own door — nobody's achievement, "organic" on the
     // board. (The publisher side stamps the same in `createSelfRegistered`.)
     ...selfProvenance(),
   });
   await repository.grantRole(userId, 'ADVERTISER');
+  // 28 Sep 2026: an individual's name is the person's own — kept on the
+  // account too (as the publisher door does), so the basics that come next
+  // open with it filled in instead of asking it a second time. Only on an
+  // account that has no name yet; a business name never lands here.
+  if (accountType === 'INDIVIDUAL' && input.name && !user.name) await repository.updateProfile(userId, { name: input.name });
   return { party, accountType, profileId: advertiser.id, displayId: advertiser.displayId, created: true };
 }
 
@@ -134,7 +152,7 @@ export async function updateProfile(userId: string, input: UpdateProfileInput) {
   if (touchesIdentity && !current) throw new ApiError(404, 'NOT_FOUND', 'User not found');
   // QR-4: the two names compose the display name unless one was given
   // outright; a person who gives only a first name is called by it.
-  let data: UpdateProfileInput & { name?: string } = input;
+  let data: UpdateProfileInput & { name?: string; emailVerifiedAt?: null } = input;
   // QR-5: the date of birth travels as YYYY-MM-DD and is stored as a date.
   if (input.dateOfBirth !== undefined) data = { ...data, dateOfBirth: dateOfBirthToDate(input.dateOfBirth) as never };
   if ((input.firstName !== undefined || input.lastName !== undefined) && input.name === undefined && current) {
@@ -148,7 +166,9 @@ export async function updateProfile(userId: string, input: UpdateProfileInput) {
   if (data.email !== undefined && current) {
     const email = data.email.trim().toLowerCase();
     if (email !== current.email) await assertIdentityFree('EMAIL', email, { ownPrimaryOf: userId });
-    data = { ...data, email };
+    // ED-1: an address that moves is unproven until a code is answered at it
+    // (`POST /users/me/email/verify`); the same address keeps its stamp.
+    data = { ...data, email, ...(email !== current.email ? { emailVerifiedAt: null } : {}) };
   }
   const updated = await repository.updateProfile(userId, data);
   if (current) {
@@ -160,7 +180,7 @@ export async function updateProfile(userId: string, input: UpdateProfileInput) {
   return updated;
 }
 
-type PartyRow = { id: string; name?: string | null; email?: string | null } | null | undefined;
+type PartyRow = { id: string; name?: string | null; email?: string | null; type?: string | null } | null | undefined;
 
 /**
  * QR-22 (the owner, 17 Sep 2026): the basics are asked after the side is
@@ -171,15 +191,25 @@ type PartyRow = { id: string; name?: string | null; email?: string | null } | nu
  * this screen's to overwrite. A mirror that fails does not undo the
  * person's own row: the party row can be corrected from its profile.
  */
-async function mirrorBasicsToParties(
+export async function mirrorBasicsToParties(
   user: { id: string; publisherProfile?: unknown; advertiserProfile?: unknown },
   before: { name: string | null; mobile: string },
   given: { name?: string; email?: string },
 ) {
   if (!given.name && !given.email) return;
-  const placeholder = (held: string | null | undefined) => !held || !held.trim() || held === before.mobile || (before.name !== null && held === before.name);
+  // 28 Sep 2026: the previous display name counts as a placeholder only on
+  // an individual's row — there the account's name IS the person's. A
+  // business or organisation row named the same as the person was named on
+  // purpose (the publisher door used to copy a business name onto the
+  // person, so the two matched), and is renamed only while it still carries
+  // nothing or the number.
+  const individual = (row: NonNullable<PartyRow>) => !row.type || row.type === 'INDIVIDUAL';
+  const placeholder = (row: NonNullable<PartyRow>) => {
+    const held = row.name;
+    return !held || !held.trim() || held === before.mobile || (individual(row) && before.name !== null && held === before.name);
+  };
   const patchFor = (row: NonNullable<PartyRow>) => ({
-    ...(given.name && placeholder(row.name) ? { name: given.name } : {}),
+    ...(given.name && placeholder(row) ? { name: given.name } : {}),
     ...(given.email && !row.email ? { email: given.email } : {}),
   });
   try {
@@ -262,7 +292,13 @@ export async function sendResetLinkByAdmin(userId: string): Promise<{ email: str
 }
 
 /** What the editor answers beside the row: the diff the audit row carries. */
-export type AdminEdit = { user: WithRoles; diff: AuditDiff; movedIdentity: ('mobile' | 'email')[] };
+export type AdminEdit = {
+  user: WithRoles;
+  diff: AuditDiff;
+  movedIdentity: ('mobile' | 'email')[];
+  /** Account lifecycle: the profiles a Deactivate suspended (BLOCK_NEW) or a Reactivate reinstated. */
+  cascaded: ProfileRef[];
+};
 
 /**
  * Admin edit of another account.
@@ -287,6 +323,8 @@ export async function updateUserByAdmin(
   if (data.isActive === false && userId === actingUserId) {
     throw new ApiError(400, 'BAD_REQUEST', 'You cannot deactivate your own account');
   }
+  // Account lifecycle (2 Oct 2026): a closed account is never reactivated — 409 ACCOUNT_CLOSED before anything is written.
+  if (data.isActive === true) assertNotClosed(target.closedAt);
   // Lot K2: the last active super admin does not leave by this door either.
   if (data.isActive === false && target.isActive) await assertNotLastSuperAdmin(userId, 'DEACTIVATE');
 
@@ -376,6 +414,12 @@ export async function updateUserByAdmin(
   // A deactivated account keeps its access tokens for up to their whole
   // lifetime unless the marker is written — which is the window an admin
   // pressing "deactivate" believes they have just closed.
+  // Account lifecycle (2 Oct 2026): Deactivate also stops the person's profiles
+  // taking new work (BLOCK_NEW on each), and Reactivate lifts exactly that.
+  let cascaded: ProfileRef[] = [];
+  if (data.isActive === false && target.isActive) cascaded = await cascadeDeactivation(userId, actingUserId);
+  if (data.isActive === true && !target.isActive) cascaded = await cascadeReactivation(userId, actingUserId);
+
   if (data.isActive === false) {
     await revokeSessions(userId, 'ACCOUNT_DEACTIVATED');
   } else if (rolesChange) {
@@ -388,6 +432,7 @@ export async function updateUserByAdmin(
     user: updated,
     diff,
     movedIdentity: [...(movingNumber ? ['mobile' as const] : []), ...(movingEmail ? ['email' as const] : [])],
+    cascaded,
   };
 }
 
@@ -402,14 +447,57 @@ export function adminUpdateAction(data: UpdateUserByAdminInput): string {
  * The five kinds of history that make an account a record rather than a row,
  * in the words the refusal uses.
  */
-const HISTORY_LABELS: Record<keyof Awaited<ReturnType<typeof repository.findDeletionHistory>>, string> = {
+const HISTORY_LABELS: Record<keyof DeletionHistory, string> = {
   walletEntries: 'wallet entries',
   ledgerLegs: 'ledger entries',
   orders: 'orders',
   listings: 'listings',
   agreementAcceptances: 'accepted agreements',
   kycRecords: 'KYC records',
+  invoices: 'invoices',
+  campaigns: 'campaigns',
+  packageSales: 'package purchases',
+  accessGrantsUsed: 'access grants used',
+  printWork: 'print jobs and quotes',
+  staffWork: 'pieces of staff work',
 };
+
+/** One reason an account cannot be deleted — the history kinds above, or `self` / `lastSuperAdmin`. */
+export type DeletionBlocker = { kind: string; label: string; count: number };
+
+/** What `GET /users/:id/deletable` answers, and what `DELETE /users/:id` acts on. */
+export type Deletability = { deletable: boolean; blockers: DeletionBlocker[] };
+
+/** The history kinds found, in the words the refusal and the console use. */
+function historyBlockers(history: DeletionHistory): DeletionBlocker[] {
+  return (Object.keys(history) as (keyof DeletionHistory)[])
+    .filter((key) => (history[key] ?? 0) > 0)
+    .map((key) => ({ kind: key, label: HISTORY_LABELS[key], count: history[key] }));
+}
+
+/**
+ * Account lifecycle (2 Oct 2026): `GET /users/:id/deletable` — whether the
+ * console may offer "Delete account", and if not, why: the history behind
+ * it (money, work, inventory, signed agreements, KYC, invoices, campaigns,
+ * package purchases, access grants used, a print shop's jobs, staff work),
+ * the caller's own account, or the last super admin. Read-only.
+ */
+export async function getDeletability(userId: string, actingUserId: string): Promise<Deletability> {
+  const user = await repository.findDeletionTarget(userId);
+  if (!user) throw new ApiError(404, 'NOT_FOUND', 'User not found');
+  const blockers: DeletionBlocker[] = [];
+  if (userId === actingUserId) blockers.push({ kind: 'self', label: 'your own account', count: 1 });
+  if (user.roles.some((r) => r.role === 'ADMIN')) {
+    try {
+      await assertNotLastSuperAdmin(userId, 'DELETE');
+    } catch (error) {
+      if (!(error instanceof ApiError)) throw error;
+      blockers.push({ kind: 'lastSuperAdmin', label: 'the last super admin', count: 1 });
+    }
+  }
+  blockers.push(...historyBlockers(await repository.findDeletionHistory(user)));
+  return { deletable: blockers.length === 0, blockers };
+}
 
 export async function deleteUser(userId: string, actingUserId: string) {
   if (userId === actingUserId) {
@@ -430,19 +518,18 @@ export async function deleteUser(userId: string, actingUserId: string) {
    * record behind it is closed, never deleted. `deleteUserCascade` would take
    * the orders and the listings with it, and the ledger legs that balance
    * against ADX would be left describing a party that no longer exists. The
-   * closure case is the path, and this refusal names it.
+   * closure case is the path, and this refusal names it. Account lifecycle
+   * (2 Oct 2026): invoices, campaigns, package purchases, access grants used,
+   * a print shop's jobs and an employee's desk work count too.
    */
-  const history = await repository.findDeletionHistory(user);
-  const found = (Object.keys(history) as (keyof typeof history)[])
-    .filter((key) => history[key] > 0)
-    .map((key) => ({ kind: key, label: HISTORY_LABELS[key], count: history[key] }));
+  const found = historyBlockers(await repository.findDeletionHistory(user));
 
   if (found.length > 0) {
     throw new ApiError(
       409,
       'USER_HAS_HISTORY',
       `This account has ${found.map((row) => `${row.count} ${row.label}`).join(', ')} behind it and cannot be deleted. Close it instead.`,
-      { userId, has: found, closeWith: 'account closure' }
+      { userId, has: found, blockers: found, closeWith: 'account closure' }
     );
   }
 
@@ -464,7 +551,10 @@ export async function createUser(input: {
   await assertIdentityFree('PHONE', mobile);
   if (email) await assertIdentityFree('EMAIL', email);
 
-  const user = await repository.createWithRoles({ ...input, mobile, ...(email ? { email } : {}) });
+  // 28 Sep 2026: every account is a person with their own ADX-… id from the
+  // moment it exists — the desk's creates included, not only the OTP door's.
+  const displayId = await allocateIdentifier('USER');
+  const user = await repository.createWithRoles({ ...input, mobile, displayId, ...(email ? { email } : {}) });
 
   // Lot A (Q25): the second factor is on for an admin from the moment the
   // account exists, not from the first time somebody remembers to turn it on.

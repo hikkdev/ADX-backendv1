@@ -128,7 +128,7 @@ export function kycRecordStateWhere(state: KycQueueState): KycRecordStateWhere {
  */
 export type KycPartyStateWhere = {
   kyc?: null | { is: KycRecordStateWhere } | { isNot: null };
-  kycStatus?: { not: 'VERIFIED' };
+  kycStatus?: { not: 'VERIFIED' } | 'VERIFIED';
   OR?: KycPartyStateWhere[];
 };
 
@@ -137,6 +137,21 @@ export function kycPartyStateWhere(state: KycQueueState, mirror: boolean): KycPa
   if (state !== 'AWAITING_DOCUMENTS') return record;
   const none: KycPartyStateWhere = mirror ? { kyc: null, kycStatus: { not: 'VERIFIED' } } : { kyc: null };
   return { OR: [none, record] };
+}
+
+/**
+ * 29 Sep 2026 (the party rosters, made uniform): one state as a where over
+ * EVERY party, not only the queue's. `deriveKycState` reads a party with no
+ * record and a VERIFIED mirror — a legacy row — as VERIFIED, and the roster
+ * prints it so; the queue never lists such a row (`kycQueueBaseWhere`), which
+ * is why `kycPartyStateWhere` can leave it out. A roster lists everyone, so
+ * its VERIFIED cut takes that row in too, and the six cuts partition the
+ * roster exactly as the pills do.
+ */
+export function kycRosterStateWhere(state: KycQueueState, mirror: boolean): KycPartyStateWhere {
+  const where = kycPartyStateWhere(state, mirror);
+  if (state !== 'VERIFIED' || !mirror) return where;
+  return { OR: [where, { kyc: null, kycStatus: 'VERIFIED' }] };
 }
 
 /**
@@ -158,3 +173,5 @@ export function kycStateCounts(counts: Partial<Record<KycQueueState, number>>): 
 
 /** QR-3: how far along a publisher is, and the verified mark every party earns the same way. */
 export * from './readiness';
+/** Phase D (1 Oct 2026): the legal form a party verifies as — the Digio workflow's other half. */
+export * from './entity-type';

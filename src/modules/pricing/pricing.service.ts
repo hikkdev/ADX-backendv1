@@ -1,3 +1,4 @@
+import { comparableListingValue, isCodedListingField } from '../../shared/listing-vocabulary';
 import { ApiError } from '../../shared/errors';
 import { auditDiff, logActivity } from '../../shared/audit';
 import { Decimal, money } from '../../shared/money';
@@ -1471,6 +1472,16 @@ export async function classifySpot(input: SpotDescription): Promise<ClassifiedSp
 /* ------------------------------------------------------------------ */
 
 /**
+ * Equality as a factor rule means it: exact — except on the coded listing
+ * columns (LD-1), where a code and its words are one value, in any case.
+ */
+function sameValue(field: string, actual: unknown, expected: unknown): boolean {
+  if (actual === expected) return true;
+  if (!isCodedListingField(field) || typeof actual !== 'string' || typeof expected !== 'string') return false;
+  return comparableListingValue(field, actual) === comparableListingValue(field, expected);
+}
+
+/**
  * A tiny predicate language for `PricingFactor.suggestWhen`.
  *
  * Deliberately not an expression evaluator: ops-authored JSON that reaches an
@@ -1493,8 +1504,13 @@ export function evaluatePredicate(rule: unknown, facts: Record<string, unknown>)
     ? facts[field]
     : undefined;
 
-  if ('eq' in node) return actual === node['eq'];
-  if (Array.isArray(node['in'])) return node['in'].includes(actual);
+  // LD-1 (3 Oct 2026): elevation, visibility and traffic are stored as codes
+  // now (ROOFTOP, 50_150M, HIGH) where a rule may have been written against
+  // the words ("Rooftop") — and older listings may still hold the words.
+  // Both sides are compared in the coded form, so either spelling matches
+  // either; a word with no code ("Mid-rise") still matches only itself.
+  if ('eq' in node) return sameValue(field, actual, node['eq']);
+  if (Array.isArray(node['in'])) return node['in'].some((option) => sameValue(field, actual, option));
 
   const numeric = typeof actual === 'number' ? actual : Number.NaN;
   if (Number.isNaN(numeric)) return false;

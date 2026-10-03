@@ -40,6 +40,11 @@ const DEFAULT_PREFIXES: Record<PartyType, string> = {
   SAFETY: 'SFT',
   /// QR-4: ADX-DDMM-YYNN — the person's own id, minted at first sign-in.
   USER: 'ADX',
+  /// BK-1 (DR 12): BKG-DDMM-YYNN on a booking, minted at placement.
+  ORDER: 'BKG',
+  /// LM-1: ADB-DDMM-YYNN on a display-ad booking; BST-… on a sponsored listing.
+  AD_BOOKING: 'ADB',
+  LISTING_BOOST: 'BST',
   /// LED-#### on a prospect. DR 06 does not print it on the card, but ops
   /// needs a way to name one lead out of a thousand on the phone.
   LEAD: 'LED',

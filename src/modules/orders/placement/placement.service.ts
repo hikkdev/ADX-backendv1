@@ -4,7 +4,9 @@ import { prismaOrdersRepository as repository } from '../prisma-orders.repositor
 import { notifyAdmins, notifyUser, shortId } from '../orders.notify';
 import { meetingPointFor } from '../scheduling/scheduling.service';
 import type { PlacementInput } from '../orders.repository';
+import { allocateIdentifier } from '../../identifiers';
 import type { ListingWithPublisher } from '../../listings';
+import { announceOrderPlaced } from '../screening.port';
 
 /**
  * Lot D (Q6/Q105): whether this listing accepts the order on the publisher's
@@ -59,6 +61,8 @@ export async function placeOrder(input: PlacementInput) {
   const window = windowFor(data.startDate, data.endDate);
   const options = forCampaignId ? { excludeCampaignId: forCampaignId } : {};
   const accepted = await instantAcceptance(listing);
+  // BK-1: the booking's own id, minted before the lock so the insert carries it.
+  const displayId = data.displayId ?? (await allocateIdentifier('ORDER'));
 
   const order = await repository.placeUnderListingLock(listing.id, async (locked) => {
     const held = await locked.slotsHeld(window, options);
@@ -73,8 +77,15 @@ export async function placeOrder(input: PlacementInput) {
       }
     }
 
-    return accepted ? locked.create(data, accepted) : locked.create(data);
+    return accepted ? locked.create({ ...data, displayId }, accepted) : locked.create({ ...data, displayId });
   });
+
+  // Order fraud screening: scored in the background, never in the way — a
+  // scoring failure is logged and the order stands. An order raised for a
+  // campaign is scored a moment later instead, when `campaigns` announces the
+  // booking paid with every spot linked — one scoring, with the campaign's
+  // payments in view, rather than two racing each other.
+  if (!forCampaignId) announceOrderPlaced(order.id);
 
   // Fire-and-forget: a notification failure must not fail the order.
   if (accepted) {

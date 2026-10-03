@@ -96,7 +96,7 @@ beforeEach(() => {
   repository.remove.mockResolvedValue(dept());
   employees.countEmployeesByDepartment.mockResolvedValue({ dep_ops: 3, dep_field: 1 });
   employees.listDepartmentMembers.mockResolvedValue([
-    { id: 'emp_1', userId: 'usr_1', displayId: 'EMP-1', name: 'Asha', email: 'asha@adx.co', designation: 'Head of ops', region: 'Bengaluru', workMode: 'HYBRID', employmentType: 'FULL_TIME', active: true },
+    { id: 'emp_1', userId: 'usr_1', displayId: 'EMP-1', name: 'Asha', email: 'asha@adx.in', designation: 'Head of ops', region: 'Bengaluru', workMode: 'HYBRID', employmentType: 'FULL_TIME', active: true },
   ]);
   employees.findEmployeeCard.mockImplementation(async (id: string) => (id === 'emp_1' ? { id: 'emp_1', userId: 'usr_1', name: 'Asha', designation: 'Head of ops' } : null));
   employees.listUnlinkedDepartmentNames.mockResolvedValue([]);

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { authenticate, requireRole } from '../../shared/auth';
+import { authenticate, requireRole, requirePermission } from '../../shared/auth';
 import { asyncHandler } from '../../shared/http';
 import { reinstateHandlerFor, suspendHandlerFor, suspensionHandler } from './suspension.controller';
 
@@ -25,16 +25,16 @@ export const suspensionRouter = Router();
 
 const admin = [authenticate, requireRole('ADMIN')] as const;
 
-suspensionRouter.post('/listings/:id/suspend', ...admin, asyncHandler(suspendHandlerFor('LISTING')));
-suspensionRouter.post('/listings/:id/reinstate', ...admin, asyncHandler(reinstateHandlerFor('LISTING')));
+suspensionRouter.post('/listings/:id/suspend', ...admin, requirePermission('supply.suspend'), asyncHandler(suspendHandlerFor('LISTING')));
+suspensionRouter.post('/listings/:id/reinstate', ...admin, requirePermission('supply.suspend'), asyncHandler(reinstateHandlerFor('LISTING')));
 
-suspensionRouter.post('/publishers/:id/suspend', ...admin, asyncHandler(suspendHandlerFor('PUBLISHER')));
-suspensionRouter.post('/publishers/:id/reinstate', ...admin, asyncHandler(reinstateHandlerFor('PUBLISHER')));
+suspensionRouter.post('/publishers/:id/suspend', ...admin, requirePermission('supply.suspend'), asyncHandler(suspendHandlerFor('PUBLISHER')));
+suspensionRouter.post('/publishers/:id/reinstate', ...admin, requirePermission('supply.suspend'), asyncHandler(reinstateHandlerFor('PUBLISHER')));
 
-suspensionRouter.post('/advertisers/:id/suspend', ...admin, asyncHandler(suspendHandlerFor('ADVERTISER')));
-suspensionRouter.post('/advertisers/:id/reinstate', ...admin, asyncHandler(reinstateHandlerFor('ADVERTISER')));
+suspensionRouter.post('/advertisers/:id/suspend', ...admin, requirePermission('demand.suspend'), asyncHandler(suspendHandlerFor('ADVERTISER')));
+suspensionRouter.post('/advertisers/:id/reinstate', ...admin, requirePermission('demand.suspend'), asyncHandler(reinstateHandlerFor('ADVERTISER')));
 
-suspensionRouter.post('/agents/:id/suspend', ...admin, asyncHandler(suspendHandlerFor('AGENT')));
-suspensionRouter.post('/agents/:id/reinstate', ...admin, asyncHandler(reinstateHandlerFor('AGENT')));
+suspensionRouter.post('/agents/:id/suspend', ...admin, requirePermission('agents.suspend'), asyncHandler(suspendHandlerFor('AGENT')));
+suspensionRouter.post('/agents/:id/reinstate', ...admin, requirePermission('agents.suspend'), asyncHandler(reinstateHandlerFor('AGENT')));
 
-suspensionRouter.get('/suspension/:partyType/:partyId', ...admin, asyncHandler(suspensionHandler));
+suspensionRouter.get('/suspension/:partyType/:partyId', ...admin, requirePermission('marketplace.view'), asyncHandler(suspensionHandler));

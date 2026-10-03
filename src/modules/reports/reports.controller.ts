@@ -37,7 +37,7 @@ function invalid(error: { flatten(): unknown }, what = 'request'): ApiError {
   return new ApiError(400, 'VALIDATION_ERROR', `Invalid ${what}`, error.flatten());
 }
 
-/** GET /reports/catalogue — the twelve kinds, their filters and columns. */
+/** GET /reports/catalogue — the thirteen kinds, their filters and columns. */
 export function catalogueHandler(_req: Request, res: Response): void {
   res.json({ success: true, data: describedCatalogue() });
 }

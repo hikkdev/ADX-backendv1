@@ -20,6 +20,15 @@ const mocks = vi.hoisted(() => ({
   startSession: vi.fn(),
   logActivity: vi.fn(),
   issueChallenge: vi.fn(),
+  // G-2 / ED-1: the hand-off for a new address and the stamp for a known one.
+  signupHandoffForProvenEmail: vi.fn(),
+  stampProvenEmail: vi.fn(),
+}));
+
+vi.mock('../../otp/otp.service', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../otp/otp.service')>()),
+  signupHandoffForProvenEmail: mocks.signupHandoffForProvenEmail,
+  stampProvenEmail: mocks.stampProvenEmail,
 }));
 
 vi.mock('../google.service', () => ({ verifyGoogleIdToken: mocks.verifyGoogleIdToken }));
@@ -57,10 +66,10 @@ import { ApiError } from '../../../../shared/errors';
 
 const IDENTITY = {
   sub: '110000000000000000001',
-  email: 'ada@adx.co',
+  email: 'ada@adx.in',
   emailVerified: true,
   name: 'Ada Lovelace',
-  hostedDomain: 'adx.co',
+  hostedDomain: 'adx.in',
 };
 
 function adxUser(overrides: Record<string, unknown> = {}) {
@@ -68,7 +77,7 @@ function adxUser(overrides: Record<string, unknown> = {}) {
     id: 'usr_ada',
     mobile: '+919876543210',
     name: 'Ada Lovelace',
-    email: 'ada@adx.co',
+    email: 'ada@adx.in',
     language: 'en',
     avatarUrl: null,
     passwordHash: null,
@@ -105,7 +114,7 @@ beforeEach(async () => {
     challengeToken: 'challenge-token',
     methods: ['SMS', 'EMAIL'],
     maskedMobile: '+91 ***** 3210',
-    maskedEmail: 'a**a@adx.co',
+    maskedEmail: 'a**a@adx.in',
   });
 });
 
@@ -121,7 +130,7 @@ describe('POST /auth/google — a verified identity with a matching account', ()
       data: {
         accessToken: 'adx-access',
         refreshToken: 'adx-refresh',
-        user: { id: 'usr_ada', email: 'ada@adx.co', roles: ['PARTNER'] },
+        user: { id: 'usr_ada', email: 'ada@adx.in', roles: ['PARTNER'] },
       },
     });
   });
@@ -131,7 +140,7 @@ describe('POST /auth/google — a verified identity with a matching account', ()
 
     await signIn();
 
-    expect(mocks.findLoginUsersByEmailInsensitive).toHaveBeenCalledWith('ada@adx.co');
+    expect(mocks.findLoginUsersByEmailInsensitive).toHaveBeenCalledWith('ada@adx.in');
   });
 
   it('starts a session with the roles the account actually holds', async () => {
@@ -179,7 +188,7 @@ describe('POST /auth/google — a verified identity with a matching account', ()
       'usr_ada',
       'LOGIN_GOOGLE',
       expect.anything(),
-      expect.objectContaining({ googleSub: IDENTITY.sub, hostedDomain: 'adx.co' }),
+      expect.objectContaining({ googleSub: IDENTITY.sub, hostedDomain: 'adx.in' }),
     );
   });
 });
@@ -201,7 +210,7 @@ describe('POST /auth/google — an admin gets a challenge, not tokens', () => {
           challengeToken: 'challenge-token',
           methods: ['SMS', 'EMAIL'],
           maskedMobile: '+91 ***** 3210',
-          maskedEmail: 'a**a@adx.co',
+          maskedEmail: 'a**a@adx.in',
         },
       },
     });
@@ -233,24 +242,30 @@ describe('POST /auth/google — an admin gets a challenge, not tokens', () => {
   });
 });
 
-describe('POST /auth/google — refuses to provision or guess', () => {
-  it('rejects an unknown email with 403 and never starts a session', async () => {
+describe('POST /auth/google — a sign-up door (G-2), never a guess', () => {
+  it('hands a new, Google-verified address to the phone step and starts no session', async () => {
     mocks.findLoginUsersByEmailInsensitive.mockResolvedValue([]);
+    mocks.signupHandoffForProvenEmail.mockResolvedValue({ kind: 'signup', signupToken: 'signup-1', email: 'ada@adx.in', expiresInSeconds: 1800 });
+
+    const res = await signIn();
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual({ signup: { signupToken: 'signup-1', email: 'ada@adx.in', expiresInSeconds: 1800 } });
+    expect(mocks.signupHandoffForProvenEmail).toHaveBeenCalledWith('ada@adx.in');
+    // The account opens on the phone step, not here.
+    expect(mocks.startSession).not.toHaveBeenCalled();
+  });
+
+  it('an address Google has not verified is still refused with 403', async () => {
+    mocks.findLoginUsersByEmailInsensitive.mockResolvedValue([]);
+    mocks.verifyGoogleIdToken.mockResolvedValue({ ...IDENTITY, emailVerified: false });
 
     const res = await signIn();
 
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('FORBIDDEN');
-    // The whole point of the policy: authentication, not registration.
+    expect(mocks.signupHandoffForProvenEmail).not.toHaveBeenCalled();
     expect(mocks.startSession).not.toHaveBeenCalled();
-  });
-
-  it('names the reason for an unknown email — the caller already owns that mailbox', async () => {
-    mocks.findLoginUsersByEmailInsensitive.mockResolvedValue([]);
-
-    const res = await signIn();
-
-    expect(res.body.error.message).toContain('administrator');
   });
 
   it('rejects a deactivated account with 401', async () => {
@@ -263,10 +278,20 @@ describe('POST /auth/google — refuses to provision or guess', () => {
     expect(mocks.startSession).not.toHaveBeenCalled();
   });
 
+  it('account lifecycle (2 Oct 2026): rejects a closed account the same way, even with the switch still on', async () => {
+    mocks.findLoginUsersByEmailInsensitive.mockResolvedValue([adxUser({ isActive: true, closedAt: new Date() })]);
+
+    const res = await signIn();
+
+    expect(res.status).toBe(401);
+    expect(res.body.error.message).toBe('Account not active');
+    expect(mocks.startSession).not.toHaveBeenCalled();
+  });
+
   it('refuses with 409 when two accounts differ only by email case', async () => {
     mocks.findLoginUsersByEmailInsensitive.mockResolvedValue([
-      adxUser({ id: 'usr_one', email: 'ada@adx.co' }),
-      adxUser({ id: 'usr_two', email: 'Ada@adx.co' }),
+      adxUser({ id: 'usr_one', email: 'ada@adx.in' }),
+      adxUser({ id: 'usr_two', email: 'Ada@adx.in' }),
     ]);
 
     const res = await signIn();

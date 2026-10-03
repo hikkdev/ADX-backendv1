@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { ApiError } from '../../shared/errors';
 import { logger } from '../../shared/logging';
+import { normaliseVehicleNumber } from '../../shared/integrations';
+import { routedVehicleRc } from '../../shared/verification';
 import { reverseGeocode } from '../../shared/maps';
 import { requireAgentProfile } from '../agents';
 import { allocateIdentifier } from '../identifiers';
@@ -45,6 +47,12 @@ export const captureLeadSchema = z.object({
   note: z.string().trim().min(1).max(500).optional(),
   /** Uploaded first under purpose LEAD_CAPTURE, by the same agent. */
   photoFileIds: z.array(z.string().trim().min(1).max(64)).max(MAX_CAPTURE_PHOTOS).default([]),
+  /**
+   * VH-2: the registration of a vehicle being spotted as an ad spot — an
+   * auto, a taxi, a delivery van. Typed off the plate; the RC lookup turns
+   * it into an owner's name before the first conversation.
+   */
+  vehicleNumber: z.string().trim().min(4).max(20).optional(),
 });
 export type CaptureLeadInput = z.infer<typeof captureLeadSchema>;
 
@@ -81,6 +89,50 @@ export async function captureLead(userId: string, input: CaptureLeadInput) {
     if (accounts[0]) throw new ApiError(409, 'CONFLICT', `That number belongs to a ${accounts[0].kind.toLowerCase()} account already`, { reason: 'EXISTING_ACCOUNT', kind: accounts[0].kind, id: accounts[0].id });
   }
 
+  /*
+   * VH-2: a vehicle's identity is its registration, not its position.
+   *
+   * The thirty-metre check above is the right dedup for a wall, which stays
+   * where it is. An auto does not: two agents can meet the same vehicle a
+   * kilometre apart on the same afternoon, and a spatial check would let
+   * both capture it. So a registration already on a lead is refused here,
+   * the same way a phone number is.
+   */
+  const vehicleNumber = input.vehicleNumber ? normaliseVehicleNumber(input.vehicleNumber) : null;
+  if (vehicleNumber) {
+    const held = await repository.findByVehicleNumber(vehicleNumber);
+    if (held) {
+      throw new ApiError(409, 'CONFLICT', `${vehicleNumber} is already on lead ${held.displayId ?? held.id}`, {
+        reason: 'DUPLICATE_VEHICLE',
+        leadId: held.id,
+        displayId: held.displayId,
+        businessName: held.businessName,
+        mine: held.assignedAgentId === agent.id,
+      });
+    }
+  }
+
+  /*
+   * The RC lookup, best effort. It fills the owner's name and what the
+   * vehicle is, so the agent knocks on the window knowing who they are
+   * talking to. It must never stop a capture: the vendor is unconfigured
+   * until Cashfree whitelists us, and an agent standing in the street
+   * should not lose the lead to that.
+   */
+  let vehicleRc: { facts: Record<string, unknown>; verifiedAt: Date } | null = null;
+  if (vehicleNumber) {
+    try {
+      // Cashfree Phase 1: asked through the verification router. The lead does not exist yet, so the attempt is kept against the agent capturing it.
+      const answer = await routedVehicleRc(vehicleNumber, { caseType: 'LISTING', caseId: `lead-capture:${agent.id}` });
+      if (answer.ok) vehicleRc = { facts: answer.facts as unknown as Record<string, unknown>, verifiedAt: new Date() };
+      else logger.info('Vehicle RC not checked at capture', { vehicleNumber, code: answer.code });
+    } catch (err) {
+      logger.warn('Vehicle RC lookup failed at capture', { vehicleNumber, err });
+    }
+  }
+  const rcOwner = typeof vehicleRc?.facts['ownerName'] === 'string' ? (vehicleRc.facts['ownerName'] as string) : null;
+  const rcMakerModel = [vehicleRc?.facts['maker'], vehicleRc?.facts['model']].filter((part): part is string => typeof part === 'string' && part.trim() !== '').join(' ');
+
   // The photos must be the agent's own captures.
   const photos: string[] = [];
   for (const fileId of input.photoFileIds) {
@@ -112,10 +164,16 @@ export async function captureLead(userId: string, input: CaptureLeadInput) {
   const lead = await repository.create(
     await withCityKey({
       side: input.side,
-      businessName: input.businessName?.trim() || placeholderName({ side: input.side, category: input.category, locality, address }),
+      // VH-2: a verified vehicle names itself — "Bajaj RE · KA01AB1234" reads
+      // better on the board than "Auto surface near MG Road", and it is what
+      // the agent will look for.
+      businessName:
+        input.businessName?.trim() ||
+        (vehicleNumber && rcMakerModel ? `${rcMakerModel} · ${vehicleNumber}` : vehicleNumber ? vehicleNumber : placeholderName({ side: input.side, category: input.category, locality, address })),
       displayId,
       category: input.category,
-      contactName: input.contactName ?? null,
+      // The RC's owner is the person to ask for, when the agent has not already asked.
+      contactName: input.contactName ?? rcOwner ?? null,
       phone: input.phone ?? null,
       phoneNormalised,
       address,
@@ -129,6 +187,9 @@ export async function captureLead(userId: string, input: CaptureLeadInput) {
       assignedAgentId: agent.id,
       capturedByAgentId: agent.id,
       capturedAt: now,
+      vehicleNumber,
+      vehicleRcVerifiedAt: vehicleRc?.verifiedAt ?? null,
+      vehicleRcPayload: vehicleRc ? { ...vehicleRc.facts, checkedAt: vehicleRc.verifiedAt.toISOString() } : null,
       photoFileIds: photos,
       lastTouchedAt: now,
       createdByUserId: userId,
@@ -138,7 +199,7 @@ export async function captureLead(userId: string, input: CaptureLeadInput) {
     leadId: lead.id,
     actorUserId: userId,
     kind: 'IMPORTED',
-    note: `Spotted in the street${input.accuracy !== undefined && input.accuracy > 50 ? ` (fix ±${Math.round(input.accuracy)} m)` : ''}${photos.length ? ` · ${photos.length} photo${photos.length === 1 ? '' : 's'}` : ''}${input.note ? ` — ${input.note}` : ''}`,
+    note: `Spotted in the street${input.accuracy !== undefined && input.accuracy > 50 ? ` (fix ±${Math.round(input.accuracy)} m)` : ''}${photos.length ? ` · ${photos.length} photo${photos.length === 1 ? '' : 's'}` : ''}${vehicleNumber ? ` · ${vehicleNumber}${vehicleRc ? ` verified${rcOwner ? `, ${rcOwner}` : ''}` : ' (RC not checked)'}` : ''}${input.note ? ` — ${input.note}` : ''}`,
   });
   await recomputeLead(lead.id, now).catch((err) => logger.warn('Captured lead not scored', { leadId: lead.id, err }));
   // The capture is the agent's first touch on it — it counts toward the contact target as a logged touch.

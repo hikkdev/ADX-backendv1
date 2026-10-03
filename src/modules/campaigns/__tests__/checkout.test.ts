@@ -18,6 +18,7 @@ const {
   captureCampaignHold,
   releaseCampaignHold,
   placeOrder,
+  announceOrdersPaid,
   issueTrackingCodes,
 } = vi.hoisted(() => ({
   repository: {
@@ -39,6 +40,7 @@ const {
   captureCampaignHold: vi.fn(),
   releaseCampaignHold: vi.fn(),
   placeOrder: vi.fn(),
+  announceOrdersPaid: vi.fn(),
   issueTrackingCodes: vi.fn(),
 }));
 
@@ -50,7 +52,7 @@ vi.mock('../../advertisers', () => ({
   captureCampaignHold,
   releaseCampaignHold,
 }));
-vi.mock('../../orders', () => ({ placeOrder, notifyAdmins: vi.fn() }));
+vi.mock('../../orders', () => ({ placeOrder, notifyAdmins: vi.fn(), announceOrdersPaid }));
 vi.mock('../tracking.service', () => ({ issueTrackingCodes }));
 // Lot D (Q123): the insertion order is accepted on the version live now; these
 // tests are about the money, so it has been.
@@ -185,10 +187,24 @@ describe('review', () => {
     expect(review.total).toBe('34810.00');
   });
 
-  it('takes the discount off the total', async () => {
+  it('takes the discount off the taxable value, so the tax is charged on what is paid (GST-D)', async () => {
+    // 29,500 taxable carrying 5,310 of tax; 500 off takes 5,310 × 500 / 29,500 = 90.00 of tax with it.
     const review = await reviewCampaign(campaign({ discount: new Decimal('500') }));
     expect(review.discount).toBe('500.00');
-    expect(review.total).toBe('34310.00');
+    expect(review.discountGst).toBe('90.00');
+    expect(review.gstAmount).toBe('5220.00');
+    expect(review.promo).toBeNull();
+    expect(review.total).toBe('34220.00');
+  });
+
+  it('PC-1: a promo code on the booking is priced off media + fees at every review, capped, and names itself', async () => {
+    const promo = { id: 'promo_1', code: 'FESTIVE20', kind: 'PERCENT', value: new Decimal('20'), maxDiscount: new Decimal('5000'), minSpend: null, isActive: true };
+    // 20% of 28,000 + 1,500 = 5,900 → capped at 5,000; GST-D: the tax on the 5,000 (900.00) comes off with it.
+    const review = await reviewCampaign(campaign({ promoCodeId: 'promo_1', promoCode: promo, discount: new Decimal('1') }));
+    expect(review.discount).toBe('5000.00');
+    expect(review.discountGst).toBe('900.00');
+    expect(review.promo).toEqual({ code: 'FESTIVE20', amount: '5000.00' });
+    expect(review.total).toBe('28910.00');
   });
 
   it('reports what is left of the budget, even when it has gone negative', async () => {
@@ -231,6 +247,8 @@ describe('authorize', () => {
       expect.objectContaining({ status: 'BOOKED', orderId: 'ord_1' })
     );
     expect(result.failedSpots).toEqual([]);
+    // Order fraud screening: the paid booking's orders are re-scored, in the background.
+    expect(announceOrdersPaid).toHaveBeenCalledWith(['ord_1']);
   });
 
   /**
@@ -470,6 +488,8 @@ describe('transitions', () => {
     expect(captureCampaignHold).toHaveBeenCalledWith('hold_1');
     expect(repository.updateSpot).toHaveBeenCalledWith('spt_1', { status: 'LIVE' });
     expect(result.wentLive).toBe(1);
+    // Order fraud screening: the hold is captured, so the money is taken — the orders are re-scored.
+    expect(announceOrdersPaid).toHaveBeenCalledTimes(1);
   });
 
   it('completes a campaign whose end has passed', async () => {

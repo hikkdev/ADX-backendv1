@@ -66,7 +66,7 @@ export type { PaidWithdrawalFilter } from './payouts.repository';
  * rules every other party meets (`requestWithdrawal`, `addMethod`), and
  * prints them in the shapes the finance console already reads.
  */
-export { requestWithdrawal, listMethods, addMethod, walletForUser } from './payouts.service';
+export { requestWithdrawal, listMethods, addMethod, addOwnMethod, walletForUser } from './payouts.service';
 export { shapeMethod, shapeWithdrawal } from './payouts.shape';
 export { addMethodSchema } from './payouts.schema';
 export type { AddMethodInput } from './payouts.schema';
@@ -107,3 +107,7 @@ export type { PayoutRail, PayoutInstruction, PayoutResult, RailSettings } from '
 
 // Lot G (answer 144): the module's feature declarations, loaded with the module so the registry sees them at boot.
 import './features';
+
+/** Account lifecycle (2 Oct 2026): what else happens when a withdrawal is PAID — bootstrap fills it (an exited agent's sign-in ends). */
+export { registerWithdrawalPaidPort } from './withdrawal-paid.port';
+export type { WithdrawalPaidPort } from './withdrawal-paid.port';

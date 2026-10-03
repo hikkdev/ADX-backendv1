@@ -81,8 +81,8 @@ feature('campaigns.analytics', {
   kind: 'FEATURE',
   launch: 'on',
   description:
-    'Campaign analytics: digital interactions per campaign and across the book (Q109).',
-  routes: ['/api/v1/campaigns/analytics', '/api/v1/campaigns/:id/analytics'],
+    'Campaign analytics: digital interactions per campaign and across the book (Q109); the console campaign page\'s Performance card (scans, landing views, CTA presses, enquiries — 2 Oct 2026).',
+  routes: ['/api/v1/campaigns/analytics', '/api/v1/campaigns/:id/analytics', '/api/v1/campaigns/:id/performance'],
 });
 
 feature('campaigns.refunds', {
@@ -95,6 +95,16 @@ feature('campaigns.refunds', {
   routes: ['/api/v1/finance/campaign-refunds'],
 });
 
+feature('campaigns.creative-analysis', {
+  surfaces: ['CONSOLE', 'BACKEND'],
+  owner: 'demand',
+  kind: 'FEATURE',
+  launch: 'on',
+  description:
+    'VA-1 (23 Sep 2026): the vision pass over an artwork — appropriate, relevant, legal, its rating, and whether it is unique on the platform — read by the reviewer before deciding; on demand from the desk, never a decision.',
+  routes: ['/api/v1/campaigns/creatives'],
+});
+
 feature('publisher.spot-insights', {
   surfaces: ['APP_USER', 'BACKEND'],
   owner: 'supply',
@@ -103,4 +113,25 @@ feature('publisher.spot-insights', {
   description:
     'Publishers see the advertiser\'s per-spot figures on their bookings (Q9): kept present, off until there is data.',
   aliases: ['publisher-spot-insights'],
+});
+
+feature('campaigns.reservation-fee', {
+  surfaces: ['APP_USER', 'APP_AGENT', 'WEBSITE', 'CONSOLE', 'BACKEND'],
+  owner: 'demand',
+  kind: 'FEATURE',
+  launch: 'on',
+  description:
+    'RF-1 (the owner, 25 Sep 2026): a big checkout is reserved for 24 hours against a fee of 5% of the total, due within the hour; folded into the checkout when the advertiser goes ahead, 10% kept when they do not. Terms under Settings › booking.reservationFee.',
+  routes: ['/api/v1/campaigns/:id/reserve', '/api/v1/campaigns/:id/reserve/pay'],
+  jobs: ['campaign-lifecycle'],
+});
+
+feature('campaigns.weekly-summary', {
+  surfaces: ['APP_USER', 'WEBSITE', 'BACKEND'],
+  owner: 'demand',
+  kind: 'FEATURE',
+  launch: 'on',
+  description:
+    'WS-1 (DR 12, 25 Sep 2026): the Monday 09:00 IST digest of an advertiser\'s campaigns — the last seven days\' portfolio analytics by email (on by default under the WEEKLY_SUMMARY kind, switchable) and push.',
+  jobs: ['weekly-summary'],
 });

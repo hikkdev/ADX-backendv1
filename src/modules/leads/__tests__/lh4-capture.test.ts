@@ -12,7 +12,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  * name; the body's bounds.
  */
 
-const { repository, agents, identifiers, pricing, uploads, maps } = vi.hoisted(() => ({
+const { repository, agents, identifiers, pricing, uploads, maps, integrations } = vi.hoisted(() => ({
   repository: {
     create: vi.fn(),
     findById: vi.fn(),
@@ -21,6 +21,7 @@ const { repository, agents, identifiers, pricing, uploads, maps } = vi.hoisted((
     findByPhones: vi.fn().mockResolvedValue([]),
     findAccountsByPhones: vi.fn().mockResolvedValue([]),
     findOpenNear: vi.fn().mockResolvedValue([]),
+    findByVehicleNumber: vi.fn().mockResolvedValue(null),
     findSourceByKey: vi.fn().mockResolvedValue({ id: 'lsrc_capture', key: 'capture', kind: 'CAPTURE' }),
     createSource: vi.fn(),
     findForScoring: vi.fn().mockResolvedValue(null),
@@ -30,6 +31,12 @@ const { repository, agents, identifiers, pricing, uploads, maps } = vi.hoisted((
   pricing: { cityKeyFor: vi.fn(async () => ({ cityId: 'city_blr' })), withCityKey: vi.fn(async (x: unknown) => x), citySupport: vi.fn() },
   uploads: { findUploadedFile: vi.fn() },
   maps: { reverseGeocode: vi.fn(async () => ({ formattedAddress: '5th Cross, Koramangala, Bengaluru', latitude: 12.93, longitude: 77.62, placeId: null, city: 'Bengaluru', state: 'Karnataka', postalCode: null })) },
+  /* VH-2: the RC vendor. Unconfigured by default, which is how it answers
+     until Cashfree whitelists us — a capture must survive that. */
+  integrations: {
+    lookupVehicleRc: vi.fn(async () => ({ ok: false as const, code: 'UNCONFIGURED' as const, message: 'not configured' })),
+    normaliseVehicleNumber: (value: string) => value.toUpperCase().replace(/\s+/g, ''),
+  },
 }));
 
 vi.mock('../prisma-leads.repository', async (importOriginal) => {
@@ -43,6 +50,9 @@ vi.mock('../../uploads', () => uploads);
 vi.mock('../../payouts', () => ({ rateFor: vi.fn(async () => '2000.00'), recordIncentiveOnce: vi.fn() }));
 vi.mock('../../visits', () => ({ createVisit: vi.fn() }));
 vi.mock('../../../shared/maps', () => maps);
+vi.mock('../../../shared/integrations', () => integrations);
+// Cashfree Phase 1: the RC check goes through the verification router; the vendor's answer is mocked at that door.
+vi.mock('../../../shared/verification', () => ({ routedVehicleRc: integrations.lookupVehicleRc }));
 vi.mock('../../app-config', () => ({ getPlatformSettings: vi.fn(async () => ({ leads: { scoring: { weights: { fitMax: 30, intentMax: 35, recencyMin: -25, sourceMax: 15, agentFlag: 10 }, recency: { afterDays7: -5, afterDays21: -15, afterDays45: -25 }, thresholds: { hot: 70, warm: 40 }, agentFlagDays: 14, intent: {}, fit: { defaultCategory: 12, categoryBySide: { PUBLISHER: {}, ADVERTISER: {} }, importanceBonus: { KEY: 4, ENTERPRISE: 8 }, localityBonus: 6, localityRadiusM: 1000 } } } })) }));
 
 import { CAPTURE_RADIUS_M, captureLead, captureLeadSchema, placeholderName } from '../capture.service';
@@ -125,5 +135,73 @@ describe('capturing a lead', () => {
     expect(captureLeadSchema.safeParse({ side: 'PUBLISHER', category: 'Wall', latitude: 12.9, longitude: 77.6 }).success).toBe(true);
     expect(captureLeadSchema.safeParse({ side: 'PUBLISHER', category: 'Wall', latitude: 12.9 }).success).toBe(false);
     expect(captureLeadSchema.safeParse({ side: 'PUBLISHER', category: 'Wall', latitude: 12.9, longitude: 77.6, photoFileIds: new Array(7).fill('f') }).success).toBe(false);
+  });
+});
+
+/**
+ * VH-2: a vehicle spotted as an ad spot.
+ *
+ * Pinned: the registration is the identity, because the thing moves — the
+ * thirty-metre dedup that catches the same wall twice cannot catch the same
+ * auto a kilometre away, so a registration already on a lead is refused; the
+ * RC lookup fills the owner's name and what the vehicle is, so the agent
+ * knocks on the window knowing who they are talking to; and an unconfigured
+ * vendor never costs the agent the lead.
+ */
+describe('VH-2: capturing a vehicle', () => {
+  const point = { latitude: 12.9352, longitude: 77.6245 };
+
+  /* `clearAllMocks` clears the calls, not the implementations, so the
+     defaults these tests share are re-set rather than inherited from
+     whichever one ran last. */
+  beforeEach(() => {
+    repository.findByVehicleNumber.mockResolvedValue(null);
+    integrations.lookupVehicleRc.mockResolvedValue({ ok: false, code: 'UNCONFIGURED', message: 'not configured' } as never);
+  });
+
+  it('refuses a registration another lead already holds, wherever the vehicle happens to be', async () => {
+    repository.findByVehicleNumber.mockResolvedValue({ id: 'led_9', displayId: 'LED-0009', businessName: 'Bajaj RE · KA01AB1234', assignedAgentId: 'agt_2' });
+    await expect(
+      captureLead('usr_agent', { side: 'PUBLISHER', category: 'Auto', ...point, photoFileIds: [], vehicleNumber: 'ka 01 ab 1234' }),
+    ).rejects.toMatchObject({ statusCode: 409, details: { reason: 'DUPLICATE_VEHICLE', displayId: 'LED-0009', mine: false } });
+    // Normalised before it is looked up: a plate is read with spaces and in any case.
+    expect(repository.findByVehicleNumber).toHaveBeenCalledWith('KA01AB1234');
+    expect(repository.create).not.toHaveBeenCalled();
+  });
+
+  it('names the lead and its contact from the RC when the lookup answers', async () => {
+    integrations.lookupVehicleRc.mockResolvedValue({
+      ok: true,
+      facts: { registrationNumber: 'KA01AB1234', ownerName: 'Ramesh Kumar', maker: 'Bajaj', model: 'RE', vehicleClass: 'Three Wheeler (Passenger)', rcStatus: 'ACTIVE' },
+      raw: {},
+    } as never);
+    await captureLead('usr_agent', { side: 'PUBLISHER', category: 'Auto', ...point, photoFileIds: [], vehicleNumber: 'KA01AB1234' });
+    expect(repository.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        businessName: 'Bajaj RE · KA01AB1234',
+        contactName: 'Ramesh Kumar',
+        vehicleNumber: 'KA01AB1234',
+        vehicleRcVerifiedAt: expect.any(Date),
+      }),
+    );
+    // The activity line says what was checked and who it belongs to.
+    expect(repository.logActivity).toHaveBeenCalledWith(
+      expect.objectContaining({ note: expect.stringContaining('KA01AB1234 verified, Ramesh Kumar') }),
+    );
+  });
+
+  it('still captures the vehicle when the vendor is unconfigured, and says the RC was not checked', async () => {
+    await captureLead('usr_agent', { side: 'PUBLISHER', category: 'Auto', ...point, photoFileIds: [], vehicleNumber: 'KA01AB1234' });
+    expect(repository.create).toHaveBeenCalledWith(
+      expect.objectContaining({ businessName: 'KA01AB1234', vehicleNumber: 'KA01AB1234', vehicleRcVerifiedAt: null, vehicleRcPayload: null }),
+    );
+    expect(repository.logActivity).toHaveBeenCalledWith(expect.objectContaining({ note: expect.stringContaining('(RC not checked)') }));
+  });
+
+  it('leaves an ordinary wall capture exactly as it was', async () => {
+    await captureLead('usr_agent', { side: 'PUBLISHER', category: 'Wall', ...point, photoFileIds: [] });
+    expect(repository.findByVehicleNumber).not.toHaveBeenCalled();
+    expect(integrations.lookupVehicleRc).not.toHaveBeenCalled();
+    expect(repository.create).toHaveBeenCalledWith(expect.objectContaining({ vehicleNumber: null, vehicleRcPayload: null }));
   });
 });

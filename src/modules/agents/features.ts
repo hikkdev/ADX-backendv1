@@ -55,6 +55,43 @@ feature('agent.milestones', {
   routes: ['/api/v1/milestones', '/api/v1/agents/:id/milestones'],
 });
 
+/**
+ * CP-1 (23 Sep 2026): what an agent is paid and how much of their work it
+ * covers. The salary covers a daily quota of onboardings; past it, an
+ * onboarding pays the planned unit cost plus an uplift instead of the flat
+ * commission. Effective-dated, audited, and ADMIN-only.
+ */
+feature('agent.compensation', {
+  surfaces: ['CONSOLE', 'BACKEND'],
+  owner: 'agent-experience',
+  kind: 'FEATURE',
+  launch: 'on',
+  description:
+    "An agent's salary, the daily onboarding quota it covers, and the commission an onboarding past it pays.",
+  routes: ['/api/v1/agents/:id/compensation', '/api/v1/agents/:id/standing', '/api/v1/agents/compensation/defaults'],
+});
+
+feature('agent.cost-per-onboarding', {
+  surfaces: ['CONSOLE'],
+  owner: 'agent-experience',
+  kind: 'FEATURE',
+  launch: 'on',
+  description:
+    'What an onboarding cost in agent money — salary committed plus the rewards that buy an account, over the accounts agents actually brought. Read per side and blended, on the three section overviews and on the agent.',
+  // The overviews are one route with the section as a parameter, so the prefix is the claim; the per-agent figure rides the standing read.
+  routes: ['/api/v1/section-overviews', '/api/v1/agents/:id/standing'],
+});
+
+feature('agent.quota-tracker', {
+  surfaces: ['APP_AGENT', 'CONSOLE'],
+  owner: 'agent-experience',
+  kind: 'FEATURE',
+  launch: 'on',
+  description:
+    "The day's quota on the milestone board — a tracker, not a milestone: the salary pays it, so there is nothing to claim, and a milestone whose target sits inside the quota is flagged as paid twice.",
+  routes: ['/api/v1/milestones', '/api/v1/agents/:id/milestones'],
+});
+
 feature('agent.work-preferences', {
   surfaces: ['APP_AGENT'],
   owner: 'agent-experience',

@@ -12,6 +12,19 @@
  * Model types should be imported with `import type`, which erases at compile
  * time and costs nothing at runtime.
  */
-export { closeDatabase, prisma } from './prisma';
+export {
+  closeDatabase,
+  prisma,
+  GLOBAL_OMIT,
+  USER_CREDENTIALS,
+  ORDER_RISK_COLUMNS,
+  ORDER_RISK_KEYS,
+  LISTING_PRIVATE_COLUMNS,
+  type AppPrismaClient,
+  type AppTransactionClient,
+  type ListingRead,
+  type OrderRead,
+  type UserRead,
+} from './prisma';
 export { pingDatabase } from './ping';
 export * from '../../generated/prisma';

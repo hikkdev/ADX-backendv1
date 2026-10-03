@@ -60,7 +60,7 @@ const user = (over: Record<string, unknown> = {}) =>
     id: 'usr_1',
     mobile: '+919845012210',
     name: 'Asha',
-    email: 'asha@adx.co',
+    email: 'asha@adx.in',
     avatarUrl: null,
     passwordHash: 'x',
     language: 'en',

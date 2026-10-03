@@ -1,17 +1,42 @@
 import rateLimit from 'express-rate-limit';
 import { RedisStore, type RedisReply } from 'rate-limit-redis';
 import { redis } from '../cache/redis';
+import { RedisUnavailableError, redisKnownDown } from '../cache/redis-outage';
 
 // Counters live in Redis (keyed by IP, namespaced per prefix) rather than
 // in-process memory, so limits hold across instances instead of resetting
 // per-process or being divided by however many instances are running.
+//
+// 28 Sep 2026 (Docker was not running; every public read waited ~34 s and
+// answered 500): while the connection is known to be down the store fails at
+// once instead of queuing behind ioredis's retries. The store reloads its
+// script on the next request, so it recovers the moment Redis is back. What
+// happens then is each limiter's choice — `failOpen` below.
 function redisStore(prefix: string): RedisStore {
   return new RedisStore({
     prefix,
     sendCommand: (...args: string[]) =>
-      redis.call(...(args as [string, ...string[]])) as Promise<RedisReply>,
+      redisKnownDown(redis.status)
+        ? Promise.reject(new RedisUnavailableError())
+        : (redis.call(...(args as [string, ...string[]])) as Promise<RedisReply>),
   });
 }
+
+/**
+ * For limiters that cap load rather than guard a secret: with Redis down the
+ * request goes through unlimited (logged by the library) instead of failing.
+ * The sign-in, OTP, email and form limiters do NOT take this — they refuse
+ * with a 503 "try again in a minute" (the error handler) while Redis is down.
+ */
+const failOpen = { passOnStoreError: true } as const;
+
+/**
+ * The platform's error envelope for a refusal — `{ success: false, error: { code, message } }`, the
+ * shape every client reads (29 Sep 2026: these sent `error` as a bare string, which the website, the
+ * apps and the console could not read, so a person who hit a limit was told "Something went wrong.").
+ */
+const refusal = (message: string) => ({ success: false, error: { code: 'RATE_LIMITED', message } }) as const;
+
 
 // Password-based login is brute-forceable (unlike OTP, which requires an SMS
 // to be sent per attempt), so throttle it per-IP.
@@ -20,7 +45,7 @@ export const passwordAuthLimiter = rateLimit({
   limit: 10,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { success: false, error: 'Too many attempts. Please try again later.' },
+  message: refusal('Too many attempts. Please try again later.'),
   store: redisStore('rl:password-auth:'),
 });
 
@@ -35,7 +60,7 @@ export const googleAuthLimiter = rateLimit({
   limit: 20,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { success: false, error: 'Too many attempts. Please try again later.' },
+  message: refusal('Too many attempts. Please try again later.'),
   store: redisStore('rl:google-auth:'),
 });
 
@@ -47,7 +72,7 @@ export const otpRequestLimiter = rateLimit({
   limit: 8,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { success: false, error: 'Too many OTP requests. Please try again later.' },
+  message: refusal('Too many OTP requests. Please try again later.'),
   store: redisStore('rl:otp-request:'),
 });
 
@@ -59,18 +84,19 @@ export const otpVerifyLimiter = rateLimit({
   limit: 30,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { success: false, error: 'Too many attempts. Please try again later.' },
+  message: refusal('Too many attempts. Please try again later.'),
   store: redisStore('rl:otp-verify:'),
 });
 
 // Refresh tokens are 256-bit random values, so brute force isn't realistic —
 // this is just cheap insurance against abuse/DoS on the token endpoints.
 export const refreshLimiter = rateLimit({
+  ...failOpen,
   windowMs: 15 * 60 * 1000,
   limit: 60,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { success: false, error: 'Too many requests. Please try again later.' },
+  message: refusal('Too many requests. Please try again later.'),
   store: redisStore('rl:refresh:'),
 });
 
@@ -88,14 +114,12 @@ export const refreshLimiter = rateLimit({
  * sending a hundred links is the same SMS bill as anybody else.
  */
 export const packageLinkLimiter = rateLimit({
+  ...failOpen,
   windowMs: 60 * 60 * 1000,
   limit: 30,
   standardHeaders: true,
   legacyHeaders: false,
-  message: {
-    success: false,
-    error: 'Too many payment links sent. Please wait before sending another.',
-  },
+  message: refusal('Too many payment links sent. Please wait before sending another.'),
   keyGenerator: (req) => req.user?.sub ?? req.ip ?? 'unknown',
   store: redisStore('rl:package-link:'),
 });
@@ -118,14 +142,12 @@ export const packageLinkLimiter = rateLimit({
  * a dozen times while they think, and a legitimate session must never hit this.
  */
 export const marketProbeLimiter = rateLimit({
+  ...failOpen,
   windowMs: 15 * 60 * 1000,
   limit: 120,
   standardHeaders: true,
   legacyHeaders: false,
-  message: {
-    success: false,
-    error: 'Too many pricing lookups. Please wait a few minutes and try again.',
-  },
+  message: refusal('Too many pricing lookups. Please wait a few minutes and try again.'),
   // `req.user` is set by authenticate(), which runs before this on the pricing
   // router. The IP fallback covers the impossible case rather than trusting it.
   keyGenerator: (req) => req.user?.sub ?? req.ip ?? 'unknown',
@@ -143,11 +165,12 @@ export const marketProbeLimiter = rateLimit({
  * a handful of things, never sixty a minute.
  */
 export const trackingInteractionLimiter = rateLimit({
+  ...failOpen,
   windowMs: 60 * 1000,
   limit: 60,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { success: false, error: 'Too many events. Please slow down.' },
+  message: refusal('Too many events. Please slow down.'),
   store: redisStore('rl:tracking-interaction:'),
 });
 
@@ -160,6 +183,7 @@ export const trackingInteractionLimiter = rateLimit({
  * scraper. A person opens a handful of shared links, never two a second.
  */
 export const spotPageLimiter = rateLimit({
+  ...failOpen,
   windowMs: 60 * 1000,
   limit: 60,
   standardHeaders: true,
@@ -169,16 +193,34 @@ export const spotPageLimiter = rateLimit({
 });
 
 /**
+ * LD-1 (3 Oct 2026): `POST /listings/:displayIdOrId/view` — the spot-page
+ * view count. Public, so keyed by the signed-in user or else the address.
+ * A person opens a few spots a minute; the cap is a script inflating a
+ * spot's numbers (which the per-visitor de-duplication already blunts).
+ */
+export const spotViewLimiter = rateLimit({
+  ...failOpen,
+  windowMs: 60 * 1000,
+  limit: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: refusal('Too many requests. Please slow down.'),
+  keyGenerator: (req) => req.user?.sub ?? req.ip ?? 'unknown',
+  store: redisStore('rl:spot-view:'),
+});
+
+/**
  * Lot G (Q130): the public status page — `GET /status` and the confirm and
  * unsubscribe links. Read by anyone, so keyed by IP; a person refreshes a
  * status page a few times during an outage, never sixty times a minute.
  */
 export const statusPageLimiter = rateLimit({
+  ...failOpen,
   windowMs: 60 * 1000,
   limit: 60,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { success: false, error: 'Too many requests. Please slow down.' },
+  message: refusal('Too many requests. Please slow down.'),
   store: redisStore('rl:status-page:'),
 });
 
@@ -192,6 +234,43 @@ export const statusSubscribeLimiter = rateLimit({
   limit: 5,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { success: false, error: 'Too many subscription requests. Please try again later.' },
+  message: refusal('Too many subscription requests. Please try again later.'),
   store: redisStore('rl:status-subscribe:'),
+});
+
+/**
+ * 26 Sep 2026: the website's signed-out reads beyond browse — the geography
+ * catalogue and the city resolver (`/app/geo/cities`, `/app/geo/resolve`),
+ * a publisher's public card (`/publishers/:id/public`) and the live text of
+ * a platform agreement (`/legal/agreements/:kind`). Public data only, keyed
+ * by IP like the spot page: a visitor reads a handful, a scraper thousands.
+ * A signed-in caller is keyed by their user, so one office NAT does not
+ * spend a colleague's budget.
+ */
+export const publicReadLimiter = rateLimit({
+  ...failOpen,
+  windowMs: 60 * 1000,
+  limit: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: refusal('Too many requests. Please slow down.'),
+  keyGenerator: (req) => req.user?.sub ?? req.ip ?? 'unknown',
+  store: redisStore('rl:public-read:'),
+});
+
+/**
+ * FM-1 (27 Sep 2026): an answer to a PUBLIC form — `POST
+ * /app/forms/:key/submissions`. Written by anyone with no token, behind the
+ * captcha where one is configured, so keyed by IP. The cost being capped is
+ * a script filling a form that makes leads or raises tickets: a person
+ * answers a form once or twice, never ten times in ten minutes. A SIGNED_IN
+ * form does not pass here — its guard is the token.
+ */
+export const formSubmitLimiter = rateLimit({
+  windowMs: 10 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: refusal('Too many answers from this connection. Please try again later.'),
+  store: redisStore('rl:form-submit:'),
 });

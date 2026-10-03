@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { auditDiff, logActivity } from '../../shared/audit';
+import { assertAdultForOrders } from '../../shared/age-gate';
 import { ApiError } from '../../shared/errors';
 import { findAgentProfile, requireAgentProfile } from '../agents';
 import { orderError } from './orders.errors';
@@ -33,10 +34,14 @@ import {
   slotTimeSchema,
 } from './orders.schema';
 import { placeOrder } from './placement/placement.service';
+import { orderDetailFor, withoutCompletionCode, type OrderViewer } from './orders.redact';
+import { getOrderHold, getOrderRiskView } from './risk/order-risk.service';
 import {
   getAllOrders,
   getBookingCalendar,
   getOrderById,
+  getOrderCompletionCode,
+  getOrderPlacedBy,
   getOrderSummary,
   getOrdersForAdvertiser,
   getOrdersForAgent,
@@ -115,6 +120,8 @@ async function attempt<T>(work: Promise<T>): Promise<T> {
 export async function placeOrderHandler(req: Request, res: Response): Promise<void> {
   const parsed = placeOrderSchema.safeParse(req.body);
   if (!parsed.success) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid request', parsed.error.flatten());
+  // AGE-1 (the owner, 29 Sep 2026): the person placing the order is 18 or over, with a date of birth on file.
+  await assertAdultForOrders(req.user!.sub);
 
   await respond(
     res,
@@ -210,14 +217,33 @@ export async function getMyOrdersHandler(req: Request, res: Response): Promise<v
 export async function getOrderByIdHandler(req: Request, res: Response): Promise<void> {
   const order = await getOrderById(orderId(req));
   if (!order) throw new ApiError(404, 'NOT_FOUND', 'Order not found');
-  if (!(await canReadOrder(order as unknown as ReadableOrder, req.user!))) {
+  const viewer = await orderViewer(order as unknown as ReadableOrder, req.user!);
+  if (!viewer) {
     // 403 rather than 404, matching orders.errors' NOT_YOUR_ORDER: the id is a
     // cuid nobody guesses, so admitting it exists costs nothing, and a
     // wrong-account bug in an app is far easier to find as "no access" than
     // as "not found".
     throw new ApiError(403, 'FORBIDDEN', 'You do not have access to this order');
   }
-  res.json({ success: true, data: order });
+  // 26 Sep 2026: the completion code is support's to read back, nobody else's.
+  // PB-1: and "Placed by" (the person and the business) is the console's alone.
+  // 2 Oct 2026: the code itself is off the aggregate (the global omit) and read
+  // back here for ADX alone; `withoutCompletionCode` stays as the belt.
+  if (viewer.admin) {
+    // Order fraud screening: the score, the signals, the review and the hold — ADX's alone, read on their own like the code.
+    const [placedBy, completionOtpPlain, risk] = await Promise.all([
+      getOrderPlacedBy(String(order.advertiserId)),
+      getOrderCompletionCode(String(order.id)),
+      getOrderRiskView(String(order.id)),
+    ]);
+    res.json({ success: true, data: { ...withoutCompletionCode(order), ...(risk ?? {}), completionOtpPlain, placedBy } });
+    return;
+  }
+  // 2 Oct 2026: and each party sees the others' names, plus only the phone
+  // numbers its own screens dial — see `orderDetailFor`. Order fraud
+  // screening: and, on a held order, `reviewNotice` — the neutral line.
+  const hold = await getOrderHold(String(order.id));
+  res.json({ success: true, data: orderDetailFor(withoutCompletionCode(order), viewer, hold) });
 }
 
 /** The slice of the detail aggregate that decides who may read it. */
@@ -238,21 +264,22 @@ type ReadableOrder = {
  * and address included. The detail aggregate is the widest read in the
  * codebase, which is exactly why it needed the narrowest gate.
  */
-async function canReadOrder(
+async function orderViewer(
   order: ReadableOrder,
   user: { sub: string; roles: string[] },
-): Promise<boolean> {
-  if (user.roles.includes('ADMIN')) return true;
-  if (order.advertiserId === user.sub) return true;
-  if (order.listing?.publisher?.userId === user.sub) return true;
+): Promise<OrderViewer | null> {
+  if (user.roles.includes('ADMIN')) return { admin: true, advertiser: false, publisher: false, agent: false };
+  const advertiser = order.advertiserId === user.sub;
+  const publisher = order.listing?.publisher?.userId === user.sub;
 
+  // 2 Oct 2026: every relationship is settled, not the first that admits —
+  // what the answer carries depends on which of them the caller holds.
+  let agent = false;
   if (user.roles.includes('AGENT_PUBLISHER') || user.roles.includes('AGENT_ADVERTISER')) {
-    const agent = await findAgentProfile(user.sub);
-    if (!agent) return false;
-    if (order.agentId === agent.id) return true;
-    if (order.agentAssignments?.some((assignment) => assignment.agentId === agent.id)) return true;
+    const profile = await findAgentProfile(user.sub);
+    agent = !!profile && (order.agentId === profile.id || !!order.agentAssignments?.some((assignment) => assignment.agentId === profile.id));
   }
-  return false;
+  return advertiser || publisher || agent ? { admin: false, advertiser, publisher, agent } : null;
 }
 
 // ── Publisher response and slot negotiation ────────────────────────────────
@@ -394,8 +421,8 @@ export async function selfInstallCollectPrintsHandler(req: Request, res: Respons
 }
 
 export async function selfInstallCaptureConditionHandler(req: Request, res: Response): Promise<void> {
-  const { photoUrls } = photoUrlsSchema.parse(req.body);
-  await respond(res, selfInstallCaptureCondition(orderId(req), req.user!.sub, photoUrls));
+  const { photoUrls, note } = photoUrlsSchema.parse(req.body);
+  await respond(res, selfInstallCaptureCondition(orderId(req), req.user!.sub, photoUrls, note));
 }
 
 export async function selfInstallCheckInHandler(req: Request, res: Response): Promise<void> {
@@ -406,8 +433,8 @@ export async function selfInstallCheckInHandler(req: Request, res: Response): Pr
 }
 
 export async function selfInstallCaptureInstallationHandler(req: Request, res: Response): Promise<void> {
-  const { photoUrl } = photoUrlSchema.parse(req.body);
-  await respond(res, selfInstallCaptureInstallation(orderId(req), req.user!.sub, photoUrl));
+  const { photoUrl, note } = photoUrlSchema.parse(req.body);
+  await respond(res, selfInstallCaptureInstallation(orderId(req), req.user!.sub, photoUrl, note));
 }
 
 // ── Admin ──────────────────────────────────────────────────────────────────

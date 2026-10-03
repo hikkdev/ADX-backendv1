@@ -4,6 +4,7 @@ import { ApiError } from './api-error';
 import { reportError } from './error-sink';
 import { recordServerError } from './error-rate-alert';
 import { logger } from '../logging/logger';
+import { isRedisOutage } from '../cache/redis-outage';
 
 /**
  * A 5xx is logged, then handed to the configured sink and counted towards the
@@ -84,6 +85,19 @@ export function errorHandler(
         ...(err.details === undefined ? {} : { details: err.details }),
         requestId,
       },
+    });
+    return;
+  }
+
+  // 28 Sep 2026: Redis is down (a fail-closed rate limiter, a lock) — a 503 the
+  // client can retry, not a 500, and not counted as a server error (that count
+  // lives in Redis too).
+  if (isRedisOutage(err)) {
+    logger.warn('Request refused while Redis is unavailable', { requestId, method: req.method, path: req.path });
+    res.setHeader('Retry-After', '30');
+    res.status(503).json({
+      success: false,
+      error: { code: 'SERVICE_UNAVAILABLE', message: 'This is briefly unavailable — please try again in a minute.', requestId },
     });
     return;
   }

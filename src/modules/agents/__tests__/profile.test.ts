@@ -140,3 +140,24 @@ describe('the city key on a patch (Lot X-B)', () => {
     expect(repository.update).toHaveBeenLastCalledWith('agt_1', { status: 'ON_LEAVE' });
   });
 });
+
+describe('account lifecycle (2 Oct 2026): status changes into and out of a suspension go through Suspend / Reinstate', () => {
+  it('refuses SUSPENDED with a sentence pointing to Suspend, writing nothing', async () => {
+    await expect(updateAgent('agt_1', { status: 'SUSPENDED' })).rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining('Use Suspend') });
+    expect(repository.update).not.toHaveBeenCalled();
+  });
+
+  it('refuses any status on a suspended agent, pointing to Reinstate', async () => {
+    repository.findById.mockResolvedValue({ ...profile, status: 'SUSPENDED', suspensionScopes: ['BLOCK_NEW'] });
+    await expect(updateAgent('agt_1', { status: 'ACTIVE' })).rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining('Reinstate') });
+    expect(repository.update).not.toHaveBeenCalled();
+  });
+
+  it('still moves a working agent between working and on leave, and leaves a suspended agent’s other fields editable', async () => {
+    await updateAgent('agt_1', { status: 'ON_LEAVE' });
+    expect(repository.update).toHaveBeenCalledWith('agt_1', { status: 'ON_LEAVE' });
+    repository.findById.mockResolvedValue({ ...profile, status: 'SUSPENDED', suspensionScopes: ['BLOCK_NEW'] });
+    await updateAgent('agt_1', { territory: 'North' });
+    expect(repository.update).toHaveBeenLastCalledWith('agt_1', { territory: 'North' });
+  });
+});

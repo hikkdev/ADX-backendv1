@@ -16,6 +16,6 @@ feature('system.integrations', {
   kind: 'FEATURE',
   launch: 'on',
   description:
-    'The integrations row: SMS rails, email, HRMS, work tool, KYC provider mode, maps, audience vendors, the QR engine (QR-1: Local or GenQR, with its connection test) — secrets masked on the way out.',
+    'The integrations row: SMS rails, email, HRMS, work tool, KYC provider mode, maps, audience vendors, the QR engine (QR-1: Local or GenQR, with its connection test), Cashfree Secure ID and the verification routing (Cashfree Phase 1) — secrets sealed at rest under INTEGRATIONS_ENCRYPTION_KEY and masked on the way out.',
   routes: ['/api/v1/integrations'],
 });

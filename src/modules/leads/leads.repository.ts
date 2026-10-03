@@ -292,6 +292,8 @@ export interface LeadsRepository {
 
   /* ── LH3: feeds, inbound, referrals ────────────────────────────── */
 
+  /** VH-2: the lead already holding this registration, if any — a vehicle's identity is its number, not its position. */
+  findByVehicleNumber(vehicleNumber: string): Promise<{ id: string; displayId: string | null; businessName: string; assignedAgentId: string | null } | null>;
   /** Leads already holding any of these provider keys. */
   findByExternalKeys(keys: string[]): Promise<{ id: string; externalKey: string | null }[]>;
   /** Leads created for the source since `since` — the daily quota's count. */
@@ -359,6 +361,8 @@ export interface LeadsRepository {
   lastLapsedClaim(leadId: string, agentId: string): Promise<Date | null>;
   /** Open leads the agent holds (assigned or claimed) — the cap's count. */
   countOpenFor(agentId: string): Promise<number>;
+  /** Account lifecycle (2 Oct 2026): the open leads an agent holds — assigned or claimed — for the release a suspension makes. */
+  findOpenHeldBy(agentId: string): Promise<{ id: string }[]>;
 
   /* ── LH6: the outreach hub's two reads off other tables ───────── */
 

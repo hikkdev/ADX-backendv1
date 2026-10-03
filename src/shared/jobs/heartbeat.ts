@@ -1,5 +1,6 @@
 import { redis } from '../cache';
 import { logger } from '../logging';
+import { warnThrottled } from '../logging/throttled';
 
 /**
  * Job heartbeats — Lot E.
@@ -22,6 +23,8 @@ export const JOB_NAMES = [
   'campaign-lifecycle',
   'earnings-accrual',
   'monthly-statements',
+  // WS-1 (DR 12): the Monday-morning campaign digest.
+  'weekly-summary',
   'kyc-provider-probe',
   'kyc-purge',
   'retention',
@@ -62,6 +65,16 @@ export const JOB_NAMES = [
   'work-due',
   // AG-4: every six hours — an agent's papers with a date: reminders at 30 and 7 days, EXPIRED on the day, a working agent held.
   'agent-document-expiry',
+  // LM-1: every five minutes — paid placements go live, end, lapse unpaid after an hour, or are refunded unreviewed.
+  'promotions',
+  // ST-3: hourly tick, weekly run — unreferenced files marked; removal only when Settings › Storage turns it on.
+  'storage-sweep',
+  // Cashfree Phase 1: every two minutes — pending verification attempts (DigiLocker, the async bank check) read back, overdue sessions expired.
+  'verification-status-sweep',
+  // HC-1: hourly tick, weekly run (Monday 03:00 IST) — the public holiday calendar read into the Holidays page.
+  'holiday-calendar',
+  // Order fraud screening (2 Oct 2026): hourly tick, daily run — every open order re-scored.
+  'order-risk-rescreen',
 ] as const;
 
 export type JobName = (typeof JOB_NAMES)[number];
@@ -69,7 +82,7 @@ export type JobName = (typeof JOB_NAMES)[number];
 export function recordHeartbeat(job: JobName | string, at = new Date()): void {
   void redis
     .hset(HEARTBEAT_KEY, job, at.toISOString())
-    .catch((err: unknown) => logger.warn('Job heartbeat not recorded', { job, reason: String(err) }));
+    .catch((err: unknown) => warnThrottled('Job heartbeat not recorded', { job, reason: String(err) }));
 }
 
 export type Heartbeat = { job: string; lastTickAt: string | null };

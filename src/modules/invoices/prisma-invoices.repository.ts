@@ -111,6 +111,15 @@ export const prismaInvoicesRepository: InvoicesRepository = {
     return prisma.invoice.findFirst({ where: { packageSaleId, ...live }, include: withLines });
   },
 
+  findLiveInvoiceForAdvertising(advertiserId, reference) {
+    // LM-1: a paid placement has no column of its own on the invoice — its
+    // reference (ADB-…) rides in the one line's description, and is unique.
+    return prisma.invoice.findFirst({
+      where: { advertiserId, campaignId: null, packageSaleId: null, ...live, lines: { some: { description: { contains: `(${reference})` } } } },
+      include: withLines,
+    });
+  },
+
   findCreditNoteFor(invoiceId) {
     return prisma.invoice.findFirst({
       where: { voidsInvoiceId: invoiceId, kind: 'CREDIT_NOTE' },

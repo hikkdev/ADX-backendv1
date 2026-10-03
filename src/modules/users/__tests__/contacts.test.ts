@@ -68,7 +68,7 @@ const user = (over: Record<string, unknown> = {}) => ({
   id: 'usr_1',
   mobile: '+919845012210',
   mobileVerifiedAt: NOW,
-  email: 'asha@adx.co',
+  email: 'asha@adx.in',
   name: 'Asha',
   isActive: true,
   roles: [{ role: 'PUBLISHER' }],
@@ -129,7 +129,7 @@ describe('the read', () => {
       { id: 'adm_1', name: 'Ops', mobile: '+919999999999' },
     ]);
     const view = await listContacts('usr_1');
-    expect(view.primary).toEqual({ mobile: '+919845012210', mobileVerifiedAt: NOW, email: 'asha@adx.co', emailVerified: true });
+    expect(view.primary).toEqual({ mobile: '+919845012210', mobileVerifiedAt: NOW, email: 'asha@adx.in', emailVerified: true });
     expect(view.contacts).toHaveLength(2);
     expect(view.contacts[1]).toMatchObject({ id: 'ct_2', kind: 'EMAIL', value: 'asha@work.co', addedBy: { id: 'adm_1', name: 'Ops' } });
     expect(repository.findNamesByIds).toHaveBeenCalledTimes(1);
@@ -273,22 +273,22 @@ describe('make-primary', () => {
     repository.findContact.mockResolvedValue(contact({ kind: 'EMAIL', value: 'asha@work.co', verifiedAt: NOW }));
     const change = await makePrimary('usr_1', 'usr_1', 'ct_1', { allowUnverified: false, action: 'PRIMARY_CONTACT_CHANGED' });
     // Lot K2 (Lot K verifier): hasProvenEmail vouched for the old address, so it drops down verified.
-    expect(auth.hasProvenEmail).toHaveBeenCalledWith('usr_1', 'asha@adx.co');
-    expect(repository.swapPrimary).toHaveBeenCalledWith(expect.objectContaining({ previous: { value: 'asha@adx.co', verifiedAt: expect.any(Date) }, actorId: 'usr_1' }));
+    expect(auth.hasProvenEmail).toHaveBeenCalledWith('usr_1', 'asha@adx.in');
+    expect(repository.swapPrimary).toHaveBeenCalledWith(expect.objectContaining({ previous: { value: 'asha@adx.in', verifiedAt: expect.any(Date) }, actorId: 'usr_1' }));
     expect(auth.completeMobileChange).not.toHaveBeenCalled();
     expect(audit.logActivity).toHaveBeenCalledWith(
       'usr_1',
       'PRIMARY_CONTACT_CHANGED',
-      expect.objectContaining({ diff: { before: { email: 'asha@adx.co' }, after: { email: 'asha@work.co' } }, metadata: expect.objectContaining({ verified: 'VERIFIED' }) }),
+      expect.objectContaining({ diff: { before: { email: 'asha@adx.in' }, after: { email: 'asha@work.co' } }, metadata: expect.objectContaining({ verified: 'VERIFIED' }) }),
     );
-    expect(change).toMatchObject({ kind: 'EMAIL', before: 'asha@adx.co', after: 'asha@work.co' });
+    expect(change).toMatchObject({ kind: 'EMAIL', before: 'asha@adx.in', after: 'asha@work.co' });
   });
 
   it('Lot K2: an old primary email that was never proved drops down UNVERIFIED — moving it is not proof', async () => {
     auth.hasProvenEmail.mockResolvedValue(false);
     repository.findContact.mockResolvedValue(contact({ kind: 'EMAIL', value: 'asha@work.co', verifiedAt: NOW }));
     await makePrimary('usr_1', 'usr_1', 'ct_1', { allowUnverified: false, action: 'PRIMARY_CONTACT_CHANGED' });
-    expect(repository.swapPrimary).toHaveBeenCalledWith(expect.objectContaining({ previous: { value: 'asha@adx.co', verifiedAt: null } }));
+    expect(repository.swapPrimary).toHaveBeenCalledWith(expect.objectContaining({ previous: { value: 'asha@adx.in', verifiedAt: null } }));
   });
 
   it("Lot K2: the desk mount refuses the acting admin's own id — an admin proves their own contact like everyone else", async () => {

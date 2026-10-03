@@ -40,7 +40,7 @@ vi.mock('../../../../shared/audit', () => audit);
 vi.mock('../../../app-config', () => ({ getPlatformSettings: vi.fn(async () => ({ kyc: { reviewSlaHours: 48 } })), getFlow: vi.fn(async () => null) }));
 
 import { EMPLOYEE_KYC_DEEP_LINK, listEmployeeKycs, requestEmployeeKyc } from '../employee-kyc.service';
-import { handleEmployeeDigioWebhook } from '../employee-digio.service';
+import { handleEmployeeDigioWebhook, initiateEmployeeDigioKyc } from '../employee-digio.service';
 import { listEmployeeKycsHandler } from '../employee-kyc.controller';
 
 const NOW = new Date('2026-09-14T22:00:00.000Z');
@@ -83,7 +83,8 @@ describe('GET /employee-kyc — every employee', () => {
 describe('POST /employee-kyc/:employeeId/request — the one click', () => {
   it('DIGIO: opens the session with the employee’s own contact and the adx-emp- reference, stamps, tells, audits EMPLOYEE_KYC_REQUESTED', async () => {
     const result = await requestEmployeeKyc('emp_1', { channel: 'DIGIO' }, 'usr_hr', undefined, NOW);
-    expect(digio.requestDigioKyc).toHaveBeenCalledWith({ referenceId: `adx-emp-emp_1-${NOW.getTime()}`, customerName: 'Priya', customerEmail: 'priya@adx.in', customerMobile: '+919812340002' });
+    // Phase D: no employment type on the row reads as full time.
+    expect(digio.requestDigioKyc).toHaveBeenCalledWith({ party: 'EMPLOYEE', workflowKey: 'EMPLOYEE.FULL_TIME', referenceId: `adx-emp-emp_1-${NOW.getTime()}`, customerName: 'Priya', customerEmail: 'priya@adx.in', customerMobile: '+919812340002' });
     expect(repository.upsertDigio).toHaveBeenCalledWith('emp_1', expect.objectContaining({ method: 'DIGIO', digioRequestId: 'dg_emp_1', digioStatus: 'pending' }));
     expect(repository.requestKyc).toHaveBeenCalledWith('emp_1', { requestedById: 'usr_hr', requestedChannel: 'DIGIO', at: NOW });
     expect(notifications.notify).toHaveBeenCalledWith('KYC_REQUESTED', 'usr_emp', { partyName: 'Priya', channel: 'Digio', note: '', deepLink: EMPLOYEE_KYC_DEEP_LINK }, expect.objectContaining({ inApp: expect.objectContaining({ relatedId: 'ekyc_1' }) }));
@@ -109,5 +110,24 @@ describe('Digio’s answer on the employee’s record', () => {
     expect(notifications.notify).toHaveBeenCalledWith('KYC_DECISION', 'usr_emp', expect.objectContaining({ partyName: 'Priya', decision: 'verified' }), expect.anything());
     repository.findByDigioRequestId.mockResolvedValue(null);
     expect(await handleEmployeeDigioWebhook({ id: 'dg_other', customer_identifier: 'x', status: 'approved' })).toBe(false);
+  });
+
+  it('Phase D: a pending or unknown status never moves a decided record back', async () => {
+    for (const status of ['VERIFIED', 'REJECTED']) {
+      repository.findByDigioRequestId.mockResolvedValue({ id: 'ekyc_1', employeeId: 'emp_1', status, submittedAt: NOW, employee: slice });
+      for (const sent of ['pending', 'approval_pending']) expect(await handleEmployeeDigioWebhook({ id: 'dg_emp_1', status: sent }, NOW)).toBe(true);
+    }
+    expect(repository.applyDigioWebhook).not.toHaveBeenCalled();
+  });
+});
+
+describe('Phase D: the workflow by employment type', () => {
+  it('full time and part time run EMPLOYEE.FULL_TIME; contract and intern run EMPLOYEE.INTERN_CONTRACT', async () => {
+    const keys: Record<string, string> = {};
+    for (const employmentType of ['FULL_TIME', 'PART_TIME', 'CONTRACT', 'INTERN'] as const) {
+      await initiateEmployeeDigioKyc({ ...employee, employmentType }, NOW);
+      keys[employmentType] = (digio.requestDigioKyc.mock.lastCall![0] as { workflowKey: string }).workflowKey;
+    }
+    expect(keys).toEqual({ FULL_TIME: 'EMPLOYEE.FULL_TIME', PART_TIME: 'EMPLOYEE.FULL_TIME', CONTRACT: 'EMPLOYEE.INTERN_CONTRACT', INTERN: 'EMPLOYEE.INTERN_CONTRACT' });
   });
 });

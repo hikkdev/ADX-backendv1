@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { asyncHandler } from '../../shared/http';
-import { authenticate, requireRole } from '../../shared/auth';
+import { authenticate, requireRole, requirePermission } from '../../shared/auth';
 import {
   catalogueHandler,
   onboardingBoardHandler,
@@ -28,14 +28,14 @@ export const reportsRouter = Router();
 reportsRouter.get('/runs/:id/file', signedLinkOrAdmin, asyncHandler(runFileHandler));
 
 reportsRouter.use(authenticate, requireRole('ADMIN'));
-reportsRouter.get('/catalogue', catalogueHandler);
+reportsRouter.get('/catalogue', requirePermission('marketplace.view'), catalogueHandler);
 // QR-14: the team onboarding board, on screen — the same rows the 'onboarding-board' report exports.
-reportsRouter.get('/boards/onboarding', asyncHandler(onboardingBoardHandler));
-reportsRouter.post('/run', asyncHandler(runHandler));
-reportsRouter.get('/runs', asyncHandler(listRunsHandler));
-reportsRouter.get('/runs/:id', asyncHandler(getRunHandler));
-reportsRouter.get('/schedules', asyncHandler(listSchedulesHandler));
-reportsRouter.post('/schedules', asyncHandler(createScheduleHandler));
-reportsRouter.get('/schedules/:id', asyncHandler(getScheduleHandler));
-reportsRouter.patch('/schedules/:id', asyncHandler(updateScheduleHandler));
-reportsRouter.delete('/schedules/:id', asyncHandler(deleteScheduleHandler));
+reportsRouter.get('/boards/onboarding', requirePermission('marketplace.view'), asyncHandler(onboardingBoardHandler));
+reportsRouter.post('/run', requirePermission('marketplace.view'), asyncHandler(runHandler));
+reportsRouter.get('/runs', requirePermission('marketplace.view'), asyncHandler(listRunsHandler));
+reportsRouter.get('/runs/:id', requirePermission('marketplace.view'), asyncHandler(getRunHandler));
+reportsRouter.get('/schedules', requirePermission('marketplace.view'), asyncHandler(listSchedulesHandler));
+reportsRouter.post('/schedules', requirePermission('marketplace.edit'), asyncHandler(createScheduleHandler));
+reportsRouter.get('/schedules/:id', requirePermission('marketplace.view'), asyncHandler(getScheduleHandler));
+reportsRouter.patch('/schedules/:id', requirePermission('marketplace.edit'), asyncHandler(updateScheduleHandler));
+reportsRouter.delete('/schedules/:id', requirePermission('marketplace.delete'), asyncHandler(deleteScheduleHandler));

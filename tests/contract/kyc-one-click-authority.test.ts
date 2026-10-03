@@ -9,10 +9,10 @@ import type { Router } from 'express';
  * What is pinned: every one of the five request routes is guarded by
  * `requirePermission('kyc.edit')` — the catalogue's KYC edit tier — beside
  * `requireRole('ADMIN')`, so a role config granted `kyc.edit` may send a
- * request while the super admin and an admin with no role config pass under
- * the launch rule (`hasPermission`: a token with no `perms` and the ADMIN
- * role holds everything). And the body's channel defaults to DIGIO, so the
- * console's one click needs no body at all.
+ * request, the super admin passes on its full list, and an admin with no
+ * role config is refused (RP-1: a token holds exactly its `perms`, and a
+ * role-less admin has none). And the body's channel defaults to DIGIO, so
+ * the console's one click needs no body at all.
  */
 
 import { advertiserKycRouter, agentKycRouter, employeeKycRouter, kycRequestSchema } from '../../src/modules/kyc';
@@ -51,11 +51,11 @@ describe('the one click is the KYC edit tier on every party', () => {
     expect(guardsOf(printPartnerKycRouter, 'post', '/:id/request')).toContain('requirePermission(kyc.edit)');
   });
 
-  it('a role config granted kyc.edit passes; one without it is refused; the super admin and an admin with no role config pass under the launch rule', () => {
+  it('a role config granted kyc.edit passes; one without it is refused; so is an admin with no role config (RP-1)', () => {
     expect(hasPermission({ roles: ['ADMIN'], perms: ['kyc.view', 'kyc.edit'] }, 'kyc.edit')).toBe(true);
     expect(missingPermissions({ roles: ['ADMIN'], perms: ['kyc.view'] }, ['kyc.edit'])).toEqual(['kyc.edit']);
-    // No `perms` on the token — an admin with no role config, or a token minted before perms existed — holds everything.
-    expect(hasPermission({ roles: ['ADMIN'] }, 'kyc.edit')).toBe(true);
+    // No `perms` on the token — an admin with no role config, or a token minted before perms existed — holds nothing.
+    expect(hasPermission({ roles: ['ADMIN'] }, 'kyc.edit')).toBe(false);
     expect(hasPermission({ roles: ['PUBLISHER'] }, 'kyc.edit')).toBe(false);
   });
 

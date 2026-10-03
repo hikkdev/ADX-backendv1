@@ -13,6 +13,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { repository, notify, listings, agents, agreements } = vi.hoisted(() => ({
   repository: {
+    // Order fraud screening: the hold gates ask; none of these orders is held.
+    findHold: vi.fn(async () => ({ heldAt: null })),
     findById: vi.fn(),
     findPendingAssignment: vi.fn(),
     findAssignments: vi.fn(),

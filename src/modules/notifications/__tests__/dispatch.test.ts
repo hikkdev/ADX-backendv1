@@ -123,7 +123,7 @@ const template = (over: Record<string, unknown> = {}) => ({
 
 const recipient = (over: Record<string, unknown> = {}) => ({
   id: 'usr-1',
-  email: 'Asha.Rao@adx.co',
+  email: 'Asha.Rao@adx.in',
   mobile: '+919845012210',
   emailUnsubscribedAt: null,
   isActive: true,
@@ -137,9 +137,9 @@ const delivery = (over: Record<string, unknown> = {}) => ({
   notificationId: null,
   templateKey: 'package-link',
   channel: 'EMAIL',
-  recipientMasked: 'a***@adx.co',
-  recipientHash: hashRecipient('EMAIL', 'asha.rao@adx.co'),
-  variables: { name: 'Asha', packageName: 'Growth', url: 'https://adx.local/p/t?x=1&y=2' },
+  recipientMasked: 'a***@adx.in',
+  recipientHash: hashRecipient('EMAIL', 'asha.rao@adx.in'),
+  variables: { name: 'Asha', packageName: 'Growth', url: 'https://adx.in/p/t?x=1&y=2' },
   status: 'QUEUED',
   attempts: 0,
   provider: null,
@@ -233,7 +233,7 @@ describe('notify', () => {
     const result = await notify(
       'PACKAGE_LINK',
       'usr-1',
-      { name: 'Asha', packageName: 'Growth', url: 'https://adx.local/p/t' },
+      { name: 'Asha', packageName: 'Growth', url: 'https://adx.in/p/t' },
       { inApp: { type: 'BOOKING', title: 'Plan ready', message: 'Pay here' }, type: 'BOOKING' },
     );
 
@@ -251,14 +251,14 @@ describe('notify', () => {
       notificationId: 'ntf-1',
       templateKey: 'package-link',
       channel: 'EMAIL',
-      recipientMasked: 'a***@adx.co',
-      recipientHash: hashRecipient('EMAIL', 'asha.rao@adx.co'),
-      variables: { name: 'Asha', packageName: 'Growth', url: 'https://adx.local/p/t' },
+      recipientMasked: 'a***@adx.in',
+      recipientHash: hashRecipient('EMAIL', 'asha.rao@adx.in'),
+      variables: { name: 'Asha', packageName: 'Growth', url: 'https://adx.in/p/t' },
     });
     expect(smsRow).toMatchObject({ channel: 'SMS', recipientMasked: '+91 98450 •••10' });
     expect(JSON.stringify(emailRow)).not.toContain('Hello Asha');
     // The address itself is stashed for the sender, not written to the table.
-    expect(redis.redis.set).toHaveBeenCalledWith('comms:addr:dlv-1', 'Asha.Rao@adx.co', 'EX', 48 * 3600);
+    expect(redis.redis.set).toHaveBeenCalledWith('comms:addr:dlv-1', 'Asha.Rao@adx.in', 'EX', 48 * 3600);
     expect(email.sendEmail).not.toHaveBeenCalled();
   });
 
@@ -316,7 +316,7 @@ describe('notify', () => {
 
   it('attempts the send in the request when asked, leaving a failure for the job', async () => {
     comms.findDelivery.mockImplementation(async (id: string) => delivery({ id, channel: id === 'dlv-2' ? 'SMS' : 'EMAIL' }));
-    redis.redis.get.mockImplementation(async (key: string) => (key.endsWith('dlv-2') ? '+919845012210' : 'asha.rao@adx.co'));
+    redis.redis.get.mockImplementation(async (key: string) => (key.endsWith('dlv-2') ? '+919845012210' : 'asha.rao@adx.in'));
     email.sendEmail.mockRejectedValue(new Error('SMTP down'));
     const result = await notify('PACKAGE_LINK', 'usr-1', { url: 'x' }, { immediate: true });
     expect(result.deliveries).toHaveLength(2);
@@ -329,13 +329,13 @@ describe('notify', () => {
 
 describe('the sender', () => {
   it('renders the email from the template and sends by the one door, then records the provider it answered', async () => {
-    redis.redis.get.mockResolvedValue('asha.rao@adx.co');
+    redis.redis.get.mockResolvedValue('asha.rao@adx.in');
     email.sendEmail.mockResolvedValue({ provider: 'RESEND', configured: true, messageId: 're_1', response: '{"id":"re_1"}', previewUrl: null });
     const after = await attemptDelivery('dlv-1');
     expect(email.sendEmail).toHaveBeenCalledWith(
-      'asha.rao@adx.co',
+      'asha.rao@adx.in',
       'Your ADX Growth plan',
-      '<p>Hello Asha, <a href="https://adx.local/p/t?x=1&amp;y=2">pay</a></p>',
+      '<p>Hello Asha, <a href="https://adx.in/p/t?x=1&amp;y=2">pay</a></p>',
     );
     expect(email.sendEmail).toHaveBeenCalledTimes(1);
     expect(after).toMatchObject({ status: 'SENT', provider: 'resend', providerMessageId: 're_1', attempts: 1 });
@@ -348,8 +348,8 @@ describe('the sender', () => {
     expect(sms.sendSms).toHaveBeenCalledWith({
       to: '+919845012210',
       kind: 'PACKAGE_LINK',
-      vars: { name: 'Asha', packageName: 'Growth', url: 'https://adx.local/p/t?x=1&y=2' },
-      body: 'ADX: Growth — https://adx.local/p/t?x=1&y=2',
+      vars: { name: 'Asha', packageName: 'Growth', url: 'https://adx.in/p/t?x=1&y=2' },
+      body: 'ADX: Growth — https://adx.in/p/t?x=1&y=2',
     });
     expect(after).toMatchObject({ status: 'SENT', provider: 'msg91', providerMessageId: 'req-1' });
   });
@@ -372,7 +372,7 @@ describe('the sender', () => {
   });
 
   it('marks an email SKIPPED, not SENT, when no door is configured', async () => {
-    redis.redis.get.mockResolvedValue('asha.rao@adx.co');
+    redis.redis.get.mockResolvedValue('asha.rao@adx.in');
     email.sendEmail.mockResolvedValue({ provider: 'SMTP', configured: false, messageId: null, response: null, previewUrl: null });
     expect(await attemptDelivery('dlv-1')).toMatchObject({ status: 'SKIPPED', provider: 'smtp', lastError: 'EMAIL_UNCONFIGURED' });
     // The door still ran, which is where a developer reads the message locally.
@@ -408,15 +408,15 @@ describe('delivery reports', () => {
 
 describe('the log', () => {
   it('hashes an exact address in q and otherwise matches the mask', () => {
-    expect(deliveryFilterFrom({ q: 'Asha.Rao@adx.co' })).toEqual({ recipientHash: hashRecipient('EMAIL', 'asha.rao@adx.co') });
+    expect(deliveryFilterFrom({ q: 'Asha.Rao@adx.in' })).toEqual({ recipientHash: hashRecipient('EMAIL', 'asha.rao@adx.in') });
     expect(deliveryFilterFrom({ q: '98450 12210' })).toEqual({ recipientHash: hashRecipient('SMS', '9845012210') });
     expect(deliveryFilterFrom({ q: '•••10', channel: 'SMS' })).toEqual({ channel: 'SMS', maskedContains: '•••10' });
   });
 
   it('resends a plain template as a fresh row, and refuses a sensitive one', async () => {
-    redis.redis.get.mockResolvedValue('asha.rao@adx.co');
+    redis.redis.get.mockResolvedValue('asha.rao@adx.in');
     const row = await resendDelivery('dlv-1');
-    expect(comms.createDelivery).toHaveBeenCalledWith(expect.objectContaining({ templateKey: 'package-link', recipientMasked: 'a***@adx.co' }));
+    expect(comms.createDelivery).toHaveBeenCalledWith(expect.objectContaining({ templateKey: 'package-link', recipientMasked: 'a***@adx.in' }));
     expect(email.sendEmail).toHaveBeenCalled();
     expect(row.status).toBe('SENT');
 
@@ -435,7 +435,7 @@ describe('the log', () => {
     comms.listDeliveries.mockResolvedValue({ items: [sensitive, delivery()], total: 2, counts: {} });
     const page = await listDeliveries({}, { page: 1, pageSize: 20 });
     expect(page.items[0]!.variables).toEqual({ code: '•••', minutes: '•••' });
-    expect(page.items[1]!.variables).toEqual({ name: 'Asha', packageName: 'Growth', url: 'https://adx.local/p/t?x=1&y=2' });
+    expect(page.items[1]!.variables).toEqual({ name: 'Asha', packageName: 'Growth', url: 'https://adx.in/p/t?x=1&y=2' });
   });
 
   it('refuses a resend once the variables are purged', async () => {
@@ -659,5 +659,24 @@ describe('unsubscribe', () => {
     comms.markEmailUnsubscribed.mockResolvedValue(true);
     await expect(unsubscribe(token)).resolves.toEqual({ userId: 'usr-1', alreadyUnsubscribed: false });
     await expect(unsubscribe('bad.token')).rejects.toMatchObject({ statusCode: 404 });
+  });
+});
+
+describe('account lifecycle (2 Oct 2026): a closed account gets no in-app row', () => {
+  it('skips the in-app row and every channel for a closed user', async () => {
+    comms.findRecipient.mockResolvedValue(recipient({ isActive: false, closedAt: new Date() }));
+    const result = await notify('PACKAGE_LINK', 'usr-1', { name: 'Asha', packageName: 'Growth', url: 'https://adx.in/p' }, { inApp: { type: 'SYSTEM', title: 'Hello', message: 'There' } });
+    expect(notifRepo.create).not.toHaveBeenCalled();
+    expect(result.notificationId).toBeNull();
+    expect(result.deliveries.every((delivery) => delivery.skipped === 'ACCOUNT_CLOSED')).toBe(true);
+    // The person is read once and reused for the channels.
+    expect(comms.findRecipient).toHaveBeenCalledTimes(1);
+  });
+
+  it('a deactivated (not closed) account still gets its in-app row', async () => {
+    comms.findRecipient.mockResolvedValue(recipient({ isActive: false }));
+    const result = await notify('PACKAGE_LINK', 'usr-1', { name: 'Asha', packageName: 'Growth', url: 'https://adx.in/p' }, { inApp: { type: 'SYSTEM', title: 'Hello', message: 'There' } });
+    expect(notifRepo.create).toHaveBeenCalled();
+    expect(result.notificationId).toBe('ntf-1');
   });
 });

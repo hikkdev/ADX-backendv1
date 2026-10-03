@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import type { z } from 'zod';
+import { assertPartyAdultForOrders } from '../../shared/age-gate';
 import { ApiError } from '../../shared/errors';
 import { money, type Money } from '../../shared/money';
 import { assertNotSuspended, getAdvertiserForUser, payForPackage } from '../advertisers';
@@ -199,7 +200,10 @@ export async function sellHandler(req: Request, res: Response): Promise<void> {
   // themselves. Checked here rather than trusted from the body.
   if (!actor.isAdmin) {
     if (actor.advertiserId && actor.advertiserId === advertiserId) {
-      // Buying for themselves. Nothing more to check.
+      // Buying for themselves — AGE-1: an order, so 18 or over with a date
+      // of birth on file. An agent or ADX raising a sale only sends the link;
+      // the advertiser's own payment asks the same question.
+      await assertPartyAdultForOrders({ kind: 'ADVERTISER', id: advertiserId }, { actorUserId: actor.userId });
     } else if (actor.agentId) {
       const context = await repository.advertiserContext(advertiserId);
       if (!context) throw new ApiError(404, 'NOT_FOUND', 'Advertiser not found');
@@ -292,6 +296,8 @@ export async function payHandler(req: Request, res: Response): Promise<void> {
     res.json({ success: true, data: shape(sale) });
     return;
   }
+  // AGE-1: paying is the order — the advertiser 18 or over, a date of birth on file.
+  await assertPartyAdultForOrders({ kind: 'ADVERTISER', id: sale.advertiserId }, { actorUserId: actor.userId });
   // Lot J2 (7): the rail the policy may have closed, before anything else is asked.
   await assertWalletPaymentOffered();
   // Before the wallet, never after it: markPaid refuses a cancelled or expired
@@ -327,6 +333,8 @@ export async function recordPaymentHandler(req: Request, res: Response): Promise
   if (existing) await assertNotSuspended(existing.advertiserId);
   // Lot D (Q123): money that arrived outside ADX still needs the terms accepted.
   if (existing && existing.status !== 'ACTIVE') await assertSaleTermsAccepted(existing.id);
+  // AGE-1: the desk records the advertiser's order — the advertiser's person is asked, not the admin's.
+  if (existing && existing.status !== 'ACTIVE') await assertPartyAdultForOrders({ kind: 'ADVERTISER', id: existing.advertiserId }, { actorUserId: req.user?.sub ?? null });
 
   const sale = await markPaid(req.params['id'] as string, {
     method: body.method,

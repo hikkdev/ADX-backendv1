@@ -49,7 +49,11 @@ describe('the seeded listing wizard', () => {
     expect(names[0]).toBe('select-category');
     expect(names).toContain('indoor/venue');
     expect(names).toContain('media/review');
-    expect(names).toHaveLength(1 + 4 * 8);
+    // LF-2 (28 Sep 2026): audience evidence, booking terms and the rate card became screens of their own — eleven per branch.
+    expect(names).toContain('transit/audience');
+    expect(names).toContain('outdoor/terms');
+    expect(names).toContain('indoor/rate-card');
+    expect(names).toHaveLength(1 + 4 * 11);
   });
 });
 

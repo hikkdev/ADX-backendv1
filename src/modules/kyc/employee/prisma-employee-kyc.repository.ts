@@ -1,6 +1,8 @@
 import { Prisma, prisma } from '../../../shared/database';
 import type { EmployeeKyc, KycStatus } from '../../../shared/database';
 import { KYC_QUEUE_STATES, deriveKycState, kycPartyStateWhere, type KycQueueState } from '../../../shared/kyc-state';
+import { accountStateOf, workingEmployeeWhere } from '../../../shared/party-status';
+import { PROVIDER_FAILED_STATUS } from '../../../shared/verification';
 import type {
   EmployeeDigioFields,
   EmployeeDigioUpdate,
@@ -19,12 +21,21 @@ const employeeSelect = {
     displayId: true,
     department: true,
     designation: true,
+    // Phase D follow-up (1 Oct 2026): which Digio workflow the employee is on is read off this — the console no longer joins it from the HR roster.
+    employmentType: true,
     createdAt: true,
     user: { select: { name: true, mobile: true, email: true } },
   },
 } as const;
 
 const withEmployee = { employee: employeeSelect } as const;
+
+/** Account lifecycle: what the queue reads beside the slice to say the row's `accountState` — stripped before the row goes out. */
+const queueSelect = {
+  ...employeeSelect.select,
+  isActive: true,
+  user: { select: { name: true, mobile: true, email: true, isActive: true, closedAt: true } },
+} as const;
 
 /* ── N3-B: the queue is every Employee ───────────────────────────────────── */
 
@@ -48,6 +59,8 @@ function searchWhere(q: string | undefined): Prisma.EmployeeWhereInput {
 /** Every employee (there is no mirror column on the row), narrowed by state and the search box. */
 function partyWhere(filter: EmployeeKycFilter): Prisma.EmployeeWhereInput {
   const parts: Prisma.EmployeeWhereInput[] = [];
+  // Account lifecycle (2 Oct 2026): working staff only, unless the desk asks for the inactive.
+  if (!filter.includeInactive) parts.push(workingEmployeeWhere());
   const state = stateOf(filter);
   if (state) parts.push(kycPartyStateWhere(state, false));
   if (filter.q) parts.push(searchWhere(filter.q));
@@ -57,15 +70,23 @@ function partyWhere(filter: EmployeeKycFilter): Prisma.EmployeeWhereInput {
 /** A row with no record spreads every record column as null. */
 const EMPTY_RECORD = Object.fromEntries(Object.values(Prisma.EmployeeKycScalarFieldEnum).map((column) => [column, null])) as { [K in keyof EmployeeKyc]: null };
 
-function toQueueRow(employee: EmployeeSlice & { kyc: EmployeeKyc | null }): EmployeeKycQueueRow {
-  const { kyc, ...slice } = employee;
+type QueueEmployee = Omit<EmployeeSlice, 'user'> & {
+  isActive: boolean;
+  user: EmployeeSlice['user'] & { isActive: boolean; closedAt: Date | null };
+  kyc: EmployeeKyc | null;
+};
+
+function toQueueRow(employee: QueueEmployee): EmployeeKycQueueRow {
+  const { kyc, isActive, user, ...rest } = employee;
+  const { isActive: userActive, closedAt, ...person } = user;
   return {
     ...(kyc ?? EMPTY_RECORD),
     id: kyc?.id ?? employee.id,
     employeeId: employee.id,
     kycId: kyc?.id ?? null,
     state: deriveKycState(kyc),
-    employee: slice,
+    accountState: accountStateOf({ isActive, user: { isActive: userActive, closedAt } }),
+    employee: { ...rest, user: person },
   };
 }
 
@@ -79,7 +100,7 @@ export const prismaEmployeeKycRepository: EmployeeKycRepository = {
         // Oldest submission first: the queue is worked in the order it arrived;
         // N3-B: employees with nothing in follow, by when the employee joined.
         orderBy: [{ kyc: { submittedAt: { sort: 'asc', nulls: 'last' } } }, { createdAt: 'asc' }],
-        select: { ...employeeSelect.select, kyc: true },
+        select: { ...queueSelect, kyc: true },
       }),
       prisma.employee.count({ where: partyWhere(where) }),
     ]);
@@ -101,7 +122,7 @@ export const prismaEmployeeKycRepository: EmployeeKycRepository = {
   findEmployeeContact(employeeId: string) {
     return prisma.employee.findUnique({
       where: { id: employeeId },
-      select: { id: true, userId: true, displayId: true, user: { select: { name: true, email: true, mobile: true } } },
+      select: { id: true, userId: true, displayId: true, employmentType: true, user: { select: { name: true, email: true, mobile: true, closedAt: true } } },
     });
   },
 
@@ -133,12 +154,17 @@ export const prismaEmployeeKycRepository: EmployeeKycRepository = {
     return prisma.employeeKyc.upsert({ where: { employeeId }, update: fields, create: { employeeId, ...fields }, include: withEmployee });
   },
 
+  markProviderFailed(employeeId: string) {
+    return prisma.employeeKyc.upsert({ where: { employeeId }, update: { digioStatus: PROVIDER_FAILED_STATUS }, create: { employeeId, digioStatus: PROVIDER_FAILED_STATUS } });
+  },
+
   findByDigioRequestId(kycId: string) {
     return prisma.employeeKyc.findFirst({ where: { digioRequestId: kycId }, include: withEmployee });
   },
 
   applyDigioWebhook(id: string, update: EmployeeDigioUpdate) {
-    const { digioPayload, ...rest } = update;
+    // Cashfree Phase 1: the same road carries a Cashfree session's outcome — `via` says who answered.
+    const { digioPayload, via = 'DIGIO', ...rest } = update;
     // Digio's completion is the recording — nobody at ADX held the documents;
     // an approval puts the row on the Digio path.
     return prisma.employeeKyc.update({
@@ -146,9 +172,9 @@ export const prismaEmployeeKycRepository: EmployeeKycRepository = {
       data: {
         ...rest,
         digioPayload: digioPayload as Prisma.InputJsonValue,
-        recordedVia: 'DIGIO',
+        recordedVia: via,
         recordedById: null,
-        ...(update.status === 'VERIFIED' ? { method: 'DIGIO' } : {}),
+        ...(update.status === 'VERIFIED' ? { method: via } : {}),
       },
       include: withEmployee,
     });

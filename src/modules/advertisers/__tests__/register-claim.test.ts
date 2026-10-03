@@ -67,6 +67,15 @@ describe('registerAdvertiser', () => {
     expect(advertiser).toMatchObject({ id: 'adv_held', userId: 'usr_1' });
   });
 
+  it("returns the caller's own row that a racing request opened (a double tap on the side), minting nothing", async () => {
+    repository.findAdvertiserByMobile.mockResolvedValue({ id: 'adv_raced', userId: 'usr_1', displayId: 'ADV-1009-2601' });
+    const advertiser = await registerAdvertiser({ userId: 'usr_1', name: '+919876543210' });
+    expect(advertiser).toEqual({ id: 'adv_raced', userId: 'usr_1', displayId: 'ADV-1009-2601' });
+    expect(identifiers.allocateIdentifier).not.toHaveBeenCalled();
+    expect(repository.createAdvertiser).not.toHaveBeenCalled();
+    expect(repository.attachUser).not.toHaveBeenCalled();
+  });
+
   it('still refuses a number that belongs to somebody', async () => {
     repository.findAdvertiserByMobile.mockResolvedValue({ id: 'adv_theirs', userId: 'usr_other' });
     await expect(registerAdvertiser({ userId: 'usr_1', name: 'x' })).rejects.toMatchObject({ statusCode: 409 });

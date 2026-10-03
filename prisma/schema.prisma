@@ -68,6 +68,13 @@ model User {
   consentTermsVersion     Int?
   consentPrivacyVersion   Int?
   email                   String?   @unique
+  /// ED-1 (the owner, 25 Sep 2026): both the phone and the email are
+  /// verified on every account. Stamped when a code sent to this address is
+  /// answered — at the email door, at `POST /users/me/email/verify`, or when
+  /// a proven contact is made the primary; cleared when the primary email
+  /// moves to an address that was never proved. Backfilled from the codes
+  /// answered before the column existed.
+  emailVerifiedAt         DateTime?
   passwordHash            String?
   avatarUrl               String?
   language                String    @default("en")
@@ -103,6 +110,10 @@ model User {
   closedAt                DateTime?
   closeReason             String?
   closedById              String?
+  /// Account lifecycle (2 Oct 2026): when the person's data was erased —
+  /// anonymised, with the ledger, invoices, agreements and KYC decision rows
+  /// kept. Stamped by the erasure's execute; null for everyone else.
+  erasedAt                DateTime?
   /// Lot E (Q64): the unsubscribe link on an announcement email.
   emailUnsubscribedAt     DateTime?
   createdAt               DateTime  @default(now())
@@ -254,6 +265,9 @@ model AgentProfile {
   currentAddress           String?
   currentLatitude          Float?
   currentLongitude         Float?
+  /// Onboarding addresses (1 Oct 2026): the current address's PIN code, filled
+  /// by the address search bar or typed.
+  currentPostalCode        String?
   permanentAddress         String?
   emergencyContactName     String?
   emergencyContactRelation String?
@@ -299,6 +313,7 @@ model AgentProfile {
   educations          AgentEducation[]
   employments         AgentEmployment[]
   references          AgentReference[]
+  competitorSightings CompetitorSighting[]      @relation("AgentCompetitorSightings")
   platformExperiences AgentPlatformExperience[]
   orders              Order[]
   publishers          Publisher[]
@@ -307,6 +322,8 @@ model AgentProfile {
   listings            Listing[]
   transactions        Transaction[]
   agentMilestones     AgentMilestone[]
+  /// CP-1: the pay records, effective-dated.
+  compensation        AgentCompensation[]
   /// LH10: the field work sampled for quality.
   qaSamples           LeadQaSample[]
   orderMilestones     OrderMilestone[]
@@ -823,7 +840,41 @@ model Otp {
   @@index([email, purpose])
 }
 
+/// ED-1: an email address that asked to join before it had an account. The
+/// mobile door mints a roleless User at send time because `Otp.userId` is
+/// NOT NULL; an email cannot, since `User.mobile` is the identity and is
+/// required. So the code to a new address is filed here, one live row per
+/// address, and the row is spent when the phone is proved and the email
+/// attached (`POST /auth/verify-otp` with the signup token).
+model EmailSignup {
+  id         String    @id @default(cuid())
+  /// Lower-cased.
+  email      String    @unique
+  codeHash   String
+  attempts   Int       @default(0)
+  expiresAt  DateTime
+  verifiedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+}
+
 // ─── Order Lifecycle ──────────────────────────────────────────────────────────
+
+/// Order fraud screening (2 Oct 2026): what the score says — under the review
+/// threshold, at or above it, at or above the hold threshold.
+enum OrderRiskBand {
+  LOW
+  REVIEW
+  HOLD
+}
+
+/// Order fraud screening: the review — flagged by the score, cleared or
+/// confirmed by a person. Null on an order the screening never flagged.
+enum OrderRiskReview {
+  FLAGGED
+  CLEARED
+  CONFIRMED_FRAUD
+}
 
 enum OrderStatus {
   DRAFT
@@ -866,6 +917,8 @@ model Site {
 
 model Order {
   id                            String      @id @default(cuid())
+  /// BK-1 (DR 12): BKG-DDMM-YYNN, minted at placement; null on rows older than the series until the backfill runs.
+  displayId                     String?     @unique
   advertiserId                  String
   listingId                     String
   agentId                       String?
@@ -917,11 +970,38 @@ model Order {
   selfInstallConditionPhotoUrls String[]
   selfInstallInstallPhotoUrl    String?
   selfInstallCheckedInAt        DateTime?
+  /// SI-N (DR 12 board 10): what the publisher wrote beside their self-install proof.
+  selfInstallNotes              String?
   adminApprovedAt               DateTime?
   // Ported from legacy app: optional link to a reusable Advertisement creative
   agentLatitude                 Float?
   agentLongitude                Float?
   agentLocationUpdatedAt        DateTime?
+  /// Order fraud screening (2 Oct 2026): every order is scored — the
+  /// explainable 0–1 score, the signals behind it
+  /// ([{ key, weight, value, detail, side }], side ADVERTISER | PUBLISHER |
+  /// ORDER), the band the score says, and when. ADMIN reads only: the
+  /// columns sit in the client's GLOBAL_OMIT so no party read carries them.
+  riskScore                     Decimal?    @db.Decimal(4, 3)
+  riskSignals                   Json?
+  riskBand                      OrderRiskBand?
+  riskScoredAt                  DateTime?
+  /// The desk's side: FLAGGED by the score, CLEARED or CONFIRMED_FRAUD by a
+  /// person (`riskReviewedById`, `riskReviewedAt`, `riskReviewNote`).
+  riskReviewStatus              OrderRiskReview?
+  riskReviewedById              String?
+  riskReviewedAt                DateTime?
+  riskReviewNote                String?
+  /// The signals a Clear dismissed (`SIDE:KEY`), so the same reasons do not
+  /// flag the order again — only a new one does.
+  riskClearedSignalKeys         String[]    @default([])
+  /// A reversible hold: dispatch, accrual and the money-moving steps wait.
+  /// `heldById` null means the screening held it (only with auto-hold on).
+  heldAt                        DateTime?
+  heldById                      String?
+  holdReason                    String?
+  /// The fraud case the desk opened (or attached) for this order.
+  fraudCaseId                   String?
   createdAt                     DateTime    @default(now())
   updatedAt                     DateTime    @updatedAt
 
@@ -944,6 +1024,9 @@ model Order {
   @@index([agentId, status])
   @@index([listingId])
   @@index([status, createdAt])
+  // The fraud review queue: by review status and score, and the held tab.
+  @@index([riskReviewStatus, riskScore])
+  @@index([heldAt])
 }
 
 enum AssignmentStatus {
@@ -1167,6 +1250,23 @@ enum PublisherType {
   POLITICAL
 }
 
+/// Phase D (the owner, 1 Oct 2026): the legal form a party verifies as —
+/// it picks the Digio KYC workflow (`shared/integrations/digio-workflows.ts`).
+/// Publisher, Advertiser and PrintPartner carry it as `entityType`, null
+/// until it is asked at KYC start (or derived from the legacy `type` where
+/// that says it unambiguously). Agents and employees have no entity type:
+/// agents use one workflow, employees pick theirs by `employmentType`.
+enum KycEntityType {
+  INDIVIDUAL
+  SOLE_PROPRIETOR
+  COMPANY
+  LLP_PARTNERSHIP
+  NON_PROFIT
+  GOVERNMENT_EDUCATION
+  OTHER_ENTITY
+  POLITICAL
+}
+
 /// QR-5: asked with the date of birth; never required.
 enum Gender {
   MALE
@@ -1253,66 +1353,78 @@ enum OrderMilestoneStatus {
 }
 
 model Publisher {
-  id                 String            @id @default(cuid())
-  userId             String?           @unique // user app login (User.id with role PUBLISHER)
-  agentId            String? // AgentProfile.id — null until agent scans QR
-  name               String
-  mobile             String            @unique
-  email              String?
-  type               PublisherType     @default(INDIVIDUAL)
+  id                    String            @id @default(cuid())
+  userId                String?           @unique // user app login (User.id with role PUBLISHER)
+  agentId               String? // AgentProfile.id — null until agent scans QR
+  name                  String
+  mobile                String            @unique
+  email                 String?
+  type                  PublisherType     @default(INDIVIDUAL)
+  /// Phase D (1 Oct 2026): the legal form the KYC verifies — asked at KYC
+  /// start when `type` does not settle it (BUSINESS could be any of five).
+  entityType            KycEntityType?
   /// DR 08 Steps 2–4, as the publisher types them. GSTIN for a business or
   /// organisation; the contact person is who ADX reaches about the account
   /// when the account is not a person.
-  gstin              String?
-  contactName        String?
-  contactMobile      String?
-  contactEmail       String?
+  gstin                 String?
+  contactName           String?
+  contactMobile         String?
+  contactEmail          String?
   /// Where the publisher is, as given at sign-up. This is the meeting point an
   /// agent is sent to when the publisher accepts a booking, so it is an address
   /// somebody has to be able to find rather than a billing line.
-  address            String?
+  address               String?
   /// QR-5: where the address is, when the person placed it on the map or
   /// picked it from a search. Optional — an address need not be a pin.
-  latitude           Float?
-  longitude          Float?
-  city               String?
+  latitude              Float?
+  longitude             Float?
+  city                  String?
   /// Lot X: the catalogue city the free-text `city` resolved to (null when it did not); every read that groups by city groups by this.
-  cityId             String?
-  state              String?
+  cityId                String?
+  state                 String?
+  /// Onboarding addresses (1 Oct 2026): the address's PIN code, filled by the
+  /// address search bar or typed.
+  postalCode            String?
   /// Human-readable identifier, e.g. PUB-1909-2601. Issued once, never reissued.
-  displayId          String?           @unique
-  kycStatus          KycStatus         @default(PENDING)
-  onboardingStatus   OnboardingStatus  @default(PENDING_ONBOARDING)
+  displayId             String?           @unique
+  kycStatus             KycStatus         @default(PENDING)
+  onboardingStatus      OnboardingStatus  @default(PENDING_ONBOARDING)
+  /// CP-1: when onboarding actually finished. `onboardedAt` is the door the
+  /// account came through (provenance, stamped at signup or the claim); this
+  /// is the moment `onboardingStatus` reached ONBOARDING_COMPLETE, which is
+  /// what the agent's daily quota counts and what cost-per-onboarding divides
+  /// by. Backfilled approximately for rows completed before 23 Sep 2026.
+  onboardingCompletedAt DateTime?
   /// Lot A (Q40/Q48): modular suspension — BLOCK_NEW, STOP_OPEN_WORK, STOP_ACCRUAL,
   /// FREEZE_WALLET, BLOCK_SIGNIN, each applied and reversed on its own with a
   /// reason; the history is PartySuspensionEvent.
-  suspensionScopes   SuspensionScope[] @default([])
-  suspendedAt        DateTime?
-  suspensionReason   String?
-  suspendedById      String?
-  claimedAt          DateTime? // when agent scanned the QR
+  suspensionScopes      SuspensionScope[] @default([])
+  suspendedAt           DateTime?
+  suspensionReason      String?
+  suspendedById         String?
+  claimedAt             DateTime? // when agent scanned the QR
   /// Commercial designation, distinct from `type` (which is legal entity form).
   /// An agency controlling many spots is a Partner Publisher and may also be
   /// an NGO, so the two questions cannot share a column.
-  isPartnerPublisher Boolean           @default(false)
+  isPartnerPublisher    Boolean           @default(false)
   /// Which withdrawal ladder this publisher is on. Set by ops rather than
   /// derived: "smaller agency" and "larger agency" are commercial judgements
   /// about who ADX is dealing with, not a count of listings.
-  sizeBand           PartySizeBand     @default(INDIVIDUAL)
+  sizeBand              PartySizeBand     @default(INDIVIDUAL)
   /// KYC verified and the platform agreement accepted.
-  activatedAt        DateTime?
+  activatedAt           DateTime?
   /// QR-14: who onboarded this party, and how — SELF (the app), AGENT (the
   /// agent app's door), QR (an agent's scan), DESK (the console), IMPORT (a
   /// batch). `onboardedById` is the person who did it (null for SELF),
   /// `onboardedByRole` their console role or kind at the time (a snapshot —
   /// roles move), `onboardedAt` when. Set once, at the door; a later claim or
   /// adoption never overwrites it.
-  onboardedVia       OnboardingSource?
-  onboardedById      String?
-  onboardedByRole    String?
-  onboardedAt        DateTime?
-  createdAt          DateTime          @default(now())
-  updatedAt          DateTime          @updatedAt
+  onboardedVia          OnboardingSource?
+  onboardedById         String?
+  onboardedByRole       String?
+  onboardedAt           DateTime?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
 
   user                 User?                         @relation(fields: [userId], references: [id])
   agent                AgentProfile?                 @relation(fields: [agentId], references: [id])
@@ -1417,6 +1529,9 @@ model PublisherKyc {
   updatedAt                 DateTime             @updatedAt
 
   publisher Publisher @relation(fields: [publisherId], references: [id], onDelete: Cascade)
+
+  /// Phase D: the Digio webhook finds the row by the request id, as the other four KYC tables do.
+  @@index([digioRequestId])
 }
 
 // ─── Listings ─────────────────────────────────────────────────────────────────
@@ -1569,6 +1684,29 @@ model Listing {
   peakPeriodNote         String?
   /// The rate card the publisher uploaded. Evidence, not a price ADX applies.
   rateCardUrl            String?
+  /// WG-1 (DR 12 board 08, 25 Sep 2026): what the website's listing wizard
+  /// asks beyond the app's — stored as the publisher states them and shown
+  /// to the advertiser; nothing prices on them yet.
+  installationByAdx      Boolean?
+  vehicleType            String?
+  vehicleModel           String?
+  broadcastLanguage      String?
+  contentFormat          String?
+  /// The six demographic bands the frame draws, as `{ label: share }` or a list — the publisher's claim.
+  audienceDemographics   Json?
+  maxBookingDays         Int?
+  advanceBookingDays     Int?
+  cancellationNoticeDays Int?
+  /// LF-2 (28 Sep 2026): FLEXIBLE (free up to 48 hours before), NOTICE (`cancellationNoticeDays` ahead) or NONE (no cancellation once confirmed).
+  cancellationPolicy     String?
+  /// LF-2: the publisher's answer to "Available year-round?" — a statement shown to advertisers. NOT `availableNow`, which is the live occupied flag orders flip and the campaign planner filters on.
+  availableYearRound     Boolean?
+  rateCardValidFrom      DateTime?           @db.Date
+  rateCardValidTo        DateTime?           @db.Date
+  seasonalVariationNote  String?
+  /// A digital face's pixel size, for the artwork spec.
+  widthPx                Int?
+  heightPx               Int?
   /// DR 02 step 5 — the selling story. Kept as separate columns rather than one
   /// blob because each is a distinct claim an advertiser may act on.
   targetAudience         String?
@@ -1636,6 +1774,25 @@ model Listing {
   vehicleNumber          String?
   vehicleRcVerifiedAt    DateTime?
   vehicleRcPayload       Json?
+  /// LD-1 (listing data gaps, 3 Oct 2026): the answers the forms collected
+  /// and used to throw away. When the publisher (or the agent with them)
+  /// ticked the listing terms, and which wording they ticked.
+  termsAcceptedAt        DateTime?
+  termsVersion           String?
+  /// LD-1: every answer the listing flow collected that maps to no column —
+  /// a question added in the Flow Editor — as `[{ key, label, value }]`.
+  extraAnswers           Json?
+  /// LD-1: the papers the publisher marked "Not applicable", as `[{ kind, reason?, at }]`.
+  documentWaivers        Json?
+  /// LD-1: the "I own the venue" tick. `rightsBasis` OWNED says how the space is held; this says the publisher declared it.
+  ownershipDeclaredAt    DateTime?
+  /// LD-1: the area a transit or area spot covers ("Whole of Bengaluru", "Route 500D") — no longer written into `city`.
+  coverage               String?
+  /// LD-1: the venue's operating hours, kept beside `availableHoursFrom/To` (the visibility window) rather than folded into it.
+  operatingHoursFrom     String?
+  operatingHoursTo       String?
+  /// LD-1: how sure the pin is, in metres — the map pick's or the phone's GPS accuracy, where the client has it.
+  locationAccuracyM      Float?
   createdAt              DateTime            @default(now())
   updatedAt              DateTime            @updatedAt
 
@@ -1655,6 +1812,8 @@ model Listing {
   material        Material?              @relation(fields: [materialId], references: [id])
   pricingFactors  ListingPricingFactor[]
   campaignSpots   CampaignSpot[]
+  /// BD-1: the dates the publisher took the spot off the market by hand.
+  blockedDates    ListingBlockedDate[]
   venueType       VenueType?             @relation(fields: [venueTypeId], references: [id])
   contentRules    ListingContentRule[]
 
@@ -1665,6 +1824,9 @@ model Listing {
 
   disputes        Dispute[]
   earningAccruals EarningAccrual[]
+  /// LD-1: the spot page's daily view counts, and the day's de-duplication keys behind them.
+  views           ListingView[]
+  viewVisitors    ListingViewVisitor[]
 
   cityRef City? @relation("ListingCity", fields: [cityId], references: [id], onDelete: SetNull)
 
@@ -1684,16 +1846,80 @@ model Listing {
   @@index([cityId])
 }
 
+/// BD-1 (DR 12, 25 Sep 2026): a range of calendar days the publisher blocked
+/// on a spot — a renovation, a festival the venue keeps for itself. A block
+/// holds every slot over its range: `slot-holds.ts` counts it beside the
+/// running orders and the live reservations, so browse, checkout and
+/// placement all read the days as taken. Inclusive at both ends.
+model ListingBlockedDate {
+  id          String   @id @default(cuid())
+  listingId   String
+  from        DateTime @db.Date
+  to          DateTime @db.Date
+  reason      String?
+  createdById String
+  createdAt   DateTime @default(now())
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@index([listingId, from, to])
+}
+
 model ListingPhoto {
   id        String   @id @default(cuid())
   listingId String
   url       String
   type      String   @default("main")
+  /// LD-1: the upload register's row this photograph came from (matched on the URL when the client did not say), so the console reads the capture stamp by id instead of scanning `UploadedFile.url`.
+  uploadedFileId String?
+  /// LD-1: when the photograph was taken — the camera's stamp, or what the client said.
+  takenAt   DateTime?
   createdAt DateTime @default(now())
 
   listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
 
   @@index([listingId])
+}
+
+/// LD-1 (3 Oct 2026): how often a spot's public page was opened, per Indian
+/// day. Written by `POST /listings/:displayIdOrId/view` — the website's spot
+/// page and listing detail, the advertiser's listing screen in the app — and
+/// read by the listing page's Performance. Visitors are de-duplicated per
+/// listing per day (`ListingViewVisitor`); the listing's own publisher and
+/// agent, ADX staff and obvious bots are never counted.
+model ListingView {
+  listingId      String
+  /// The Indian day the views fell on.
+  day            DateTime @db.Date
+  /// Every counted page view (a repeat inside a minute is the same view).
+  views          Int      @default(0)
+  /// Distinct visitors that day — a signed-in user, else a keyed hash of address and browser.
+  uniqueVisitors Int      @default(0)
+  /// Of `views`, the ones the website sent and the ones the apps sent.
+  webViews       Int      @default(0)
+  appViews       Int      @default(0)
+  updatedAt      DateTime @updatedAt
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@id([listingId, day])
+  @@index([day])
+}
+
+/// LD-1: who has already been counted on a listing today — a keyed hash
+/// (HMAC of the day, the listing and the user id or address + browser),
+/// never the address or the id itself, and unlinkable across days. Only
+/// today's rows matter: a listing's older rows go on its first view of a
+/// new day.
+model ListingViewVisitor {
+  listingId   String
+  day         DateTime @db.Date
+  visitorHash String
+  lastViewAt  DateTime
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@id([listingId, day, visitorHash])
 }
 
 // ─── Earnings & Payouts ───────────────────────────────────────────────────────
@@ -1721,7 +1947,48 @@ model Transaction {
   @@index([agentId])
 }
 
-// ─── Milestones ───────────────────────────────────────────────────────────────
+/// CP-1: what an agent is paid, and how much of their work that pay covers.
+///
+/// Effective-dated like `IncentiveRate`, and for the same reason: a month must
+/// be costed at the salary that was in force then, not at today's. A new
+/// record closes the one before it.
+///
+/// `dailyQuota` is the salary-covered work of one working day — the platform
+/// counts a calendar day in India, so a day nobody works simply has no
+/// onboardings and no quota, and an agent who works fifteen days in a month is
+/// never charged for the fifteen they did not.
+///
+/// `workingDaysPerMonth` is a PLANNING figure and nothing else: it prices the
+/// commission (`monthlySalary / (dailyQuota * workingDaysPerMonth)`) so that
+/// rate stays still instead of wobbling with attendance. It is not a claim
+/// about days worked, and no report reads it as one.
+model AgentCompensation {
+  id                  String  @id @default(cuid())
+  agentId             String
+  /// The base salary for a full month, as money.
+  monthlySalary       Decimal @db.Decimal(14, 2)
+  /// Onboardings one working day's salary covers. Beyond it, the day pays commission.
+  dailyQuota          Int
+  /// Planning only — the divisor that prices the commission. Never an attendance figure.
+  workingDaysPerMonth Int     @default(26)
+  /// What an onboarding beyond the quota pays, as a percentage ON TOP of the
+  /// planned unit cost: 10 means the unit cost plus a tenth.
+  commissionUpliftPct Decimal @default(10) @db.Decimal(5, 2)
+
+  effectiveFrom   DateTime
+  effectiveTo     DateTime?
+  note            String?
+  createdByUserId String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  agent AgentProfile @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId, effectiveFrom])
+  @@index([effectiveFrom])
+}
+
+/// ─── Milestones ───────────────────────────────────────────────────────────────
 
 enum MilestoneType {
   ONBOARDING
@@ -1807,6 +2074,8 @@ enum NotificationType {
   ANNOUNCEMENT
   /// Lot AA: a work task assigned, due, blocked or awaiting review.
   WORK
+  /// WS-1 (DR 12): the Monday-morning digest of the advertiser's campaigns — email by default, switchable.
+  WEEKLY_SUMMARY
 }
 
 enum TemplateStatus {
@@ -2091,6 +2360,8 @@ model SupportTicket {
   tags                  String[]       @default([])
   status                TicketStatus   @default(OPEN)
   relatedOrderId        String?
+  /// WG-1 (DR 12 board 07): the campaign a request is about, when it is about one.
+  relatedCampaignId     String?
   /// The agent ADX put on this request.
   ///
   /// Where delegated access comes from. A publisher asking for help should never
@@ -2386,24 +2657,50 @@ enum FileVisibility {
 }
 
 model UploadedFile {
-  id          String         @id @default(cuid())
-  userId      String
-  url         String
-  filename    String
-  mimeType    String
-  sizeBytes   Int
-  purpose     String // e.g. "KYC", "LISTING_PHOTO", "VERIFICATION"
+  id           String         @id @default(cuid())
+  userId       String
+  url          String
+  filename     String
+  mimeType     String
+  sizeBytes    Int
+  purpose      String // e.g. "KYC", "LISTING_PHOTO", "VERIFICATION"
   /// Lot D (Q61): private files are served only through GET /files/:id to the
   /// owner, the party's agent under a live grant, or an admin.
-  visibility  FileVisibility @default(PUBLIC)
+  visibility   FileVisibility @default(PUBLIC)
   /// The party whose document this is, when it is not the uploader's own.
-  ownerUserId String?
-  storageKey  String?
-  createdAt   DateTime       @default(now())
+  ownerUserId  String?
+  storageKey   String?
+  /// GC-1: where and when a photo was taken, when the phone sent its fix with
+  /// it and asked for the GPS stamp. The band is burned into the pixels and
+  /// the EXIF GPS block written; these columns are the same facts, queryable
+  /// without opening the file. Null on every file that did not ask.
+  latitude     Float?
+  longitude    Float?
+  accuracyM    Float?
+  takenAt      DateTime?
+  geoStamped   Boolean        @default(false)
+  /// DR-1: what the vision model read off the document, held to `readingKind`'s
+  /// field list — read once at the desk, shown wherever the file appears.
+  readingKind  String?
+  reading      Json?
+  readAt       DateTime?
+  readByUserId String?
+  /// ST-3 (28 Sep 2026): when the weekly sweep first found nothing on the platform
+  /// referring to this file; cleared the moment something does again. The sweep
+  /// removes a file only after it has stayed unreferenced for the grace period,
+  /// and only when Settings › Storage says it may.
+  unreferencedSince   DateTime?
+  /// ST-3: the last sweep that looked at this file.
+  referenceCheckedAt  DateTime?
+  createdAt    DateTime       @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+
+  @@index([unreferencedSince])
+  /// LD-1: the listing photographs' capture stamps were matched on the URL with no index behind it.
+  @@index([url])
 }
 
 // ─── RefreshToken ─────────────────────────────────────────────────────────────
@@ -2415,6 +2712,10 @@ model RefreshToken {
   tokenHash  String    @unique
   userAgent  String?
   ipAddress  String?
+  /// SL-1 (DR 12): where the session signed in from, looked up from the address after the fact; null until known or when the address is private.
+  city       String?
+  region     String?
+  country    String?
   lastUsedAt DateTime?
   expiresAt  DateTime
   revokedAt  DateTime?
@@ -2785,14 +3086,29 @@ model Holiday {
   region    String?
   /// Lot G (Q123): the restricted-holiday distinction the frame prints.
   kind      HolidayKind @default(PUBLIC)
+  /// HC-1 (1 Oct 2026): where the row came from — typed by a person, or the public holiday calendar.
+  source     HolidaySource @default(MANUAL)
+  /// HC-1: the calendar event's iCal UID. Kept when a person edits a calendar row, so the sync knows the event is theirs.
+  externalId String?
+  /// HC-1: the calendar says the date may still move (lunar days).
+  tentative  Boolean       @default(false)
+  /// HC-1: a calendar row someone deleted — kept, hidden, so the next sync does not bring it back.
+  hiddenAt   DateTime?
   createdAt DateTime    @default(now())
 
   @@unique([date, region])
+  @@unique([source, externalId])
 }
 
 enum HolidayKind {
   PUBLIC
   OPTIONAL
+}
+
+/// HC-1: MANUAL rows are a person's and the sync never touches them; CALENDAR rows follow the feed.
+enum HolidaySource {
+  MANUAL
+  CALENDAR
 }
 
 enum ScheduleEntryStatus {
@@ -2944,10 +3260,9 @@ model RoleConfig {
   members UserRoleConfig[]
 }
 
-/// Lot A (Q24/Q71): the console role a user holds — one per user. Until the
-/// per-module enforcement is switched on, every operator still passes through
-/// `requireRole('ADMIN')`; the role decides inside it once a route is moved to
-/// `requirePermission`.
+/// Lot A (Q24/Q71): the console role a user holds — one per user. RP-1: an
+/// ADMIN with no row here holds no permission and `requireRole('ADMIN')`
+/// refuses them (ROLE_REQUIRED); only Super admin's row carries every id.
 model UserRoleConfig {
   id           String   @id @default(cuid())
   userId       String   @unique
@@ -3559,6 +3874,9 @@ enum ListingAttemptOrigin {
   ADMIN_SINGLE
   ADMIN_BULK
   SCRAPE
+  /// 26 Sep 2026: the publisher's own bulk upload (`POST /party-imports/listings`
+  /// as the publisher) — it used to be recorded as AGENT.
+  PUBLISHER_BULK
 }
 
 enum ListingAttemptStatus {
@@ -3591,7 +3909,16 @@ enum ListingDocumentKind {
   MUNICIPAL_PERMIT
   /// AG-4: the registration certificate of a vehicle put up as a spot.
   VEHICLE_RC
+  /// WG-1 (DR 12 board 08): the papers the website's listing wizard draws.
+  DRIVING_LICENCE
+  VEHICLE_INSURANCE
+  VEHICLE_FITNESS
+  MEDIA_KIT
+  RATE_CARD
   OTHER
+  /// LF-2 (28 Sep 2026): the audience evidence the listing flow asks for — a BARC / TAM rating sheet, a footfall audit.
+  AUDIENCE_RATING
+  FOOTFALL_AUDIT
 }
 
 enum ListingDocumentStatus {
@@ -3635,6 +3962,8 @@ enum ContactAttemptChannel {
   EMAIL
   WHATSAPP
   IN_APP
+  /// 3 Oct 2026: somebody went to the publisher (the verification queue's "Log contact attempt").
+  VISIT
 }
 
 enum EarningsHoldStatus {
@@ -3971,6 +4300,8 @@ enum WalletEntryType {
   PENALTY
   /// Credit that went unused for the dormancy window and lapsed.
   EXPIRY
+  /// LM-1: an ad slot or a sponsored listing, paid from the wallet.
+  PROMOTION_DEBIT
 }
 
 /// Why a refund was asked for. Not exhaustive by design — support raises the
@@ -4081,6 +4412,9 @@ model Advertiser {
   mobile           String            @unique
   email            String?
   type             AdvertiserType    @default(INDIVIDUAL)
+  /// Phase D (1 Oct 2026): the legal form the KYC verifies — asked at KYC
+  /// start when `type` does not settle it (COMMERCIAL and AGENCY do not).
+  entityType       KycEntityType?
   companyName      String?
   gstin            String?
   billingAddress   String?
@@ -4088,6 +4422,9 @@ model Advertiser {
   /// Lot X: the catalogue city the free-text `city` resolved to (null when it did not); every read that groups by city groups by this.
   cityId           String?
   state            String?
+  /// AD-1 (DR 12 board 04): the PIN and the country on the billing address, for the invoice.
+  postalCode       String?
+  country          String?
   /// Lot G (Q119): an optional picklist value captured at onboarding, editable by ops.
   industry         String?
   /// Human-readable identifier, e.g. ADV-1909-2601. Issued once, never reissued.
@@ -4347,6 +4684,8 @@ enum PartyType {
   LEAD
   /// QR-4: ADX-… — the person's own id, minted at first sign-in.
   USER
+  /// BK-1: BKG-… on a booking (an order), so an advertiser and a publisher can name one.
+  ORDER
   /// VST-#### on a field visit.
   VISIT
   /// ADX-CERT-…, the certificate series.
@@ -4357,6 +4696,10 @@ enum PartyType {
   TASK
   ISSUE
   PROJECT
+  /// LM-1: ADB-… on a display-ad booking.
+  AD_BOOKING
+  /// LM-1: BST-… on a sponsored listing.
+  LISTING_BOOST
 }
 
 /// The shape a party's identifier takes when the next one is issued.
@@ -6219,25 +6562,62 @@ model Campaign {
   endDate   DateTime?
 
   /// Step 12 — creative path, and the answers its branch asked for.
-  creativePath   CreativePath?
-  creativeConfig Json?
+  creativePath           CreativePath?
+  creativeConfig         Json?
+  /// DQ-1 (DR 12 board 05): ADX's quote for designing the artwork — the
+  /// desk names a price, the advertiser accepts or declines, and an accepted
+  /// quote is a DESIGN fee line on the review and the invoice.
+  designQuoteAmount      Decimal?      @db.Decimal(14, 2)
+  designQuoteStatus      String?
+  designQuoteNote        String?
+  designQuotedAt         DateTime?
+  designQuotedByUserId   String?
+  designQuoteRespondedAt DateTime?
 
   /// Step 13 — measurement.
   trackingMethod TrackingMethod @default(QR_OR_DEEPLINK)
   trackingConfig Json?
 
   /// Step 14
-  fulfilment FulfilmentChoice?
+  fulfilment            FulfilmentChoice?
+  /// WG-1 (DR 12 board 05): the advertiser's placement wishes and whether the
+  /// brand signs off the artwork before launch. Stored as stated; the desk
+  /// reads them beside the brief.
+  placementPreferences  Json?
+  brandApprovalRequired Boolean           @default(false)
+  /// WG-1 (DR 12 board 04): the campaign contact the production step draws — the account's details when empty.
+  contactName           String?
+  contactEmail          String?
+  contactPhone          String?
 
   /// Steps 15 and 16 — the money, snapshotted at review so the total an
   /// advertiser authorised is the total that was shown, whatever moves later.
-  spotsSubtotal Decimal? @db.Decimal(14, 2)
-  feesTotal     Decimal? @db.Decimal(14, 2)
-  discount      Decimal? @db.Decimal(14, 2)
-  gstAmount     Decimal? @db.Decimal(14, 2)
-  total         Decimal? @db.Decimal(14, 2)
+  spotsSubtotal           Decimal?  @db.Decimal(14, 2)
+  feesTotal               Decimal?  @db.Decimal(14, 2)
+  discount                Decimal?  @db.Decimal(14, 2)
+  gstAmount               Decimal?  @db.Decimal(14, 2)
+  total                   Decimal?  @db.Decimal(14, 2)
   /// The wallet hold taken at authorization, captured at launch.
-  walletHoldId  String?  @unique
+  walletHoldId            String?   @unique
+  /// PC-1: the promo code on the booking, if one was typed; the discount it
+  /// takes is recomputed at every review and snapshotted at authorise.
+  promoCodeId             String?
+  /// RF-1 (the owner, 25 Sep 2026): the reservation fee on a big checkout —
+  /// `feePct` of the total, due within the hour, holding the spots for
+  /// `holdHours`; folded into the checkout when the advertiser goes ahead
+  /// (ADJUSTED), `retainPct` of it kept when they do not (RETAINED). Statuses:
+  /// DUE, PAID, ADJUSTED, SUPERSEDED (paid in full without it), RETAINED, LAPSED.
+  reservationFeeAmount    Decimal?  @db.Decimal(14, 2)
+  reservationFeeStatus    String?
+  reservationFeeDueAt     DateTime?
+  reservationFeePaidAt    DateTime?
+  /// The wallet hold the fee sits in until it is folded into the checkout or forfeited.
+  reservationFeeHoldId    String?   @unique
+  reservationHoldUntil    DateTime?
+  reservationFeeRetained  Decimal?  @db.Decimal(14, 2)
+  reservationFeeSettledAt DateTime?
+  /// The gateway payment that paid the fee, when it was not paid from the wallet.
+  reservationFeePaymentId String?
 
   paidAt             DateTime?
   launchedAt         DateTime?
@@ -6258,6 +6638,7 @@ model Campaign {
   codes       CampaignTrackingCode[]
   metrics     CampaignDailyMetric[]
   landingPage LandingPage?
+  promoCode   PromoCode?             @relation(fields: [promoCodeId], references: [id], onDelete: SetNull)
 
   targetMarketCity City? @relation("CampaignTargetCity", fields: [targetMarketCityId], references: [id], onDelete: SetNull)
 
@@ -6265,6 +6646,60 @@ model Campaign {
   @@index([agentId])
   @@index([status, startDate])
   @@index([targetMarketCityId])
+  @@index([promoCodeId])
+}
+
+// ─── Promo codes (PC-1, DR 12) ─────────────────────────────────────────────
+
+enum PromoDiscountKind {
+  PERCENT
+  FLAT
+}
+
+/// PC-1 (25 Sep 2026): a code an advertiser types on Review & pay. Percent
+/// or flat rupees off the media rent plus production fees (never off GST),
+/// capped, gated by a minimum spend, a window and two limits. Never deleted
+/// — switched off — so its redemptions keep their code.
+model PromoCode {
+  id                 String            @id @default(cuid())
+  /// Upper-cased, no spaces.
+  code               String            @unique
+  description        String?
+  kind               PromoDiscountKind
+  /// Percent (0–100) for PERCENT, rupees for FLAT.
+  value              Decimal           @db.Decimal(14, 2)
+  maxDiscount        Decimal?          @db.Decimal(14, 2)
+  minSpend           Decimal?          @db.Decimal(14, 2)
+  startsAt           DateTime?
+  endsAt             DateTime?
+  usageLimit         Int?
+  perAdvertiserLimit Int?
+  isActive           Boolean           @default(true)
+  createdById        String?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+
+  campaigns   Campaign[]
+  redemptions PromoRedemption[]
+
+  @@index([isActive, endsAt])
+}
+
+/// One per paid campaign: written at authorise with the rupees the code took
+/// off, released (not deleted) if the campaign is cancelled, so the limits
+/// count what was actually spent.
+model PromoRedemption {
+  id           String    @id @default(cuid())
+  promoCodeId  String
+  campaignId   String    @unique
+  advertiserId String
+  amount       Decimal   @db.Decimal(14, 2)
+  redeemedAt   DateTime  @default(now())
+  releasedAt   DateTime?
+
+  promoCode PromoCode @relation(fields: [promoCodeId], references: [id], onDelete: Cascade)
+
+  @@index([promoCodeId, advertiserId, releasedAt])
 }
 
 /// A pin dropped on the POI-venue targeting screen.
@@ -6293,6 +6728,8 @@ model CampaignSpot {
 
   /// Why the matcher offered it — 0 to 100. Kept so a booking can explain itself.
   matchScore Int?
+  /// PS-1 (DR 12 board 04): this spot's own print choice; null means the campaign's.
+  fulfilment FulfilmentChoice?
 
   ratePerDay       Decimal   @db.Decimal(14, 2)
   days             Int
@@ -6338,6 +6775,76 @@ model CampaignSpot {
 /// Per spot when the sizes differ, which they usually do; per campaign for a
 /// design brief or a feed, which produce one thing for all of them. That is why
 /// the Review screen can say "2 of 3 uploaded".
+/// VA-1 (23 Sep 2026): what the vision model said about an artwork, kept
+/// as a row per run so the desk can see how a verdict changed across a
+/// re-upload. Never a decision — ops decide; this is what they read first.
+model CreativeAnalysis {
+  id                String   @id @default(cuid())
+  creativeId        String
+  provider          String
+  model             String
+  /// PASS / FAIL / UNSURE, each with the sentence behind it.
+  appropriate       String
+  appropriateReason String?
+  relevant          String
+  relevantReason    String?
+  legal             String
+  legalReason       String?
+  /// PG / REGULAR / ADULT — whether the artwork is fit for a family audience or only a general one.
+  rating            String
+  ratingReason      String?
+  /// From a fixed vocabulary (TOBACCO, ALCOHOL, MISLEADING_CLAIM, …) so the desk can filter on them.
+  flags             String[] @default([])
+  summary           String
+  confidence        Float
+  /// The uniqueness check is arithmetic, not the model: the nearest other creative by perceptual hash.
+  unique            Boolean?
+  nearestCreativeId String?
+  nearestDistance   Int?
+  /// The model's whole answer, for the day the vocabulary above proves too small.
+  raw               Json?
+  requestedByUserId String
+  createdAt         DateTime @default(now())
+
+  creative CampaignCreative @relation(fields: [creativeId], references: [id], onDelete: Cascade)
+
+  @@index([creativeId, createdAt])
+}
+
+/// VA-2 (23 Sep 2026): a competitor's hoarding an agent photographed in the
+/// street — for analysis, and for the corpus a model can later be trained
+/// on. Public advertising in a public place; the photo carries the GPS
+/// stamp, so where and when are on the picture itself as well as here.
+model CompetitorSighting {
+  id          String    @id @default(cuid())
+  agentId     String
+  /// The stamped photo: the upload row, and its URL for the desk.
+  photoFileId String
+  photoUrl    String
+  /// What the agent read off it. All optional: a plate-glass shop front says its brand; a peeling wall may not.
+  brand       String?
+  category    String?
+  /// HOARDING, WALL, BUS_SHELTER, VEHICLE, DIGITAL_SCREEN, SHOP_FRONT, OTHER.
+  format      String?
+  note        String?
+  latitude    Float?
+  longitude   Float?
+  address     String?
+  city        String?
+  cityId      String?
+  capturedAt  DateTime
+  /// VA-1's vision pass over the photo — the brand and category it sees, an estimated size, the condition — when the desk has asked for it.
+  analysis    Json?
+  analysedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  agent AgentProfile @relation("AgentCompetitorSightings", fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId, capturedAt])
+  @@index([cityId, capturedAt])
+  @@index([brand])
+}
+
 model CampaignCreative {
   id         String         @id @default(cuid())
   campaignId String
@@ -6371,12 +6878,18 @@ model CampaignCreative {
   advertiserAcceptedById String?
   /// Lot D (Q7): the tracking code this artwork embeds, so the desk can check it.
   trackingCodeId         String?
+  /// VA-1: a 64-bit difference hash of the artwork's pixels, as 16 hex
+  /// characters — what "is this artwork unique" is measured with. Two
+  /// creatives whose hashes differ in fewer than a handful of bits are the
+  /// same picture whatever their bytes say.
+  perceptualHash         String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  campaign Campaign      @relation(fields: [campaignId], references: [id], onDelete: Cascade)
-  spot     CampaignSpot? @relation(fields: [spotId], references: [id], onDelete: Cascade)
+  campaign Campaign           @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  spot     CampaignSpot?      @relation(fields: [spotId], references: [id], onDelete: Cascade)
+  analyses CreativeAnalysis[]
 
   @@index([campaignId, status])
   @@index([spotId])
@@ -6691,6 +7204,8 @@ enum PaymentGateway {
   RAZORPAY
   CASHFREE
   CCAVENUE
+  /// BT-1 (DR 12): money sent to ADX's own account by NEFT/IMPS/RTGS; ops confirm receipt.
+  BANK_TRANSFER
 }
 
 enum PaymentStatus {
@@ -6700,6 +7215,12 @@ enum PaymentStatus {
   FAILED
   REFUNDED
   PARTIALLY_REFUNDED
+}
+
+/// RF-1: a payment settles its target in full, or pays the reservation fee that holds a campaign's spots.
+enum PaymentPurpose {
+  SETTLEMENT
+  RESERVATION_FEE
 }
 
 /// Lot C (Q12/Q110): one attempt to pay through a gateway. On CAPTURED the
@@ -6716,6 +7237,9 @@ model Payment {
   packageSaleId       String?
   /// Lot J: a publisher's plan purchase, the third thing a payment can settle.
   subscriptionOrderId String?
+  /// LM-1: a display ad or a sponsored listing — the fourth and fifth.
+  adBookingId         String?
+  listingBoostId      String?
   gateway             PaymentGateway
   gatewayOrderId      String?
   gatewayPaymentId    String?
@@ -6724,6 +7248,10 @@ model Payment {
   /// card | upi | netbanking | wallet, as the gateway reported it.
   method              String?
   status              PaymentStatus  @default(CREATED)
+  /// RF-1: what the money is for — the target's full amount, or the reservation fee on a campaign.
+  purpose             PaymentPurpose @default(SETTLEMENT)
+  /// UP-1 (DR 12): the UPI id the payer typed on the checkout, handed to the gateway (a collect request on Cashfree, a prefill on Razorpay).
+  payerUpiId          String?
   failureReason       String?
   topUpId             String?
   walletEntryId       String?
@@ -6733,6 +7261,14 @@ model Payment {
   createdAt           DateTime       @default(now())
   capturedAt          DateTime?
   updatedAt           DateTime       @updatedAt
+  /// BT-1: what the payer told us about the transfer they made — the UTR,
+  /// the day, the amount, a proof upload — and when. Ops confirm or reject
+  /// against the bank statement; the row stays CREATED until then.
+  bankUtr             String?
+  bankPaidOn          DateTime?      @db.Date
+  bankClaimedAmount   Decimal?       @db.Decimal(14, 2)
+  bankProofFileId     String?
+  bankClaimedAt       DateTime?
 
   refunds PaymentRefund[]
 
@@ -6741,6 +7277,8 @@ model Payment {
   @@index([campaignId])
   @@index([packageSaleId])
   @@index([subscriptionOrderId])
+  @@index([adBookingId])
+  @@index([listingBoostId])
   @@index([gateway, gatewayOrderId])
   @@index([status, createdAt])
 }
@@ -6953,6 +7491,8 @@ enum LedgerTransactionKind {
   PRINT_COST
   /// The mirror of an earlier transaction. The only way to undo anything.
   REVERSAL
+  /// LM-1: paid placements — display ads and sponsored listings.
+  PROMOTION_SPEND
 }
 
 /// One side of the book.
@@ -7135,6 +7675,9 @@ model PrintPartner {
   userId               String    @unique
   name                 String
   legalName            String?
+  /// Phase D (1 Oct 2026): the shop's legal form for the KYC — individual,
+  /// sole proprietor, company or LLP/partnership; asked at KYC start.
+  entityType           KycEntityType?
   gstin                String?
   panNumber            String?
   contactName          String?
@@ -7144,6 +7687,10 @@ model PrintPartner {
   city                 String?
   /// Lot X: the catalogue city the free-text `city` resolved to (null when it did not); every read that groups by city groups by this.
   cityId               String?
+  /// Onboarding addresses (1 Oct 2026): the shop address's state and PIN code,
+  /// filled by the address search bar or typed.
+  state                String?
+  postalCode           String?
   latitude             Float?
   longitude            Float?
   capabilities         String[]  @default([])
@@ -7666,6 +8213,12 @@ model IncentiveRate {
   event         IncentiveEvent
   tier          String         @default("*")
   amount        Decimal        @db.Decimal(14, 2)
+  /// CP-4: this key pays nothing, deliberately. A rate row is the only thing
+  /// that beats a broader one in the resolution order, so switching a side
+  /// off needs a row — and a row of zero would be indistinguishable from a
+  /// price nobody has set yet. `rateFor` answers null on this, exactly as it
+  /// does when no row exists, so no caller had to change.
+  paysNothing   Boolean        @default(false)
   effectiveFrom DateTime
   effectiveTo   DateTime?
   createdAt     DateTime       @default(now())
@@ -7711,15 +8264,15 @@ model AgentIncentive {
   verifiedAt       DateTime?
   rejectionReason  String?
 
-  walletEntryId       String?
-  ledgerTransactionId String?
+  walletEntryId               String?
+  ledgerTransactionId         String?
   /// LH10: the clawback — when it was reversed, why, and the mirroring ledger
   /// transaction (null on a reversal of money that had not yet moved).
   reversedAt                  DateTime?
   reversalReason              String?
   reversalLedgerTransactionId String?
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  createdAt                   DateTime  @default(now())
+  updatedAt                   DateTime  @updatedAt
 
   agent AgentProfile   @relation(fields: [agentId], references: [id], onDelete: Cascade)
   rate  IncentiveRate? @relation(fields: [rateId], references: [id])
@@ -7969,6 +8522,61 @@ enum LegalDocumentKind {
   FAQ
   SAFETY_GUIDELINES
   OPEN_SOURCE_LICENSES
+}
+
+/// ---------------------------------------------------------------------------
+/// CT-1 (24 Sep 2026): pages ADX writes and publishes itself — help articles,
+/// guides, a policy the thirteen legal kinds do not cover, a page the website
+/// needs. Versioned exactly as a LegalDocument is: a version is a draft until
+/// it is published, only a draft's text may change, publishing retires
+/// whatever was live, numbers only go up. Unlike a legal document a page may
+/// be taken down again — a help article can stop being true.
+/// See src/modules/content/README.md.
+/// ---------------------------------------------------------------------------
+
+enum ContentPageCategory {
+  /// A standing page: How it works, For publishers, Careers.
+  PAGE
+  /// A help-centre article.
+  HELP
+  /// A how-to with steps.
+  GUIDE
+  /// A policy beyond the thirteen legal kinds.
+  POLICY
+  /// Something dated: a release note, an announcement's long form.
+  NEWS
+}
+
+model ContentPage {
+  id              String              @id @default(cuid())
+  /// The address of the page, stable across its versions: `how-it-works`.
+  slug            String
+  version         Int
+  category        ContentPageCategory @default(PAGE)
+  title           String
+  /// One line under the title in an index.
+  summary         String?
+  /// Markdown. The apps and the website render it; the console shows the source.
+  body            String
+  /// Where this page is meant to be read: WEBSITE, APP_USER, APP_AGENT, CONSOLE.
+  surfaces        String[]            @default([])
+  tags            String[]            @default([])
+  /// What a browser tab and a search result should say; the title and summary when empty.
+  seoTitle        String?
+  seoDescription  String?
+  /// Where it sits in its category's index; lower first, then title.
+  sortOrder       Int                 @default(0)
+  isActive        Boolean             @default(false)
+  publishedAt     DateTime?
+  retiredAt       DateTime?
+  createdByUserId String?
+  changeNote      String?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  @@unique([slug, version])
+  @@index([slug, isActive])
+  @@index([category, isActive])
 }
 
 /// QR-11 (17 Sep 2026): a published brand. Settings › Brand & theme edits a
@@ -8317,39 +8925,47 @@ model Lead {
 
   /// LH2: where the deal is (D12). SOURCED at birth, SCORED after the first
   /// computation, then forward through the stages; LOST from anywhere open.
-  stage             LeadStage       @default(SOURCED)
-  stageChangedAt    DateTime?
+  stage               LeadStage       @default(SOURCED)
+  stageChangedAt      DateTime?
   /// LH2: D11 — why it was lost, and the free note OTHER carries.
-  lostReason        LeadLostReason?
-  lostNote          String?
+  lostReason          LeadLostReason?
+  lostNote            String?
   /// LH2: the catch (first listing live / first campaign paid) and the trailing reward (second booking / second month).
-  activatedAt       DateTime?
-  retainedAt        DateTime?
+  activatedAt         DateTime?
+  retainedAt          DateTime?
   /// LH2: when a PRICE / TIMING loss returns to the cold pool (D11: 60 days).
-  recycleAt         DateTime?
+  recycleAt           DateTime?
   /// LH9/LH11: when the lead last came back to the cold pool, and how many times — the board's
   /// "recycled" flag and the overview's recycle yield read these.
-  recycledAt        DateTime?
-  recycleCount      Int             @default(0)
+  recycledAt          DateTime?
+  recycleCount        Int             @default(0)
   /// LH2/LH6 (D14): which channel produced the first contact, the engagement and the conversion —
   /// `{ firstContact?: { channel, at }, engaged?: { channel, at }, converted?: { channel, at } }`.
-  attribution       Json?
+  attribution         Json?
   /// LH3: the provider's own id for a lead that arrived by webhook (`meta:<leadgen_id>`), so a replay
   /// creates nothing twice; a feed row's place id (`google-places:<place_id>`) for the same reason.
-  externalKey       String?         @unique
+  externalKey         String?         @unique
   /// LH3: the run of a directory feed that produced this row.
-  feedRunId         String?
+  feedRunId           String?
+  /// VH-2: a vehicle spotted as an ad spot — the registration the agent typed,
+  /// and Cashfree's RC answer when the lookup ran. A vehicle MOVES, so the
+  /// thirty-metre capture dedup cannot catch the same auto twice; the
+  /// registration is the identity, and it is unique across leads for exactly
+  /// that reason.
+  vehicleNumber       String?         @unique
+  vehicleRcVerifiedAt DateTime?
+  vehicleRcPayload    Json?
   /// LH4: the agent who spotted it in the street, and when; the photos are
   /// private files kept for the listing draft when it converts.
-  capturedByAgentId String?
-  capturedAt        DateTime?
-  photoFileIds      String[]        @default([])
+  capturedByAgentId   String?
+  capturedAt          DateTime?
+  photoFileIds        String[]        @default([])
   /// LH5 (D3): the agent holding the claim and when it lapses; the `LeadClaim`
   /// rows are the history. An ops assignment overrides a claim.
-  claimedByAgentId  String?
-  claimExpiresAt    DateTime?
+  claimedByAgentId    String?
+  claimExpiresAt      DateTime?
   /// LH5: the territory that routed it, when one did.
-  territoryId       String?
+  territoryId         String?
 
   /// What they said they wanted: "Wall panels".
   interest     String?
@@ -8587,17 +9203,17 @@ enum LeadFlagStatus {
 }
 
 model LeadFlag {
-  id        String         @id @default(cuid())
-  leadId    String
-  kind      LeadFlagKind
-  status    LeadFlagStatus @default(OPEN)
+  id              String         @id @default(cuid())
+  leadId          String
+  kind            LeadFlagKind
+  status          LeadFlagStatus @default(OPEN)
   /// One line ops can read, and the facts behind it — the other leads, the
   /// count in the hour, the provider key that repeated.
-  detail    String
-  evidence  Json?
+  detail          String
+  evidence        Json?
   /// The agent the flag is about, when the pattern names one (a burst, a self-referral).
-  agentId   String?
-  openedAt  DateTime       @default(now())
+  agentId         String?
+  openedAt        DateTime       @default(now())
   decidedByUserId String?
   decidedAt       DateTime?
   note            String?
@@ -8625,23 +9241,23 @@ enum QaVerdict {
 }
 
 model LeadQaSample {
-  id        String       @id @default(cuid())
-  kind      QaSampleKind
-  agentId   String
+  id               String       @id @default(cuid())
+  kind             QaSampleKind
+  agentId          String
   /// Exactly one of these says what was sampled.
-  visitId   String?      @unique
-  messageId String?      @unique
-  leadId    String?
+  visitId          String?      @unique
+  messageId        String?      @unique
+  leadId           String?
   /// What the evidence read said — `{ photo, gps, metres, consent, durationSec, recording }`.
-  evidence  Json
+  evidence         Json
   /// What the evidence alone says; the sample is drawn whatever the answer.
-  autoVerdict QaVerdict
+  autoVerdict      QaVerdict
   /// What a person said, once they looked. Null until reviewed.
-  verdict     QaVerdict?
+  verdict          QaVerdict?
   reviewedByUserId String?
   reviewedAt       DateTime?
   note             String?
-  sampledAt        DateTime @default(now())
+  sampledAt        DateTime     @default(now())
 
   agent AgentProfile @relation(fields: [agentId], references: [id], onDelete: Cascade)
 
@@ -8968,12 +9584,12 @@ model FieldVisit {
   /// LH10: the proof of the visit — a photo and the agent's own fix at the
   /// moment they marked it done. Optional: a visit completed without them is
   /// still a visit, and the QA sample is what says the evidence was missing.
-  proofFileId    String?
-  proofLatitude  Float?
-  proofLongitude Float?
-  proofAt        DateTime?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  proofFileId       String?
+  proofLatitude     Float?
+  proofLongitude    Float?
+  proofAt           DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   agent AgentProfile @relation(fields: [agentId], references: [id], onDelete: Cascade)
   lead  Lead?        @relation(fields: [leadId], references: [id], onDelete: SetNull)
@@ -9268,4 +9884,564 @@ model AgentLocationPoint {
 
   @@index([trailId, at])
   @@index([at])
+}
+
+// ─── LM-1: layouts, media and paid placements (27 Sep 2026) ───────────────────
+//
+// The owner: "Let's go for the layout management now" — and the ad slots are
+// sold ("I will sell them to advertisers … someone wants to promote an event,
+// or an advertiser wants their space advertised above all similar listings").
+// Layouts decide what each screen draws and in what order; media is the
+// library the blocks draw from; ad slots and sponsored listings are the
+// inventory ADX sells on top of them.
+
+/// The screens a layout can drive.
+enum LayoutSurface {
+  WEB_HOME
+  WEB_EXPLORE
+  WEB_FORMATS
+  WEB_LISTING
+  /// PB-3 (27 Sep 2026): the rest of the website's coded pages, now sections in Studio.
+  WEB_CATEGORIES
+  WEB_HOW_IT_WORKS
+  WEB_ADVERTISE
+  WEB_PUBLISHERS
+  WEB_HELP
+  APP_ADVERTISER_HOME
+  APP_PUBLISHER_HOME
+  APP_PARTNER_HOME
+  AGENT_HOME
+}
+
+enum LayoutVersionStatus {
+  DRAFT
+  PUBLISHED
+  RETIRED
+}
+
+/// One version of one surface's layout: the ordered blocks, each with its
+/// props, targeting and schedule. One DRAFT at a time per surface; publishing
+/// retires the live one; a restore publishes an old version's blocks anew.
+model LayoutVersion {
+  id              String              @id @default(cuid())
+  /// The surface this version lays out — null for a custom Studio page, which is keyed by `pageId` instead (PB-1).
+  surface         LayoutSurface?
+  /// PB-1 (27 Sep 2026): a custom page's versions. Exactly one of `surface` / `pageId` is set.
+  pageId          String?
+  page            SitePage?           @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  /// 1, 2, 3 … per surface (or per page) — the number the console shows and a restore names.
+  number          Int
+  status          LayoutVersionStatus @default(DRAFT)
+  /// `[{ id, type, props, visibility, schedule, hidden }]` — validated per type by the block registry.
+  blocks          Json
+  /// PB-4: what a search result and a shared link say — `{ seoTitle?, seoDescription?, seoImageMediaId?, noindex? }`. Versioned with the blocks, so a draft's SEO goes live with it.
+  meta            Json?
+  changeNote      String?
+  createdByUserId String?
+  publishedById   String?
+  publishedAt     DateTime?
+  retiredAt       DateTime?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  @@unique([surface, number])
+  @@unique([pageId, number])
+  @@index([surface, status])
+  @@index([pageId, status])
+}
+
+/// The media library: every image a layout block, a tile or a paid placement draws.
+model MediaAsset {
+  id                String    @id @default(cuid())
+  /// The stored file (uploads module, purpose MEDIA — public).
+  fileId            String?
+  url               String
+  mime              String
+  width             Int?
+  height            Int?
+  bytes             Int?
+  /// Read aloud and shown when the image cannot be; required before a block may use it.
+  altText           String?
+  title             String?
+  tags              String[]  @default([])
+  /// The size spec it was checked against on upload (`media.specs`), when one was named.
+  spec              String?
+  /// Uploaded by a buyer for their own ad (then reviewed with it), or by ADX.
+  ownerAdvertiserId String?
+  createdByUserId   String?
+  archivedAt        DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([archivedAt, createdAt])
+  @@index([ownerAdvertiserId])
+}
+
+/// A place on a screen ADX sells display ads in — its size, how many ads rotate in it at once, its price.
+model AdSlot {
+  id            String          @id @default(cuid())
+  /// Stable key the layout's `ad_slot` block names: `WEB_LISTING_SIDEBAR`.
+  key           String          @unique
+  label         String
+  description   String?
+  /// The surfaces it can appear on.
+  surfaces      LayoutSurface[]
+  /// The media size spec the artwork must meet (`media.specs`).
+  spec          String
+  /// How many booked ads may run on the same day; they rotate.
+  maxConcurrent Int             @default(3)
+  /// Price per day, before GST.
+  ratePerDay    Decimal         @db.Decimal(14, 2)
+  minDays       Int             @default(1)
+  isActive      Boolean         @default(true)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  bookings AdBooking[]
+}
+
+enum PromotionStatus {
+  /// Being put together by the buyer.
+  DRAFT
+  /// Priced and waiting for the buyer's money.
+  PENDING_PAYMENT
+  /// Paid; ADX reviews the artwork (ads) before it runs.
+  PENDING_REVIEW
+  /// Approved (or, a boost, paid) and waiting for its start date.
+  SCHEDULED
+  LIVE
+  ENDED
+  REJECTED
+  CANCELLED
+}
+
+/// A display ad bought in a slot: the buyer's artwork, link and dates.
+model AdBooking {
+  id              String          @id @default(cuid())
+  /// ADB-DDMM-YYNN
+  displayId       String?         @unique
+  slotId          String
+  advertiserId    String
+  createdByUserId String
+  title           String
+  /// The artwork (a MediaAsset the buyer uploaded) and what a tap opens.
+  mediaId         String?
+  headline        String?
+  ctaLabel        String?
+  targetUrl       String?
+  /// Cities it shows in (catalogue ids); empty = everywhere.
+  cityIds         String[]        @default([])
+  startDate       DateTime
+  endDate         DateTime
+  days            Int
+  ratePerDay      Decimal         @db.Decimal(14, 2)
+  subtotal        Decimal         @db.Decimal(14, 2)
+  gstAmount       Decimal         @db.Decimal(14, 2)
+  total           Decimal         @db.Decimal(14, 2)
+  status          PromotionStatus @default(DRAFT)
+  reviewNote      String?
+  reviewedById    String?
+  reviewedAt      DateTime?
+  paidAt          DateTime?
+  paymentId       String?
+  /// The wallet movement that paid it, or refunded it.
+  walletEntryId   String?
+  refundedAt      DateTime?
+  cancelledAt     DateTime?
+  cancelReason    String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  slot AdSlot @relation(fields: [slotId], references: [id])
+
+  @@index([slotId, status, startDate, endDate])
+  @@index([advertiserId, createdAt])
+  @@index([status, startDate])
+}
+
+enum BoostPlacement {
+  /// Top of the search results the listing matches (its category, its city).
+  SEARCH_TOP
+  /// Top of the "Similar listing" row on the listings it is similar to.
+  SIMILAR_TOP
+}
+
+/// Where a sponsored listing can be placed: its price and how many share it at once.
+model BoostPlacementConfig {
+  placement     BoostPlacement @id
+  label         String
+  ratePerDay    Decimal        @db.Decimal(14, 2)
+  /// How many sponsored listings may take this placement on the same day in one city and category.
+  maxConcurrent Int            @default(2)
+  minDays       Int            @default(1)
+  isActive      Boolean        @default(true)
+  updatedAt     DateTime       @updatedAt
+}
+
+/// A sponsored listing: the owner pays to have their space shown first.
+model ListingBoost {
+  id              String           @id @default(cuid())
+  /// BST-DDMM-YYNN
+  displayId       String?          @unique
+  listingId       String
+  publisherId     String
+  createdByUserId String
+  placements      BoostPlacement[]
+  /// Copied from the listing when booked, so capacity is counted where it shows.
+  cityId          String?
+  city            String?
+  category        String
+  startDate       DateTime
+  endDate         DateTime
+  days            Int
+  subtotal        Decimal          @db.Decimal(14, 2)
+  gstAmount       Decimal          @db.Decimal(14, 2)
+  total           Decimal          @db.Decimal(14, 2)
+  status          PromotionStatus  @default(DRAFT)
+  reviewNote      String?
+  paidAt          DateTime?
+  paymentId       String?
+  walletEntryId   String?
+  refundedAt      DateTime?
+  cancelledAt     DateTime?
+  cancelReason    String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  @@index([listingId, status])
+  @@index([status, startDate, endDate])
+  @@index([publisherId, createdAt])
+}
+
+enum PromotionEventKind {
+  IMPRESSION
+  CLICK
+}
+
+/// A day's count of views and taps for one ad or one sponsored listing, on one surface.
+model PromotionStat {
+  id          String             @id @default(cuid())
+  date        DateTime           @db.Date
+  adBookingId String?
+  boostId     String?
+  surface     String
+  kind        PromotionEventKind
+  count       Int                @default(0)
+
+  @@unique([date, adBookingId, boostId, surface, kind])
+  @@index([adBookingId, date])
+  @@index([boostId, date])
+}
+
+/**
+ * ── PB-1…PB-6 (27 Sep 2026): Studio — pages, their addresses, and redirects ──
+ */
+
+/// SYSTEM = one of the website's own pages (its sections are code, the layout is a surface);
+/// CUSTOM = a page made in Studio from content blocks alone.
+enum SitePageKind {
+  SYSTEM
+  CUSTOM
+}
+
+/// Where a page is shown. A custom page may be WEBSITE, APPS or both; a system page is WEBSITE.
+enum SitePageChannel {
+  WEBSITE
+  APPS
+}
+
+/// ADDRESS_CHANGE is written when a page moves (old → new); MANUAL is one an admin added by hand.
+enum SiteRedirectReason {
+  ADDRESS_CHANGE
+  MANUAL
+}
+
+/// A page of the website (and, for custom pages, of the apps) with a public address.
+/// The owner (27 Sep 2026): "edit the layout of existing and create whole new pages, also
+/// assign proper URLs to the new pages and edit existing URLs as well" — only admins change
+/// addresses (`content.addresses`).
+model SitePage {
+  id              String            @id @default(cuid())
+  /// Stable handle the code, blocks and apps link by: `home`, `explore`, `listing`, … or a custom page's own (`diwali-2026`). Never changes.
+  key             String            @unique
+  kind            SitePageKind
+  title           String
+  /// The public address: `/`, `/spaces`, `/spaces/:id`, `/diwali-offers`. Lower-case segments; one `:param` segment only on a system page that has one.
+  path            String            @unique
+  /// SYSTEM only: the Next.js route that draws it (`/spaces`, `/spaces/:id`). A CUSTOM page is drawn by `/pg/<key>`.
+  internalPath    String?
+  /// SYSTEM only: the layout surface its versions live under.
+  surface         LayoutSurface?    @unique
+  channels        SitePageChannel[] @default([WEBSITE])
+  /// The home page's address never changes.
+  addressLocked   Boolean           @default(false)
+  createdByUserId String?
+  archivedAt      DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  versions  LayoutVersion[]
+  redirects SiteRedirect[]
+
+  @@index([kind, archivedAt])
+}
+
+/// An old address that sends the visitor on. One `:param` segment may carry over (`/spaces/:id` → `/ad-spaces/:id`).
+model SiteRedirect {
+  id              String             @id @default(cuid())
+  fromPath        String             @unique
+  toPath          String
+  pageId          String?
+  page            SitePage?          @relation(fields: [pageId], references: [id], onDelete: SetNull)
+  /// 308 when true, 307 when false.
+  permanent       Boolean            @default(true)
+  reason          SiteRedirectReason
+  createdByUserId String?
+  createdAt       DateTime           @default(now())
+
+  @@index([pageId])
+}
+
+/**
+ * ── FM-1 (27 Sep 2026): forms — answers collected, never written into a record ──
+ */
+
+/// Where a submission goes: a lead (scored and routed), a support ticket, or just the form's own list.
+enum FormDestination {
+  LEAD
+  SUPPORT
+  INBOX
+}
+
+/// PUBLIC forms take anyone (captcha + rate limit); SIGNED_IN forms need an account and may take files.
+enum FormAudience {
+  PUBLIC
+  SIGNED_IN
+}
+
+enum FormSubmissionStatus {
+  NEW
+  READ
+  ARCHIVED
+}
+
+/// A form made in Content › Forms. Its questions live in versions (draft → publish), its
+/// plumbing (where answers go, who hears) here.
+model Form {
+  id              String          @id @default(cuid())
+  /// The handle a page's Form block names: `event-signup`. Never changes.
+  key             String          @unique
+  title           String
+  description     String?
+  destination     FormDestination @default(INBOX)
+  /// LEAD only: which side the lead is for.
+  leadSide        String?
+  audience        FormAudience    @default(PUBLIC)
+  /// Who is emailed when an answer arrives.
+  notifyEmails    String[]        @default([])
+  createdByUserId String?
+  archivedAt      DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  versions    FormVersion[]
+  submissions FormSubmission[]
+
+  @@index([archivedAt])
+}
+
+model FormVersion {
+  id              String              @id @default(cuid())
+  formId          String
+  form            Form                @relation(fields: [formId], references: [id], onDelete: Cascade)
+  number          Int
+  status          LayoutVersionStatus @default(DRAFT)
+  /// `{ screens: [{ key, title?, fields: [...] }], submitLabel, successMessage, consentText }` — forms/form-schema.ts.
+  definition      Json
+  changeNote      String?
+  createdByUserId String?
+  publishedById   String?
+  publishedAt     DateTime?
+  retiredAt       DateTime?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  @@unique([formId, number])
+  @@index([formId, status])
+}
+
+model FormSubmission {
+  id           String               @id @default(cuid())
+  formId       String
+  form         Form                 @relation(fields: [formId], references: [id], onDelete: Cascade)
+  /// The version the person answered.
+  formVersion  Int
+  /// `{ [fieldId]: value }` — as the version's fields define them.
+  answers      Json
+  contactName  String?
+  contactEmail String?
+  contactPhone String?
+  /// A Location field's answer, lifted out so submissions can be mapped and filtered by city.
+  latitude     Float?
+  longitude    Float?
+  address      String?
+  cityId       String?
+  userId       String?
+  leadId       String?
+  ticketId     String?
+  status       FormSubmissionStatus @default(NEW)
+  /// The page key or `app:<screen>` it was sent from.
+  source       String?
+  /// sha256 of the address — for rate limits and abuse review, never the address itself.
+  ipHash       String?
+  userAgent    String?
+  consentAt    DateTime
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+
+  @@index([formId, status, createdAt])
+  @@index([cityId])
+}
+
+/**
+ * ── CF-1 (27 Sep 2026): custom fields — extra questions on a record, kept beside it ──
+ */
+
+enum CustomFieldEntity {
+  PUBLISHER
+  ADVERTISER
+  LISTING
+  LEAD
+}
+
+/// One extra question on one kind of record. Values live in CustomFieldValue, never in the
+/// record's own columns, so nothing the platform relies on can break.
+model CustomFieldDef {
+  id              String            @id @default(cuid())
+  entity          CustomFieldEntity
+  /// `preferred_contact_time` — unique per entity, never changes.
+  key             String
+  label           String
+  /// text | textarea | number | select | multiselect | checkbox | date | email | phone | url | location
+  kind            String
+  /// select / multiselect: `[{ value, label }]`.
+  options         Json?
+  hint            String?
+  required        Boolean           @default(false)
+  showOnDesk      Boolean           @default(true)
+  showInApps      Boolean           @default(false)
+  showOnWebsite   Boolean           @default(false)
+  /// The record's owner (the publisher, the advertiser) may answer it in the apps / on the website.
+  editableByOwner Boolean           @default(false)
+  sortOrder       Int               @default(0)
+  createdByUserId String?
+  archivedAt      DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  values CustomFieldValue[]
+
+  @@unique([entity, key])
+  @@index([entity, archivedAt])
+}
+
+model CustomFieldValue {
+  id              String            @id @default(cuid())
+  defId           String
+  def             CustomFieldDef    @relation(fields: [defId], references: [id], onDelete: Cascade)
+  entity          CustomFieldEntity
+  /// The publisher, advertiser, listing or lead id.
+  entityId        String
+  value           Json
+  updatedByUserId String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@unique([defId, entityId])
+  @@index([entity, entityId])
+}
+
+// ─── Cashfree Phase 1: the verification layer ────────────────────────────────
+
+/// Cashfree Phase 1 (the owner, 1 Oct 2026): one run of Cashfree's equivalent
+/// of a Digio workflow — a session of single checks (DigiLocker, the selfie,
+/// the bank account, …) taken on ADX's own screens when Digio could not be
+/// asked. `caseType` + `caseId` name what is being verified (a party's KYC by
+/// the party's id); `steps` is the list the screens walk — each
+/// `{ check, required, status, attemptId, at, tries, failureCode }`; `status`
+/// is OPEN, NEEDS_USER_ACTION, IN_REVIEW, VERIFIED, FAILED or EXPIRED.
+/// `subject` holds the names the checks compare against and nothing else:
+/// never an Aadhaar number, never an image.
+model VerificationSession {
+  id          String   @id @default(cuid())
+  caseType    String
+  caseId      String
+  workflowKey String?
+  provider    String
+  /// The login that may act on the session — the party's own. Null for a party with no app account yet.
+  ownerUserId String?
+  subject     Json?
+  steps       Json
+  status      String   @default("OPEN")
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  attempts VerificationAttempt[]
+
+  @@index([caseType, caseId, createdAt])
+  @@index([status, expiresAt])
+}
+
+/// Cashfree Phase 1: every call to a verification provider — the table the
+/// audit found missing ("there is no table of provider calls"). One row per
+/// provider tried, so a failover is two rows. `verificationId` is the id ADX
+/// sends the provider as its idempotency key (`verification_id`) — the row's
+/// own id. `status` is VERIFIED, FAILED, PENDING or NEEDS_USER_ACTION;
+/// `errorClass` says why a FAILED one failed (BUSINESS is a definite answer,
+/// anything else is technical). `result` is PII-minimised by the provider
+/// before it is written: never a full Aadhaar number, never an image, never
+/// an XML link; numbers masked to their last four.
+model VerificationAttempt {
+  id             String   @id
+  caseType       String
+  caseId         String
+  sessionId      String?
+  checkType      String
+  provider       String
+  attemptNo      Int
+  verificationId String   @unique
+  status         String
+  errorClass     String?
+  failureCode    String?
+  latencyMs      Int?
+  providerRef    String?
+  nameMatchScore Decimal? @db.Decimal(5, 2)
+  result         Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  session VerificationSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+
+  @@index([caseType, caseId, createdAt])
+  @@index([provider, createdAt])
+  @@index([status, checkType])
+  @@index([sessionId])
+}
+
+/// Cashfree Phase 1: an inbound verification webhook, kept so the same event
+/// is handled once however often the provider sends it. The body is not
+/// kept — it can carry a name — only what identifies the event and what was
+/// done with it.
+model ProviderEvent {
+  id          String    @id @default(cuid())
+  provider    String
+  eventId     String
+  eventType   String?
+  receivedAt  DateTime  @default(now())
+  processedAt DateTime?
+  outcome     String?
+
+  @@unique([provider, eventId])
+  @@index([receivedAt])
 }

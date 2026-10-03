@@ -153,6 +153,8 @@ export const setIncentiveRateSchema = z.object({
   event: z.enum(INCENTIVE_EVENTS),
   tier: z.string().trim().optional(),
   amount,
+  /** CP-4: record the key as paying nothing — the amount is then ignored. */
+  paysNothing: z.boolean().optional(),
   effectiveFrom: z.coerce.date().optional(),
 });
 
@@ -187,6 +189,8 @@ export const incentiveQuerySchema = z.object({
 export const LEDGER_KINDS = [
   'TOPUP', 'CAMPAIGN_SPEND', 'PACKAGE_SPEND', 'PUBLISHER_EARNING', 'AGENT_INCENTIVE', 'PAYOUT', 'REFUND',
   'GOODWILL', 'PENALTY', 'ADJUSTMENT', 'EXPIRY', 'PRINT_COST', 'REVERSAL',
+  // LM-1's paid placements: in the enum since then, missing from the filter until the ledger's Kind picker offered it.
+  'PROMOTION_SPEND',
 ] as const;
 
 export const ledgerQuerySchema = z.object({
@@ -200,9 +204,19 @@ export const ledgerQuerySchema = z.object({
   from: z.coerce.date().optional(),
   to: z.coerce.date().optional(),
   amount: amount.optional(),
+  /** The transaction's reference or note, case-insensitive contains. */
+  q: z.string().trim().min(1).max(120).optional(),
   limit: z.coerce.number().int().min(1).max(200).optional(),
   cursor: z.string().optional(),
+  /** Opt-in: `{ rows, total, nextCursor, totals }` instead of the bare array. */
+  paged: z
+    .enum(['1', 'true', '0', 'false'])
+    .optional()
+    .transform((v) => v === '1' || v === 'true'),
 });
+
+/** The export takes the ledger's facets with no page. */
+export const ledgerExportQuerySchema = ledgerQuerySchema.omit({ limit: true, cursor: true, paged: true });
 
 /**
  * Lot B (B1, Q135): the quantity backfill. Dry run unless the caller says

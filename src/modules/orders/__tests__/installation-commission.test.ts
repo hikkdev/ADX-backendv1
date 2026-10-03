@@ -16,6 +16,8 @@ import { Decimal } from '../../../shared/money';
 
 const { repository, notify, listings, agents, payouts, logger } = vi.hoisted(() => ({
   repository: {
+    // Order fraud screening: the hold gates ask; none of these orders is held.
+    findHold: vi.fn(async () => ({ heldAt: null })),
     findById: vi.fn(),
     findWithPublisher: vi.fn(),
     findDetail: vi.fn(),

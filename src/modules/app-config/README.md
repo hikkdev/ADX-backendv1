@@ -155,9 +155,16 @@ other modules read on their hot paths.
 | `kyc.escalationSlaMultiplier` | 2 | Lot G (Q127/142): `jobs/kyc-escalation.job.ts` escalates a PENDING publisher or advertiser case older than this × `reviewSlaHours` to Compliance (source AGE) |
 | `kyc.printPartnerActivationRequiresKyc` | false | Lot N: `print-partners.activatePartner` — on, a partner whose `PrintPartner.kycStatus` is not VERIFIED is refused **409 `KYC_REQUIRED`**; off (the default, today's behaviour) ops activate and KYC follows |
 | `fraud.scanThreshold` / `fraud.scanLimitPerType` | 0.6 / 500 | Lot G (Q118/138): `jobs/fraud-signal-scan.job.ts` — a signal above the threshold opens a SIGNAL_SCAN case when none is open; each party type is walked up to the limit, most recently active first |
+| `fraud.orderScreening` | `{ enabled: true, reviewThreshold: 0.5, holdThreshold: 0.8, autoHold: false, newAccountDays: 7, bigOrderAmount: 100000, velocityCount: 5, velocityMinutes: 60 }` | Order fraud screening (2 Oct 2026): every order scored on placement, on payment and nightly; at `reviewThreshold` it is FLAGGED for the desk; `autoHold` ships OFF (watch mode) — on, a score at `holdThreshold` also holds the order, reversibly. The four parameters tune the order signals (new account + big order, velocity). Deep-patched field by field; `holdThreshold` below `reviewThreshold` is refused (400 VALIDATION_ERROR) on the whole document, whichever side the patch moved. Audited by `PLATFORM_SETTINGS_UPDATED` like the rest |
 | `listings.autoPublishOnVerification` | true | `supply.reviewVerification` — off, a cleared site visit leaves the listing at AWAITING_SITE_VERIFICATION and notifies the desk |
 | `marketplace.minBookingDays` | 1 | `campaigns.setCart` — the floor under each listing's own minimum |
 | `marketplace.maxMarketsPerCampaign` | 3 | multi-market campaigns (later lot) |
+| `booking.reservationFee.enabled` | true | RF-1 (the owner, 25 Sep 2026): whether a big checkout may be reserved for a fee at all |
+| `booking.reservationFee.minCheckoutValue` | 100000 | the checkout total from which the reservation is offered — the owner's open figure |
+| `booking.reservationFee.feePct` | 5 | the fee, as a percentage of the checkout total |
+| `booking.reservationFee.payWithinMinutes` | 60 | how long the advertiser has to pay the fee after reserving; the sweep lapses it after |
+| `booking.reservationFee.holdHours` | 24 | how long the spots are held once the fee is paid |
+| `booking.reservationFee.retainPct` | 10 | the part of the fee ADX keeps when the advertiser walks away or the hold lapses |
 | `publisher.spotInsightsVisible` | false | publisher spot insights (later lot) |
 | `retention.financialYears` / `retention.kycYears` | 8 / 8 | retention sweeps (later lot) |
 | `support.sla.{URGENT,HIGH,NORMAL,LOW}` | 1/4, 4/24, 8/72, 24/168 hours | support ticket ageing |

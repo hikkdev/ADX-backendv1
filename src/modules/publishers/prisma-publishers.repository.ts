@@ -1,9 +1,12 @@
 import { Prisma, prisma } from '../../shared/database';
+import { blockedDatesWhere, liveReservationsWhere, slotHoldingOrdersWhere } from '../listings';
 import type { KycStatus, OrderStatus, Gender } from '../../shared/database';
 import { money } from '../../shared/money';
 import { countsFrom, listArgs } from '../../shared/pagination';
-import { kycPartyStateWhere, kycQueueBaseWhere, type KycQueueState } from '../../shared/kyc-state';
-import { PUBLISHER_KYC_STATUSES, type MyListingsQuery, type PublisherRosterQuery } from './publishers.schema';
+import { kycPartyStateWhere, kycQueueBaseWhere, kycRosterStateWhere, type KycQueueState } from '../../shared/kyc-state';
+import { PARTY_ACCOUNT_STATES, publisherStateWhere, workingPublisherWhere, type PartyAccountState, type RosterStatus } from '../../shared/party-status';
+import { PUBLISHER_KYC_STATUSES, type MyListingsQuery } from './publishers.schema';
+import { mobileSearchNeedle } from '../../shared/validation';
 import {
   OCCUPYING_ORDER_STATUSES,
   type KycDocuments,
@@ -13,6 +16,7 @@ import {
   type KycReviewStamp,
   type NewPublisher,
   type PublisherPatch,
+  type PublisherRosterFilter,
   type PublishersRepository,
   toAgentLabel,
 } from './publishers.repository';
@@ -62,6 +66,8 @@ function kycQueueWhere(filter: KycQueueFilter): Prisma.PublisherWhereInput {
   };
   const state = kycQueueStateOf(filter);
   const parts: Prisma.PublisherWhereInput[] = [kycQueueBaseWhere(true)];
+  // Account lifecycle (2 Oct 2026): working accounts only, unless the desk asks for the inactive.
+  if (!filter.includeInactive) parts.push(workingPublisherWhere());
   if (state) parts.push(kycPartyStateWhere(state, true));
   if (filter.requested === false && !state) parts.push({ NOT: kycPartyStateWhere('REQUESTED', true) });
   if (Object.keys(record).length) parts.push({ kyc: { is: record } });
@@ -82,7 +88,7 @@ const detailInclude = {
   },
   // E6: whether the account behind the profile is closed (Lot A, Q21). QR-13:
   // and the person the desk may edit — the console's Edit details drawer prefills from these.
-  user: { select: { closedAt: true, closeReason: true, displayId: true, firstName: true, lastName: true, dateOfBirth: true, gender: true, avatarUrl: true, consentAcceptedAt: true } },
+  user: { select: { closedAt: true, closeReason: true, isActive: true, displayId: true, firstName: true, lastName: true, dateOfBirth: true, gender: true, avatarUrl: true, consentAcceptedAt: true } },
   // P-B: who brought them in, joined the way the KYC queue joins it, so the
   // party page can print "Onboarded by" by name.
   agent: { select: { id: true, displayId: true, user: { select: { name: true } } } },
@@ -94,22 +100,79 @@ const withAgentLabel = <T extends { agent: { id: string; displayId: string | nul
   agent: toAgentLabel(row.agent),
 });
 
-/** E10-1: the roster's search box — name, display id, city or mobile contains. */
+/**
+ * E10-1: the roster's search box — name, display id, city or mobile contains.
+ * 29 Sep 2026: and the email, and the phone as the console prints it
+ * (`+91 98765 43210` — the digits, whatever sits between them).
+ */
 function rosterSearchWhere(q: string | undefined): Prisma.PublisherWhereInput {
   if (!q) return {};
+  const digits = mobileSearchNeedle(q);
   return {
     OR: [
       { name: { contains: q, mode: 'insensitive' } },
       { displayId: { contains: q, mode: 'insensitive' } },
       { city: { contains: q, mode: 'insensitive' } },
+      { email: { contains: q, mode: 'insensitive' } },
       { mobile: { contains: q } },
+      ...(digits ? [{ mobile: { contains: digits } }] : []),
     ],
   };
 }
 
+/**
+ * 29 Sep 2026: the roster's cuts beside the search — the door and who
+ * opened it (QR-14), the KYC state as the queue derives it, the type, and
+ * the city (Lot X-B: by the key when the facet resolved to one, the
+ * spelling catching only the rows whose key is null). Each is one AND
+ * part, so no cut's `OR` can overwrite another's.
+ */
+function rosterCutsWhere(query: PublisherRosterFilter): Prisma.PublisherWhereInput[] {
+  const parts: Prisma.PublisherWhereInput[] = [];
+  if (query.q) parts.push(rosterSearchWhere(query.q));
+  if (query.onboardedVia) parts.push({ onboardedVia: query.onboardedVia });
+  if (query.onboardedById) parts.push({ onboardedById: query.onboardedById });
+  if (query.kycState) parts.push(kycRosterStateWhere(query.kycState, true));
+  if (query.type) parts.push({ type: query.type });
+  if (query.city) {
+    const spelling = { equals: query.city, mode: 'insensitive' as const };
+    parts.push(query.cityId ? { OR: [{ cityId: query.cityId }, { cityId: null, city: spelling }] } : { cityId: null, city: spelling });
+  }
+  return parts;
+}
+
+/** 29 Sep 2026: what a roster row joins — the six KYC columns (never the document links), the spots counted, the account's closure, the agent. */
+const rosterInclude = {
+  kyc: { select: { id: true, status: true, submittedAt: true, requestedAt: true, requestedChannel: true, method: true } },
+  _count: { select: { listings: true } },
+  user: { select: { closedAt: true, closeReason: true, displayId: true, isActive: true } },
+  agent: { select: { id: true, displayId: true, user: { select: { name: true } } } },
+} satisfies Prisma.PublisherInclude;
+
+/** Account lifecycle (2 Oct 2026): the status facet as one AND part — nothing for ALL. */
+const statusParts = (status: RosterStatus | undefined): Prisma.PublisherWhereInput[] => (!status || status === 'ALL' ? [] : [publisherStateWhere(status)]);
+
 export const prismaPublishersRepository: PublishersRepository = {
+  async findPublicCard(idOrDisplayId: string) {
+    const row = await prisma.publisher.findFirst({
+      where: { OR: [{ id: idOrDisplayId }, { displayId: idOrDisplayId }] },
+      select: {
+        id: true,
+        name: true,
+        kycStatus: true,
+        suspensionScopes: true,
+        user: { select: { avatarUrl: true } },
+        // The spots a visitor can open: live, rights in force — what browse answers.
+        _count: { select: { listings: { where: { status: 'ACTIVE', rightsLapsedAt: null } } } },
+      },
+    });
+    // A publisher blocked from new business is not shown as a storefront.
+    if (!row || row.suspensionScopes.includes('BLOCK_NEW')) return null;
+    return { id: row.id, name: row.name, kycStatus: row.kycStatus, avatarUrl: row.user?.avatarUrl ?? null, liveListings: row._count.listings };
+  },
+
   create(data: NewPublisher) {
-    const { type, email, city, cityId, state, displayId, userId, address, latitude, longitude, gstin, contactName, contactMobile, contactEmail, onboardingStatus, activatedAt, onboardedVia, onboardedById, onboardedByRole, onboardedAt, ...required } = data;
+    const { type, email, city, cityId, state, displayId, userId, address, latitude, longitude, postalCode, gstin, contactName, contactMobile, contactEmail, onboardingStatus, activatedAt, onboardedVia, onboardedById, onboardedByRole, onboardedAt, ...required } = data;
     // Optional columns are omitted rather than set to undefined so Prisma
     // leaves schema defaults in place. The empty KYC row is created up front so
     // every publisher has one to submit into.
@@ -127,6 +190,7 @@ export const prismaPublishersRepository: PublishersRepository = {
         ...(address !== undefined ? { address } : {}),
         ...(latitude !== undefined ? { latitude } : {}),
         ...(longitude !== undefined ? { longitude } : {}),
+        ...(postalCode !== undefined ? { postalCode } : {}),
         ...(gstin !== undefined ? { gstin } : {}),
         ...(contactName !== undefined ? { contactName } : {}),
         ...(contactMobile !== undefined ? { contactMobile } : {}),
@@ -197,7 +261,12 @@ export const prismaPublishersRepository: PublishersRepository = {
   findKycQueue(filter) {
     return prisma.publisher.findMany({
       where: kycQueueWhere(filter),
-      include: { kyc: true, agent: { select: { id: true, displayId: true, user: { select: { name: true } } } } },
+      include: {
+        kyc: true,
+        agent: { select: { id: true, displayId: true, user: { select: { name: true } } } },
+        // Account lifecycle: the row's `accountState`.
+        user: { select: { isActive: true, closedAt: true } },
+      },
       // The SLA ordering is applied in the service, over these rows: a breach
       // is submittedAt plus a number ops can change, which is not something
       // the database can order by without reading the settings row first.
@@ -222,7 +291,12 @@ export const prismaPublishersRepository: PublishersRepository = {
   findKycDetail(publisherId: string) {
     return prisma.publisher.findUnique({
       where: { id: publisherId },
-      include: { kyc: true, agent: { select: { id: true, displayId: true, user: { select: { name: true } } } } },
+      include: {
+        kyc: true,
+        agent: { select: { id: true, displayId: true, user: { select: { name: true } } } },
+        // Account lifecycle: the desk's request and restart refuse a closed account.
+        user: { select: { isActive: true, closedAt: true } },
+      },
     }) as never;
   },
 
@@ -241,9 +315,9 @@ export const prismaPublishersRepository: PublishersRepository = {
 
   /* The roster. Same shape as the agent's list, without the agent clause —
      ADX looks after all of them. Bounded, because it is a whole-table read. */
-  async findAllForAdmin(category?: string, q?: string) {
+  async findAllForAdmin(category?: string, q?: string, status?: RosterStatus) {
     const rows = await prisma.publisher.findMany({
-      where: { ...(category === 'KYC' ? { kycStatus: 'VERIFIED' as const } : {}), ...rosterSearchWhere(q) },
+      where: { AND: [{ ...(category === 'KYC' ? { kycStatus: 'VERIFIED' as const } : {}), ...rosterSearchWhere(q) }, ...statusParts(status)] },
       include: detailInclude,
       orderBy: { createdAt: 'desc' },
       take: 500,
@@ -254,26 +328,28 @@ export const prismaPublishersRepository: PublishersRepository = {
   /* E10-1: the same roster on the list contract. The chips are the KYC
      statuses, counted over the search with the KYC tab removed so "KYC"
      never makes the other chips read zero. */
-  async findRosterPage(query: PublisherRosterQuery) {
-    const base: Prisma.PublisherWhereInput = {
-      ...rosterSearchWhere(query.q),
-      // QR-14: the door, and the person who opened it.
-      ...(query.onboardedVia ? { onboardedVia: query.onboardedVia } : {}),
-      ...(query.onboardedById ? { onboardedById: query.onboardedById } : {}),
-    };
-    const where: Prisma.PublisherWhereInput = { ...base, ...(query.category === 'KYC' ? { kycStatus: 'VERIFIED' as const } : {}) };
-    const [items, total, groups] = await Promise.all([
-      prisma.publisher.findMany({ where, include: detailInclude, orderBy: { createdAt: 'desc' }, ...listArgs(query) }),
+  async findRosterPage(query: PublisherRosterFilter) {
+    // Account lifecycle (2 Oct 2026): the list contract's default is the working accounts.
+    const status = query.status ?? 'ACTIVE';
+    const cuts: Prisma.PublisherWhereInput = { AND: rosterCutsWhere(query) };
+    const base: Prisma.PublisherWhereInput = { AND: [cuts, ...statusParts(status)] };
+    const tab: Prisma.PublisherWhereInput[] = query.category === 'KYC' ? [{ kycStatus: 'VERIFIED' as const }] : [];
+    const where: Prisma.PublisherWhereInput = { AND: [base, ...tab] };
+    const [items, total, groups, perState] = await Promise.all([
+      prisma.publisher.findMany({ where, include: rosterInclude, orderBy: { createdAt: 'desc' }, ...listArgs(query) }),
       prisma.publisher.count({ where }),
       prisma.publisher.groupBy({ by: ['kycStatus'], where: base, _count: { _all: true } }),
+      // The status chips leave the status facet out, so each stays a way back in.
+      Promise.all(PARTY_ACCOUNT_STATES.map(async (state) => [state, await prisma.publisher.count({ where: { AND: [cuts, ...tab, publisherStateWhere(state)] } })] as const)),
     ]);
     return {
-      items: items.map(withAgentLabel) as never,
+      items: items.map(({ _count, ...row }) => ({ ...withAgentLabel(row), listingCount: _count.listings })),
       total,
       counts: countsFrom(
         groups.map((group) => ({ status: group.kycStatus, _count: group._count })),
         PUBLISHER_KYC_STATUSES,
       ),
+      statusCounts: Object.fromEntries(perState) as Record<PartyAccountState, number>,
     };
   },
 
@@ -291,6 +367,42 @@ export const prismaPublishersRepository: PublishersRepository = {
 
   findByUserId(userId: string) {
     return prisma.publisher.findUnique({ where: { userId } });
+  },
+
+  async findAvailability(publisherId: string, window: { from: Date; to: Date }) {
+    const listings = await prisma.listing.findMany({
+      where: { publisherId },
+      orderBy: [{ createdAt: 'asc' }],
+      select: { id: true, displayId: true, title: true, category: true, city: true, slotsTotal: true, status: true },
+    });
+    const ids = listings.map((listing) => listing.id);
+    if (ids.length === 0) return { listings, orders: [], reservations: [], blocks: [] };
+    const [orders, reservations, blocks] = await Promise.all([
+      prisma.order.findMany({
+        where: { listingId: { in: ids }, ...slotHoldingOrdersWhere(window) },
+        orderBy: [{ startDate: 'asc' }],
+        select: {
+          id: true,
+          listingId: true,
+          status: true,
+          startDate: true,
+          endDate: true,
+          campaignName: true,
+          campaignSpot: { select: { campaign: { select: { name: true } } } },
+          advertiser: { select: { name: true, advertiserProfile: { select: { name: true, companyName: true } } } },
+        },
+      }),
+      prisma.campaignSpot.findMany({
+        where: { listingId: { in: ids }, ...liveReservationsWhere(window) },
+        select: { listingId: true, startDate: true, endDate: true, campaign: { select: { name: true, advertiser: { select: { name: true, companyName: true } } } } },
+      }),
+      prisma.listingBlockedDate.findMany({
+        where: { listingId: { in: ids }, ...blockedDatesWhere(window) },
+        orderBy: [{ from: 'asc' }],
+        select: { id: true, listingId: true, from: true, to: true, reason: true },
+      }),
+    ]);
+    return { listings, orders, reservations, blocks };
   },
 
   async findLabelsByUserIds(userIds: string[]) {
@@ -595,7 +707,7 @@ export const prismaPublishersRepository: PublishersRepository = {
     });
   },
 
-  setUserProfile(userId: string, name: string, email?: string) {
+  setUserProfile(userId: string, name: string | undefined, email?: string) {
     return prisma.user.update({ where: { id: userId }, data: { name, email } });
   },
 
@@ -605,7 +717,7 @@ export const prismaPublishersRepository: PublishersRepository = {
   },
 
   findUserMobile(userId: string) {
-    return prisma.user.findUnique({ where: { id: userId }, select: { mobile: true, name: true, avatarUrl: true } });
+    return prisma.user.findUnique({ where: { id: userId }, select: { mobile: true, name: true, avatarUrl: true, email: true } });
   },
 
   async claim(publisherId: string, agentId: string) {
@@ -642,7 +754,10 @@ export const prismaPublishersRepository: PublishersRepository = {
   completeOnboarding(publisherId: string) {
     return prisma.publisher.update({
       where: { id: publisherId },
-      data: { onboardingStatus: 'ONBOARDING_COMPLETE' },
+      // CP-1: the completion's own moment. `onboardedAt` is the door the
+      // account came through; this is when onboarding finished, which the
+      // agent's daily quota counts and cost-per-onboarding divides by.
+      data: { onboardingStatus: 'ONBOARDING_COMPLETE', onboardingCompletedAt: new Date() },
     });
   },
 };

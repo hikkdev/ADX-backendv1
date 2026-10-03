@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { upperEnum } from '../../shared/validation';
+import { kycEntityTypeSchema } from '../../shared/kyc-state';
 
 export const KYC_STATUSES = ['PENDING', 'VERIFIED', 'REJECTED'] as const;
 
@@ -97,6 +98,15 @@ export const kycRequestSchema = z.object({
   note: z.string().trim().min(1).max(500).optional(),
 });
 export type KycRequestInput = z.infer<typeof kycRequestSchema>;
+
+/**
+ * Phase D (1 Oct 2026): the same body on the publisher's, the advertiser's
+ * and the print partner's request routes, with the legal form the Digio
+ * workflow needs — asked by the desk when the party has none (409
+ * `ENTITY_TYPE_REQUIRED`). Agents and employees take `kycRequestSchema`.
+ */
+export const kycEntityRequestSchema = kycRequestSchema.extend({ entityType: kycEntityTypeSchema.optional() });
+export type KycEntityRequestInput = z.infer<typeof kycEntityRequestSchema>;
 
 /** `?requested=true|false` on the queues — a request with nothing submitted yet. */
 export const requestedFilterSchema = z

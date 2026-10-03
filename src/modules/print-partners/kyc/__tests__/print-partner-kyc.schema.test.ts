@@ -23,10 +23,10 @@ describe('the submission body', () => {
       'bankProofUrl',
       'selfieUrl',
     ]);
-    expect(submitPrintPartnerKycSchema.safeParse({ panNumber: 'abcde1234f', govIdType: 'aadhaar', gstUrl: 'https://adx.local/api/v1/files/f1' }).data).toEqual({
+    expect(submitPrintPartnerKycSchema.safeParse({ panNumber: 'abcde1234f', govIdType: 'aadhaar', gstUrl: 'https://adx.in/api/v1/files/f1' }).data).toEqual({
       panNumber: 'ABCDE1234F',
       govIdType: 'AADHAAR',
-      gstUrl: 'https://adx.local/api/v1/files/f1',
+      gstUrl: 'https://adx.in/api/v1/files/f1',
     });
     expect(submitPrintPartnerKycSchema.safeParse({}).success).toBe(false);
     expect(submitPrintPartnerKycSchema.safeParse({ panNumber: 'nope' }).success).toBe(false);

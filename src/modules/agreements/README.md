@@ -260,3 +260,18 @@ before publishing]` and names the variable the kind renders (`{{spots}}`,
 edit and publish it at `/agreements/templates`; a kind with any row — draft,
 live or superseded — is never touched. LISTING is not seeded: the supply desk
 publishes it with its own enumeration.
+
+## 26 Sep 2026 — `GET /agreements/mine` and the public platform terms
+
+- `GET /agreements/mine` (any signed-in account): one line per platform-scope
+  kind the account's party profiles accepted —
+  `{ kind, label, templateVersion, acceptedAt, currentVersion, current,
+  requiresReacceptance }`; `current: false` is outdated, enforced or not.
+  Per-deal kinds are not in it. Resolved through `partiesOfUser`.
+- `GET /legal/agreements/:kind` (public, `publicAgreementRouter`, mounted at
+  `/legal/agreements` ahead of `legal`, `publicReadLimiter`): the live text of
+  a party-facing platform kind (PLATFORM, ADVERTISER_PLATFORM,
+  PUBLISHER_LICENCE, AGENT_PUBLISHER_PLATFORM, AGENT_ADVERTISER_PLATFORM) as
+  `{ id, kind, version, title, body, activatedAt }` — no drafts, author or
+  counts. The employee's letter, the partner's service agreement and the
+  per-deal kinds are 404. Pinned in `__tests__/mine-and-public.test.ts`.

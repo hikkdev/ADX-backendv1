@@ -1,5 +1,7 @@
 import { redis } from '../cache/redis';
 import { logger } from './logger';
+import { redisKnownDown } from '../cache/redis-outage';
+import { warnThrottled } from './throttled';
 
 /**
  * Requests and 5xx answers per hour, kept a day in Redis — G13-B.
@@ -23,10 +25,12 @@ const HOUR_MS = 60 * 60 * 1000;
 export const hourKey = (at: Date): string => String(Math.floor(at.getTime() / HOUR_MS));
 
 export function recordRequestOutcome(statusCode: number, at = new Date()): void {
+  // 28 Sep 2026: while Redis is known to be down, skip — a queued write would only fail ~30 s later.
+  if (redisKnownDown(redis.status)) return;
   const field = hourKey(at);
   const chain = redis.multi().hincrby(HOURLY_REQUESTS_KEY, field, 1);
   if (statusCode >= 500) chain.hincrby(HOURLY_5XX_KEY, field, 1);
-  void chain.exec().catch((err: unknown) => logger.warn('Request outcome not counted', { reason: err instanceof Error ? err.message : String(err) }));
+  void chain.exec().catch((err: unknown) => warnThrottled('Request outcome not counted', { reason: err instanceof Error ? err.message : String(err) }));
 }
 
 export type RequestCounts = { requests: number; serverErrors: number; hours: number };

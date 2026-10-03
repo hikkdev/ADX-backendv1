@@ -1,4 +1,4 @@
-import { prisma } from '../../../shared/database';
+import { prisma, USER_CREDENTIALS } from '../../../shared/database';
 import type { Otp, RecoveryCode, Role, User } from '../../../shared/database';
 
 /**
@@ -44,7 +44,9 @@ export interface TwoFactorRepository {
 
 export const prismaTwoFactorRepository: TwoFactorRepository = {
   findUser(userId: string) {
-    return prisma.user.findUnique({ where: { id: userId }, include: { roles: true } }) as never;
+    // 2 Oct 2026: opts back into the credential columns the global omit keeps
+    // back — every factor check reads the sealed TOTP secret off this row.
+    return prisma.user.findUnique({ omit: USER_CREDENTIALS, where: { id: userId }, include: { roles: true } }) as never;
   },
 
   stampTwoFactorRequired(userId: string) {
@@ -56,6 +58,8 @@ export const prismaTwoFactorRepository: TwoFactorRepository = {
 
   findLatestTwoFactorOtp(userId: string) {
     return prisma.otp.findFirst({
+      // The answer is compared against the hash — opted back in past the global omit.
+      omit: { codeHash: false },
       where: {
         userId,
         purpose: { in: ['TWO_FACTOR', 'TWO_FACTOR_EMAIL'] },
@@ -128,7 +132,8 @@ export const prismaTwoFactorRepository: TwoFactorRepository = {
   },
 
   findUnusedRecoveryCodes(userId: string) {
-    return prisma.recoveryCode.findMany({ where: { userId, usedAt: null }, orderBy: { createdAt: 'asc' } });
+    // Compared one by one against the hashes — opted back in past the global omit.
+    return prisma.recoveryCode.findMany({ omit: { codeHash: false }, where: { userId, usedAt: null }, orderBy: { createdAt: 'asc' } });
   },
 
   async spendRecoveryCode(codeId: string) {

@@ -17,12 +17,14 @@ const { repository, digio } = vi.hoisted(() => ({
 vi.mock('../prisma-print-partner-kyc.repository', () => ({ prismaPrintPartnerKycRepository: repository }));
 vi.mock('../../../../shared/integrations/digio-client', () => digio);
 vi.mock('../../../notifications', () => ({ createNotification: vi.fn(), notify: vi.fn() }));
-vi.mock('../../../../shared/audit', () => ({ logActivity: vi.fn() }));
+vi.mock('../../../../shared/audit', () => ({ logActivity: vi.fn(), auditDiff: vi.fn(() => ({})) }));
 vi.mock('../../../../shared/logging', () => ({ logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } }));
 
-import { initiatePrintPartnerDigioKyc } from '../print-partner-digio.service';
+import { initiatePrintPartnerDigioKyc, type DigioPartner } from '../print-partner-digio.service';
 
-const partner = { id: 'prt_1', name: 'Sharma Prints', email: 'shop@example.in', mobile: '+919999999999' };
+// Phase D: the shop's legal form is on the row, so the start asks nothing.
+const partner: DigioPartner = { id: 'prt_1', name: 'Sharma Prints', email: 'shop@example.in', mobile: '+919999999999', entityType: 'SOLE_PROPRIETOR', kycStatus: 'PENDING' };
+const self = { onBehalf: false, byUserId: 'usr_prt' };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -33,16 +35,16 @@ beforeEach(() => {
 describe('starting Digio on a verified partner', () => {
   it('is 409 KYC_ALREADY_VERIFIED before Digio is asked or the row touched', async () => {
     repository.findByPartnerId.mockResolvedValue({ id: 'ppk_1', printPartnerId: 'prt_1', status: 'VERIFIED', method: 'MANUAL' });
-    await expect(initiatePrintPartnerDigioKyc(partner)).rejects.toMatchObject({ statusCode: 409, code: 'KYC_ALREADY_VERIFIED' });
+    await expect(initiatePrintPartnerDigioKyc(partner, self)).rejects.toMatchObject({ statusCode: 409, code: 'KYC_ALREADY_VERIFIED' });
     expect(digio.requestDigioKyc).not.toHaveBeenCalled();
     expect(repository.upsertDigio).not.toHaveBeenCalled();
   });
 
   it('still opens a session with no row, or a row that is not verified', async () => {
     repository.findByPartnerId.mockResolvedValue(null);
-    await expect(initiatePrintPartnerDigioKyc(partner)).resolves.toMatchObject({ kycId: 'dg_1' });
+    await expect(initiatePrintPartnerDigioKyc(partner, self)).resolves.toMatchObject({ kycId: 'dg_1' });
     repository.findByPartnerId.mockResolvedValue({ id: 'ppk_1', printPartnerId: 'prt_1', status: 'NEEDS_INFO', method: 'MANUAL' });
-    await expect(initiatePrintPartnerDigioKyc(partner)).resolves.toMatchObject({ kycId: 'dg_1' });
+    await expect(initiatePrintPartnerDigioKyc(partner, self)).resolves.toMatchObject({ kycId: 'dg_1' });
     expect(repository.upsertDigio).toHaveBeenCalledTimes(2);
   });
 });

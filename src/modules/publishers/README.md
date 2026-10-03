@@ -27,19 +27,19 @@ Mounted at `/api/v1/publishers`, all `authenticate`d, plus one webhook.
 | Method | Path | Guard |
 | --- | --- | --- |
 | POST | `/register` | PUBLISHER (**201** or 200) |
-| GET | `/me` | PUBLISHER — QR-3 (17 Sep 2026): the row plus `readiness: { profile: { complete, missing[], percent }, kyc: { verified, status }, terms: { accepted }, percent, canList, canGoLive }` (`shared/kyc-state`'s `publisherReadiness` — basics name/email/address/dateOfBirth 70, identity check 30, terms 0 since QR-6 — the terms of use are consented to before any detail (`POST /users/me/consent`) and the commercial agreement is presented at submit (`listings`), so neither is a setup step; a name still equal to the mobile is no name; `canList` is the listing door's rule and, since QR-5, `canGoLive` is the same rule — the check ranks, it no longer gates) and `verified` (`kycStatus === 'VERIFIED'`, the tick beside the name; `/advertisers/me` and `/print-partners/me` carry the same). QR-5 (17 Sep 2026): also `dateOfBirth` (`YYYY-MM-DD \| null`) and `gender` (`MALE \| FEMALE \| OTHER \| PREFER_NOT_TO_SAY \| null`), read off the person's User row, and the publisher's `latitude` / `longitude` (the pin behind the address; null when it was typed). QR-7: `avatarUrl` (the person's profile picture, off the User row; set through `PATCH /users/me` after an `AVATAR` upload) |
+| GET | `/me` | PUBLISHER — QR-3 (17 Sep 2026): the row plus `readiness: { profile: { complete, missing[], percent }, kyc: { verified, status }, terms: { accepted }, percent, canList, canGoLive }` (`shared/kyc-state`'s `publisherReadiness` — basics name/email/address 70 (AGE-1, 29 Sep 2026: the date of birth left the basics), identity check 30, terms 0 since QR-6 — the terms of use are consented to before any detail (`POST /users/me/consent`) and the commercial agreement is presented at submit (`listings`), so neither is a setup step; a name still equal to the mobile is no name; `canList` is the listing door's rule and, since QR-5, `canGoLive` is the same rule — the check ranks, it no longer gates) and `verified` (`kycStatus === 'VERIFIED'`, the tick beside the name; `/advertisers/me` and `/print-partners/me` carry the same). QR-5 (17 Sep 2026): also `dateOfBirth` (`YYYY-MM-DD \| null`) and `gender` (`MALE \| FEMALE \| OTHER \| PREFER_NOT_TO_SAY \| null`), read off the person's User row, and the publisher's `latitude` / `longitude` (the pin behind the address; null when it was typed). QR-7: `avatarUrl` (the person's profile picture, off the User row; set through `PATCH /users/me` after an `AVATAR` upload) |
 | GET | `/me/listings` | PUBLISHER — DR 06: the publisher's own spots on the list contract, `?shelf=AVAILABLE\|OCCUPIED\|INACTIVE`, `?q=`, `?sort=`; every row carries `occupied` and, E11-1, `belowFloor` (rate-cards' `belowFloorFlags`, the same chip as ADMIN `GET /listings` — under the floor of the card in force, whatever case stands on it; false where no card reaches) |
 | GET | `/me/qr` | PUBLISHER (**201** or 200) — `?latitude&longitude` is the phone's fix; a 90-second code, reissued once dead |
 | GET | `/me/qr/status` | PUBLISHER — polled: is the code live, and who scanned it (name, id, photo, distance) |
 | POST | `/me/qr/scans/:scanId/approve` | PUBLISHER — the owner's yes: burns the code, claims, opens the ONBOARDING grant |
 | POST | `/me/qr/scans/:scanId/decline` | PUBLISHER — the owner's no: burns the code, logs USER_DECLINED |
 | POST | `/me/cancel-onboarding` | PUBLISHER |
-| PATCH | `/me` | PUBLISHER — DR 08 Steps 2–4. QR-5 (17 Sep 2026): also `dateOfBirth` (`YYYY-MM-DD`, 18–120 years ago) and `gender` (any casing), written to the person's User row (the same two columns `PATCH /users/me` takes), and `latitude` / `longitude` (both or neither — 400 `VALIDATION_ERROR` with one half — null clears), the pin the app sets when the address came off the map or a place search |
+| PATCH | `/me` | PUBLISHER — DR 08 Steps 2–4. QR-5 (17 Sep 2026): also `dateOfBirth` (`YYYY-MM-DD` — AGE-1: any real day, not in the future, at most 120 years back; under 18 is taken) and `gender` (any casing), written to the person's User row (the same two columns `PATCH /users/me` takes), and `latitude` / `longitude` (both or neither — 400 `VALIDATION_ERROR` with one half — null clears), the pin the app sets when the address came off the map or a place search |
 | GET | `/me/kyc` | PUBLISHER — null before the first submission |
 | POST | `/me/kyc` | PUBLISHER (**201**) — Steps 6–11, self-service; Lot F: while NEEDS_INFO a **partial** body of the DR 08 columns — only the flagged tiles — the rest keep their files and decisions, the case returns to PENDING, the flags on the fields sent are cleared; `manifestVersion` in the body is pinned on the row at the first submission (`pinKycManifest`, never moved) |
 | POST | `/me/complete-onboarding` | PUBLISHER — needs a submitted KYC; 409 while an agent is mid-way |
 | GET | `/` | any authenticated — E10-1 (ADMIN): `?q=` (name / display id / city / mobile contains) beside `?category=`; with `?page=` the answer is the list contract `{ items, total, page, pageSize, counts }`, the chips by `kycStatus` counted with the KYC tab removed; without `page` the bare array stays one release — E12-B: on that bare path an empty `q=` / `category=` and a non-numeric `pageSize=` are ignored as the old handler ignored them (`publisherBareQuerySchema` drops them); the list-contract path keeps its validation. N2-B: every roster row — the bare array and the list contract's `items[]` — carries **`userId`** (the app login behind the publisher, null until they have one): the console opens the desk's KYC paths by it, since a request or a recording before any KYC row exists is keyed by the party's user |
-| POST | `/` | AGENT_PUBLISHER, ADMIN (**201**) — Q29: an admin may open one from the desk; `attributeToAgentId` in the body is the only way an admin's publisher gets an agent. **QR-13 (17 Sep 2026): the desk onboards in full** — beside `name, mobile, email, type, city, state, address` the body takes the person (`firstName, lastName, dateOfBirth` (YYYY-MM-DD, 18+), `gender`), the pin (`latitude`+`longitude`, both or neither), `gstin` and the contact person. Once `firstName` is given the app's ladder rules apply (`deskOnboarding`): last name, email, address, city, state and date of birth required; a BUSINESS's GSTIN; a contact name and mobile for anyone but an INDIVIDUAL. The mobile is normalised to `+91…`, the **User is opened with the PUBLISHER role and an `ADX-…` id (or adopted when the number already has an account — fields filled where empty, role granted)** and linked as `userId`, and with the four readiness basics in the row opens `ONBOARDING_COMPLETE` with `activatedAt` — so the owner's first sign-in goes OTP → consent → home, with nothing left to ask. Without a first name the agent door's quick-add is unchanged |
+| POST | `/` | AGENT_PUBLISHER, ADMIN (**201**) — Q29: an admin may open one from the desk; `attributeToAgentId` in the body is the only way an admin's publisher gets an agent. **QR-13 (17 Sep 2026): the desk onboards in full** — beside `name, mobile, email, type, city, state, address` the body takes the person (`firstName, lastName, dateOfBirth` (YYYY-MM-DD, any valid date — AGE-1), `gender`), the pin (`latitude`+`longitude`, both or neither), `gstin` and the contact person. Once `firstName` is given the app's ladder rules apply (`deskOnboarding`): last name, email, address, city and state required (AGE-1: the date of birth is optional); a BUSINESS's GSTIN; a contact name and mobile for anyone but an INDIVIDUAL. The mobile is normalised to `+91…`, the **User is opened with the PUBLISHER role and an `ADX-…` id (or adopted when the number already has an account — fields filled where empty, role granted)** and linked as `userId`, and with the three readiness basics in the row opens `ONBOARDING_COMPLETE` with `activatedAt` — so the owner's first sign-in goes OTP → consent → home, with nothing left to ask. Without a first name the agent door's quick-add is unchanged |
 | GET | `/:publisherId` | any authenticated — the onboarding agent or ADMIN; Lot F: `kyc.flagged[] { field, note }` and `kyc.documentReviews[] { field, decision, note }` from the desk's per-document decisions (the manifest's source), so the agent's capture screen lights the flagged tiles. P-B: `agent { id, displayId, name } \| null` — who brought them in, by name ("Onboarded by"), joined the way the KYC queue joins it; null when nobody did |
 | GET | `/:publisherId/summary` | ADMIN — P-B: the detail card, the mirror of `GET /advertisers/:id/summary`: `{ publisher, metrics, listings, activity }`. See "The detail card" below |
 | GET | `/:publisherId/activity` | the account's own agent or ADMIN — R-B: the action log on the list contract `{ items, total, page, pageSize, counts }`, newest first; `?status=` is the kind facet (`CHECK_IN \| FOLLOW_UP \| CALLED \| MESSAGED \| NOTE`, a comma list, the chips counted with it removed), `?q=` reaches the note; each row `{ id, kind, note, at, agentId }`. 403 another agent or no agent profile, 404 unknown |
@@ -430,6 +430,16 @@ stopped), null while nothing is live; `awaiting` counts bookings still
 PENDING_PUBLISHER; `listings` carries every spot with its pin and whether it
 is occupied, for the map. The greeting follows the Indian clock.
 
+BD-1 (DR 12, 25 Sep 2026): `GET /publishers/me/availability?from&to`
+(PUBLISHER) is the website's availability calendar in one read — every spot
+as a row (`id, displayId, title, category, city, slotsTotal, status`), and
+over the window its `bookings` (the orders holding a slot, `kind: BOOKED`,
+with the campaign and advertiser names; the live campaign reservations as
+`kind: HOLD`) and its `blocks` (the publisher's own blocked dates, see
+listings' README). The window defaults to today and the fortnight after,
+and is at most 92 days. The same clauses feed browse's slot count, so the
+grid never shows free what a shopper cannot book.
+
 E11-1: `GET /publishers/me/listings` and the agent's `GET
 /publishers/:publisherId/listings` stamp `belowFloor` on every row through
 `rate-cards`' `belowFloorFlags` (`stampBelowFloor` in `my-listings.service.ts`),
@@ -528,3 +538,62 @@ mapped to `agent { id, displayId, name } | null` on every detail read
 (`GET /publishers/:id`, the roster, the agent's list) — the party page's
 "Onboarded by", by name; a publisher nobody brought in answers `null`.
 Pinned by `p-b-publisher-summary.test.ts`.
+
+## 26 Sep 2026 — the public publisher card
+
+`GET /publishers/:publisherId/public` — the website's storefront header
+(`/spaces?publisherId=`): `{ id, name, avatarUrl, verified, liveListings }`, by
+id or display id, no contact data and no KYC detail beyond the verified mark.
+`liveListings` counts ACTIVE spots with their rights in force; a publisher
+blocked from new business (`BLOCK_NEW`) is 404. Registered above the
+router-wide `authenticate` with `authenticateOptional` and `publicReadLimiter`
+— the only route there. Pinned in `__tests__/public-card.test.ts`.
+
+## 29 Sep 2026 — the uniform party roster
+
+The console's four party desks (publishers, advertisers, print partners,
+agents) now draw one column layout and one filter bar, so `GET /publishers?page=`
+(ADMIN) takes the cuts every party roster takes beside `q`, `category` and
+the door: **`kycState`** (the six states of `shared/kyc-state`, any case —
+`kycRosterStateWhere`, which also counts a legacy row with no record and a
+VERIFIED mirror as VERIFIED, the way the pill reads it), **`type`**
+(`PublisherType`) and **`city`** (a catalogue slug or a name — by the key,
+the spelling for the rows keyed to nothing). `q` also matches the email and
+the phone as the console prints it (`+91 98765 43210` — `mobileSearchNeedle`).
+Every cut is one AND part. Each `items[]` row carries **`kyc`** — the six
+facts with the server's `state`, never the document links — and
+**`listingCount`** (the spots, counted rather than joined; the list contract
+no longer joins `listings`). The bare path is unchanged. Pinned by
+`uniform-roster.route.test.ts` and `uniform-roster.repository.test.ts`.
+
+## Phase D (1 Oct 2026) — the legal form the KYC verifies
+
+`Publisher.entityType` (`KycEntityType`, nullable) picks the Digio workflow —
+the rules are in `kyc/README.md` under the same heading. On this module's routes:
+
+- `POST /publishers/me/kyc/digio/initiate`, `POST
+  /publishers/:publisherId/kyc/digio/initiate`, `POST
+  /publishers/kyc-queue/:publisherId/digio/restart` take `{ entityType? }`;
+  `POST /publishers/kyc-queue/:publisherId/request` takes `{ channel?, note?,
+  entityType? }`. With the form unknown (a BUSINESS — it could be any of
+  five) and none sent: **409 `ENTITY_TYPE_REQUIRED`** with `details { party:
+  'PUBLISHER', options }`, nothing stored, stamped or sent. All eight forms
+  are allowed; POLITICAL runs the "Other entities" workflow.
+- `GET /publishers/me`, `GET /publishers/:publisherId`, the roster (both the
+  list contract and the bare array) and the agent's own list answer
+  **`entityType`** (the effective value, null when it is still to be asked)
+  and **`entityTypeStored`**; `GET /users/me/onboarding-manifest` carries the
+  same two beside the ladder.
+- `PATCH /publishers/:publisherId` takes `entityType` (any of the eight, null
+  clears it back to what `type` says; audit `KYC_ENTITY_TYPE_SET`). On a
+  VERIFIED publisher only the upgrade — an individual's business — is taken,
+  as a fresh Digio request; anything else is **409 `KYC_LOCKED`** and the
+  rest of the patch is not written.
+- The Digio webhook now moves `Publisher.kycStatus` with the record, in one
+  transaction, as the desk's review does — payouts read the mirror, and a
+  Digio-verified publisher was left unable to withdraw. `PublisherKyc` is
+  indexed on `digioRequestId`.
+
+Pinned in `__tests__/n2v-digio-start-verified.test.ts`,
+`n2b-digio-method.test.ts`, `phase-d-entity-type.test.ts`,
+`n-desk-paths.test.ts` and `digio-restart.test.ts`.

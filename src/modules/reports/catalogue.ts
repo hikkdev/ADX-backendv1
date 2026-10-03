@@ -5,14 +5,14 @@ import type { Decimal } from '../../shared/money';
 import type { ReportData, Window } from './reports.repository';
 
 /**
- * The catalogue — Lot G (Q129/Q143): twelve reports, defined in code.
+ * The catalogue — Lot G (Q129/Q143): thirteen reports, defined in code.
  *
  * A report is a kind, a name, what it is for, the filters it takes, the
  * columns it prints and a query that answers rows for a window. The
  * catalogue is data the console reads (`GET /reports/catalogue`) and the
  * contract a run or a schedule is validated against — a filter a kind does
  * not declare is refused, never silently ignored. The queries read through
- * `ReportData`, so the twelve stay testable without a database and the
+ * `ReportData`, so the thirteen stay testable without a database and the
  * ORM stays behind the repository.
  *
  * Money is printed as a two-place string (`money`), dates as ISO instants;
@@ -65,7 +65,7 @@ const pct = (part: number, whole: number): string | null => (whole === 0 ? null 
 const R = (key: string, label: string): ReportColumn => ({ key, label, align: 'right' });
 const L = (key: string, label: string): ReportColumn => ({ key, label });
 
-/** The twelve, bound to a data source. */
+/** The thirteen, bound to a data source. */
 export function buildCatalogue(data: ReportData): ReportKind[] {
   return [
     {

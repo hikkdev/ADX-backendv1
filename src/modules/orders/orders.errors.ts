@@ -1,4 +1,6 @@
 import { ApiError, type ApiErrorCode } from '../../shared/errors';
+import { ORDER_REVIEW_NOTICE } from './orders.redact';
+import { ORDER_ON_HOLD_MESSAGE } from './risk/order-hold';
 
 /**
  * Order services throw bare sentinel `Error`s so they stay free of HTTP
@@ -42,6 +44,10 @@ const MAP: Record<string, [number, string, ApiErrorCode?]> = {
   NO_PUBLISHER_ACCOUNT: [409, 'This listing has no publisher account to act for.'],
   SAME_AGENT: [400, 'That agent already holds this order.'],
   // Lot D (Q120): the print gate. Its own code so the console routes to the review queue.
+  // Order fraud screening (2 Oct 2026): a held order's money-moving or dispatching step.
+  // ADX's own steps get the desk's sentence; a party's (an agent accepting) the neutral line.
+  ORDER_ON_HOLD: [409, ORDER_ON_HOLD_MESSAGE, 'ORDER_ON_HOLD'],
+  ORDER_UNDER_REVIEW: [409, ORDER_REVIEW_NOTICE, 'ORDER_ON_HOLD'],
   CREATIVE_NOT_APPROVED: [
     409,
     'The artwork for this order has not been approved. Approve it in the creative review queue before marking prints ready.',

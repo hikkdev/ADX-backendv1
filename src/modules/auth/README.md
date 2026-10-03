@@ -38,8 +38,8 @@ steps and (Lot K2) the five authenticator routes are authenticated.
 | --- | --- | --- |
 | POST | `/send-otp` | `otpRequestLimiter`, `verifyCaptcha` |
 | POST | `/verify-otp` | `otpVerifyLimiter` — M-B: an account holding ADMIN gets **no tokens**; it gets `{ challenge }` (the password login's shape) bounded to what the phone did not prove — `AUTHENTICATOR` when enrolled and `EMAIL` while the backup lasts, never SMS again — or, when the policy does not allow SMS for the account, `AUTHENTICATOR` alone; 403 `ADMIN_SIGN_IN_REQUIRED` (`details.loginAt`) when nothing can answer. Audited `LOGIN_2FA_CHALLENGED { method: 'otp' }` |
-| POST | `/send-otp-email` | `otpRequestLimiter`, `verifyCaptcha` |
-| POST | `/verify-otp-email` | `otpVerifyLimiter` — M-B: an ADMIN is refused 403 `ADMIN_SIGN_IN_REQUIRED` naming the console login (the code is spent; `LOGIN_FAILED { method: 'otp_email' }`) |
+| POST | `/send-otp-email` | `otpRequestLimiter`, `verifyCaptcha` — ED-1: register-or-login; an unknown address gets a sign-up code (`EmailSignup`), a known one its login code; same budget, same answer |
+| POST | `/verify-otp-email` | `otpVerifyLimiter` — ED-1: a known address answers tokens (and stamps `emailVerifiedAt`); an unknown one answers `{ signup: { signupToken, email, expiresInSeconds } }` for the phone step. M-B: an ADMIN is refused 403 `ADMIN_SIGN_IN_REQUIRED` naming the console login (the code is spent; `LOGIN_FAILED { method: 'otp_email' }`) |
 | POST | `/refresh` | `refreshLimiter` |
 | POST | `/logout` | `refreshLimiter` |
 | POST | `/login-password` | `passwordAuthLimiter`, `verifyCaptcha` |
@@ -111,7 +111,7 @@ the `aud` claim this backend pins, so a mismatch rejects every token.
   who picked their personal Gmail account in the popup has to be told to pick
   the other one.
 - The domain check reads the signed **`hd` claim, never the email suffix**. An
-  attacker at another Workspace can hold an alias that ends in `@adx.co`; they
+  attacker at another Workspace can hold an alias that ends in `@adx.in`; they
   cannot forge `hd`.
 - `algorithms: ['RS256']` is **pinned**, not read from the token header, so an
   `alg: none` or HS256 forgery cannot talk the verifier out of checking the
@@ -146,7 +146,7 @@ An account holding ADMIN gets **no tokens** from `POST /login-password` or
 
 ```json
 { "challenge": { "challengeToken": "…", "methods": ["SMS","EMAIL"],
-                 "maskedMobile": "+91 ***** 2210", "maskedEmail": "a******o@adx.co" } }
+                 "maskedMobile": "+91 ***** 2210", "maskedEmail": "a******o@adx.in" } }
 ```
 
 `challengeToken` is a five-minute JWT carrying `sub` and `purpose: '2fa'` and
@@ -164,6 +164,71 @@ it cannot open an authenticated route — pinned by
 - `POST /2fa/verify { challengeToken, code }` consumes the newest live code of
   either purpose (so the body does not have to say which channel it was) and
   returns the ordinary token pair through `startSession`.
+
+## `GET /auth/providers` (26 Sep 2026)
+
+Public. `{ google: { webClientId } | null, facebook: { appId } | null }` — the ids a client needs to open each social door, null when that door is not set up (Google: `GOOGLE_CLIENT_ID`; Facebook: app id AND secret, env or the integrations row). The phone apps hide a button whose provider answers null. Never a secret.
+
+## SL-1: where a session signed in from (25 Sep 2026)
+
+`GET /users/me/sessions` rows carry `city`, `region`, `country` beside the
+address — looked up AFTER the session opens (`sessions/geo-ip.ts`,
+fire-and-forget from `startSession`), never on the sign-in's path. The
+provider is the integrations row's `geoIp` section: `NONE` (default —
+nothing is looked up), `IPAPI` (ip-api.com, no key) or `IPINFO` (a token).
+A private address is never sent out; answers are cached a week per address.
+
+## FB-1 / G-2 / 2FA-A / EC-8 (25 Sep 2026)
+
+- **Facebook** — `POST /auth/facebook { accessToken }` (the SDK's user token):
+  checked with the Graph API (`debug_token` under the app's own credentials
+  — live, and issued for THIS app — then `/me`). A known address signs in;
+  an unknown one is a sign-up, answered with the email door's hand-off
+  (`{ signup: { signupToken, email, expiresInSeconds } }`) for the phone
+  step; 409 `FACEBOOK_EMAIL_REQUIRED` when the Facebook account shares no
+  email. App id + secret: env `FACEBOOK_APP_ID/SECRET` or the integrations
+  row's `facebook` section. 503 until set.
+- **Google as a sign-up door** — `POST /auth/google` no longer refuses an
+  unknown address: a Google-verified one gets the same hand-off; an
+  unverified one is still 403.
+- **The authenticator for every account (2FA-A)** — `/2fa/totp/*` and the
+  recovery codes are `authenticate` only. An enrolled account gets a
+  challenge (`methods: ['AUTHENTICATOR']`, recovery codes work) from every
+  one-factor door — mobile OTP, email OTP, Google, Facebook — before tokens,
+  answered on `POST /auth/2fa/verify` as an admin's is.
+- **Email codes are eight capital letters (EC-8)** — every code sent to an
+  address (`send-otp-email`, the sign-up code, `users/me/email`, a contact's
+  code), from `ABCDEFGHJKLMNPQRSTUVWXYZ` (no I or O), typed in any case.
+  SMS codes stay six digits.
+- **The stamp** — `emailVerifiedAt` is also set when an invitation is
+  accepted, a password is reset from its link, or the admin's email second
+  factor answers (`stampProvenEmail`).
+
+## ED-1: the email door (25 Sep 2026)
+
+Every account proves its number and its email. The apps ask the number first
+and the email second; the website asks the email first (DR 12's frame) and
+the number second. Either order ends with both stamps on the row.
+
+- **Sign-up by email.** `POST /send-otp-email` with an address nobody holds
+  files a code in `EmailSignup` — one live row per address; no `User` can be
+  minted from an email alone, since `User.mobile` is the identity and
+  required. `POST /verify-otp-email` answers a **signup token** (a JWT,
+  purpose `EMAIL_SIGNUP`, thirty minutes) instead of tokens. The client then
+  runs the ordinary mobile door and sends the token along:
+  `POST /verify-otp { mobile, otp, signupToken }`. The phone is proved,
+  the account is the number's (new or years old), and `attachSignupEmail`
+  writes the proven address onto it — `signup.outcome` in the answer says
+  PRIMARY (done), KEPT (the account already had a verified email; it stays),
+  TAKEN (another account took the address in between) or EXPIRED. The
+  person is signed in whatever became of the email.
+- **Login by email** is unchanged in shape: a known address answers tokens.
+  It now refuses with the OTP vocabulary (`details.reason`), counts wrong
+  guesses against the address, and stamps `User.emailVerifiedAt`.
+- **Number first** — the app's door — proves the email afterwards through
+  `POST /users/me/email/send-code` + `/verify` (users' README).
+- Both login payloads and `GET /users/me` carry `mobileVerifiedAt` and
+  `emailVerifiedAt`, so a client routes to whichever step is still missing.
 
 **The one-factor doors (M-B).** The mobile OTP, the email OTP and the
 publisher app's OTP each sign a person in on one proof, and the account
@@ -373,8 +438,9 @@ Called by `users` (deactivation, a desk mobile change, a role grant) and by
 
 `startSession` and `POST /refresh` both resolve `perms: string[]` through
 `auth.ports.ts`, whose resolver is `access-control.permissionsFor`, registered
-in `bootstrap/register-modules.ts`. Unregistered, the launch rule answers: an
-ADMIN holds every permission, everyone else none. A role change therefore takes
+in `bootstrap/register-modules.ts`. Unregistered, nobody holds any (RP-1: only
+Super admin holds every permission, and only access-control knows who that
+is; an ADMIN with no role is refused ROLE_REQUIRED). A role change therefore takes
 effect by **revoking the session**, never by editing a token.
 
 ## Owned Prisma entities
@@ -472,8 +538,9 @@ would create a cycle, because `users` needs auth's session listing for
   the number becomes an ordinary roleless user. The mint is audited
   `DEV_ADMIN_LOGIN_USED` on the new account and happens once: a known
   number never re-mints. The minted admin carries a placeholder email
-  (`dev-admin-<last4>@adx.local`) so the console's second factor has the
-  EMAIL channel after the mobile door has spent SMS; the 2FA code comes
+  (`dev-admin-<last4>@example.com` — a reserved domain that never receives
+  mail, so nothing bounces off ADX's sending domain) so the console's second
+  factor has the EMAIL channel after the mobile door has spent SMS; the 2FA code comes
   back as `devCode` outside production, as it always has. Nothing bypasses
   2FA and the seed gains nothing — the allowlist is the door.
 - `devOtp` is returned in the response body outside production only.

@@ -20,6 +20,8 @@ const { queries, agents } = vi.hoisted(() => ({
     getOrdersForAgent: vi.fn(),
     getAllOrders: vi.fn(),
     getOrderById: vi.fn(),
+    getOrderPlacedBy: vi.fn(),
+    getOrderCompletionCode: vi.fn(async () => null as string | null),
   },
   agents: { requireAgentProfile: vi.fn(), findAgentProfile: vi.fn(), dispatchAskFor: vi.fn(async () => ({})), isBelowRequiredGrade: vi.fn(async () => false), agentMeetsGrade: vi.fn(async () => true), getRoutingSettings: vi.fn(async () => ({ bands: { INDIVIDUAL: 'G1', SMALL_AGENCY: 'G2', LARGE_AGENCY: 'G3' }, leadBands: { STANDARD: 'G1', KEY: 'G3', ENTERPRISE: 'G4' }, enforce: true })) },
 }));
@@ -155,6 +157,39 @@ describe('GET /orders/:id', () => {
       statusCode: 403,
     });
     await expect(readAs(['ADVERTISER'], 'usr_other')).rejects.toMatchObject({ statusCode: 403 });
+  });
+
+  /* 26 Sep 2026: the completion code is support's to read back, nobody else's. */
+  it('answers the completion code to ADX only, and its hash to nobody', async () => {
+    // 2 Oct 2026: the aggregate no longer carries the code (the global omit);
+    // the admin branch reads the plain code on its own. The fixture still
+    // carries both, to prove the persona branches strip them regardless.
+    queries.getOrderById.mockResolvedValue(order({ completionOtp: '$2a$hash', completionOtpPlain: '482913' }));
+    queries.getOrderCompletionCode.mockResolvedValue('482913');
+    const publisher = (await readAs(['PUBLISHER'], 'usr_pub')) as { data: Record<string, unknown> };
+    expect(publisher.data).not.toHaveProperty('completionOtpPlain');
+    expect(publisher.data).not.toHaveProperty('completionOtp');
+    const agent = (await readAs(['AGENT_PUBLISHER'], 'usr_agent', { id: 'agt_holder' })) as { data: Record<string, unknown> };
+    expect(agent.data).not.toHaveProperty('completionOtpPlain');
+    const admin = (await readAs(['ADMIN'], 'usr_admin')) as { data: Record<string, unknown> };
+    expect(admin.data).toMatchObject({ completionOtpPlain: '482913' });
+    expect(admin.data).not.toHaveProperty('completionOtp');
+    expect(queries.getOrderCompletionCode).toHaveBeenCalledWith('ord_1');
+  });
+
+  /* PB-1 (2 Oct 2026): "Placed by" is the console's — the person and the business never reach a persona read. */
+  it('answers who placed it, person and business, to ADX only', async () => {
+    const placedBy = { userId: 'usr_adv', name: 'Asha Rao', displayId: 'ADX-0210-2601', business: { id: 'adv_1', name: 'Rao Sweets', displayId: 'ADV-0210-2601' } };
+    queries.getOrderPlacedBy.mockResolvedValue(placedBy);
+    const admin = (await readAs(['ADMIN'], 'usr_admin')) as { data: Record<string, unknown> };
+    expect(admin.data).toMatchObject({ id: 'ord_1', placedBy });
+    expect(queries.getOrderPlacedBy).toHaveBeenCalledWith('usr_adv');
+    queries.getOrderPlacedBy.mockClear();
+    const publisher = (await readAs(['PUBLISHER'], 'usr_pub')) as { data: Record<string, unknown> };
+    expect(publisher.data).not.toHaveProperty('placedBy');
+    const agent = (await readAs(['AGENT_PUBLISHER'], 'usr_agent', { id: 'agt_holder' })) as { data: Record<string, unknown> };
+    expect(agent.data).not.toHaveProperty('placedBy');
+    expect(queries.getOrderPlacedBy).not.toHaveBeenCalled();
   });
 
   it('is still 404 when it does not exist at all', async () => {

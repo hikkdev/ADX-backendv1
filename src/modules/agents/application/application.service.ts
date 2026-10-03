@@ -1,6 +1,7 @@
 import type { Request } from 'express';
 import { ApiError } from '../../../shared/errors';
 import { logActivity } from '../../../shared/audit';
+import { revokeSessions } from '../../auth';
 import type { AgentDocument, AgentDocumentKind, AgentGrade, AgentStage, AgreementKind } from '../../../shared/database';
 import { allocateIdentifier } from '../../identifiers';
 import { assertCityAllows, withCityKey } from '../../pricing';
@@ -12,7 +13,8 @@ import { prismaApplicationRepository as repository } from './prisma-application.
 import type { ApplicationRecord, ApplicationRow, ProfilePatch } from './application.repository';
 import { APPLICATION_STAGE_GROUPS } from './application.schema';
 import type { ApplicationProfileInput, ApplicationsQuery, ApplyInput, DecisionInput, DeskProfileInput, ExitInput, FileDocumentInput, GradeInput, InterviewInput, InterviewOutcomeInput, ReviewDocumentInput, ScreenInput } from './application.schema';
-import { lookupVehicleRc, nameMatchScore, normaliseVehicleNumber } from '../../../shared/integrations';
+import { nameMatchScore, normaliseVehicleNumber } from '../../../shared/integrations';
+import { routedVehicleRc } from '../../../shared/verification';
 import { fleetProvenanceFor, markFleetInviteActivated, markFleetInviteApplied } from './fleet.service';
 import type { ExitSettlement } from './application.port';
 import { dateOfBirthToDate } from '../../../shared/validation';
@@ -106,7 +108,7 @@ export type ApplicationView = {
   person: { name: string | null; mobile: string | null; email: string | null; dateOfBirth: Date | null; gender: string | null };
   profile: Pick<
     ApplicationRecord,
-    | 'city' | 'state' | 'languages' | 'vehicleType' | 'vehicleNumber' | 'currentAddress' | 'currentLatitude' | 'currentLongitude' | 'permanentAddress'
+    | 'city' | 'state' | 'languages' | 'vehicleType' | 'vehicleNumber' | 'currentAddress' | 'currentLatitude' | 'currentLongitude' | 'currentPostalCode' | 'permanentAddress'
     | 'emergencyContactName' | 'emergencyContactRelation' | 'emergencyContactPhone' | 'highestEducation' | 'salesExperienceYears' | 'industries' | 'noticePeriodDays'
     | 'territory' | 'homeZone'
   >;
@@ -256,6 +258,7 @@ async function buildView(record: ApplicationRecord, now = new Date(), opts: { id
       currentAddress: record.currentAddress,
       currentLatitude: record.currentLatitude,
       currentLongitude: record.currentLongitude,
+      currentPostalCode: record.currentPostalCode,
       permanentAddress: record.permanentAddress,
       emergencyContactName: record.emergencyContactName,
       emergencyContactRelation: record.emergencyContactRelation,
@@ -709,8 +712,19 @@ export async function exitAgent(agentId: string, input: ExitInput, byUserId: str
     blacklistedAt: input.blacklist ? now : null,
     engagementEndAt: now,
   });
-  // AG-5: the settlement — sessions, grants, the QR code, the closing payout — through the modules that own each part.
+  // AG-5: the settlement — grants, the QR code, the work in hand, the closing payout — through the modules that own each part.
   const settlement = await applicationPort().settleExit(agentId, record.userId);
+  // Account lifecycle (2 Oct 2026, the owner's decision): sign-in stays while
+  // money is still owed to the agent and ends when the final payout is PAID
+  // (`endExitedAgentSignIn` from the payouts hook); with nothing owed it ends now.
+  if (settlement.balanceRemains) {
+    settlement.signIn = 'KEPT_UNTIL_PAID';
+    await logActivity(byUserId, 'AGENT_EXIT_SIGNIN_KEPT', { req, targetType: 'AgentProfile', targetId: agentId, module: 'agents', metadata: { until: 'FINAL_PAYOUT_PAID', payout: settlement.payout } });
+  } else {
+    const outcome = await endExitedAgentSignIn(agentId, byUserId, 'NO_BALANCE');
+    settlement.signIn = outcome === 'ENDED' ? 'ENDED' : 'KEPT_OTHER_ROLE';
+    settlement.sessionsEnded = outcome === 'ENDED';
+  }
   await logActivity(byUserId, 'AGENT_EXITED', {
     req,
     targetType: 'AgentProfile',
@@ -734,6 +748,38 @@ export async function exitAgent(agentId: string, input: ExitInput, byUserId: str
   );
   const view = await buildView(await load({ agentId }));
   return { ...view, settlement };
+}
+
+/**
+ * Account lifecycle (2 Oct 2026): an exited agent's sign-in ends — at the
+ * exit when nothing is owed, else when the closing withdrawal is PAID. Only
+ * when the account works as nothing else: a person who is also a working
+ * publisher, advertiser, employee or print shop keeps signing in, and that
+ * is logged. Audited either way. 'NOT_EXITED' when the agent is not (or no
+ * longer) exited — a rehire between the exit and the payout keeps sign-in.
+ */
+export async function endExitedAgentSignIn(
+  agentId: string,
+  byUserId: string,
+  cause: 'NO_BALANCE' | 'FINAL_PAYOUT_PAID',
+): Promise<'ENDED' | 'KEPT_OTHER_ROLE' | 'NOT_EXITED'> {
+  const record = await repository.findById(agentId);
+  if (!record || record.stage !== 'EXITED') return 'NOT_EXITED';
+  const others = await repository.otherWorkingRoles(record.userId);
+  if (others.length > 0) {
+    await logActivity(byUserId, 'AGENT_EXIT_SIGNIN_KEPT', { targetType: 'AgentProfile', targetId: agentId, module: 'agents', metadata: { cause, otherRoles: others } });
+    return 'KEPT_OTHER_ROLE';
+  }
+  await repository.switchOffSignIn(record.userId);
+  await revokeSessions(record.userId, 'AGENT_EXITED');
+  await logActivity(byUserId, 'AGENT_EXIT_SIGNIN_ENDED', {
+    targetType: 'User',
+    targetId: record.userId,
+    module: 'agents',
+    diff: { isActive: { before: true, after: false } },
+    metadata: { agentId, cause },
+  });
+  return 'ENDED';
 }
 
 /* ── AG-5: the purge ─────────────────────────────────────────────────────── */
@@ -840,7 +886,8 @@ export async function verifyVehicleRcAtDesk(agentId: string, byUserId: string, r
   if (!number) throw new ApiError(409, 'VERIFICATION_UNAVAILABLE', 'No vehicle registration number on the application');
   const paper = await repository.findDocument(agentId, 'VEHICLE_RC');
   if (!paper) throw new ApiError(409, 'VERIFICATION_UNAVAILABLE', 'File the vehicle RC first, then check it');
-  const answer = await lookupVehicleRc(number);
+  // Cashfree Phase 1: asked through the verification router — an attempt on record against the agent's case.
+  const answer = await routedVehicleRc(number, { caseType: 'AGENT_KYC', caseId: agentId });
   if (!answer.ok) throw new ApiError(409, 'VERIFICATION_UNAVAILABLE', answer.message, { code: answer.code });
   const nameMatch = nameMatchScore(answer.facts.ownerName, record.user.name);
   const payload = { ...answer.facts, nameMatch, checkedAt: new Date().toISOString(), raw: answer.raw } as unknown as Record<string, never>;

@@ -32,6 +32,16 @@ export type ExitSettlement = {
   sessionsEnded: boolean;
   grantsRevoked: number;
   qrDeactivated: boolean;
+  /**
+   * Account lifecycle (2 Oct 2026, the owner's decision): the wallet still
+   * holds money, so the agent keeps signing in until the final payout is
+   * PAID (they may need to add a payout method). False means sign-in ends at the exit.
+   */
+  balanceRemains?: boolean;
+  /** Account lifecycle: the work in hand handed back — offers, visits, milestones, leads. */
+  released?: { offers: number; visits: number; milestones: number; leads: number };
+  /** Account lifecycle: what happened to sign-in — ended now, kept until the payout is paid, or kept for another role. */
+  signIn?: 'ENDED' | 'KEPT_UNTIL_PAID' | 'KEPT_OTHER_ROLE';
   /** The closing withdrawal, or null when the wallet held nothing. */
   payout: { amount: string; reference: string | null; outcome: string } | null;
   notes: string[];

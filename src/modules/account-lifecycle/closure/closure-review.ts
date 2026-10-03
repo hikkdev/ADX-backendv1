@@ -46,6 +46,9 @@ export const BLOCKER_KINDS = [
   'WALLET_BALANCE',
   'OPEN_AGREEMENTS',
   'OPEN_TICKETS',
+  // Account lifecycle (2 Oct 2026): a print partner's work.
+  'OPEN_PRINT_JOBS',
+  'OPEN_PRINT_QUOTES',
 ] as const;
 
 export type BlockerKind = (typeof BLOCKER_KINDS)[number];
@@ -61,7 +64,7 @@ export type Blocker = {
 };
 
 export type WalletLine = {
-  kind: 'PUBLISHER' | 'ADVERTISER' | 'AGENT';
+  kind: 'PUBLISHER' | 'ADVERTISER' | 'AGENT' | 'PRINT_PARTNER';
   partyId: string;
   walletId: string;
   balance: Money;
@@ -74,7 +77,14 @@ export type ClosureReview = {
   name: string | null;
   mobile: string;
   closedAt: Date | null;
-  parties: { publisherId: string | null; advertiserId: string | null; agentProfileId: string | null };
+  parties: {
+    publisherId: string | null;
+    advertiserId: string | null;
+    agentProfileId: string | null;
+    /** Account lifecycle (2 Oct 2026): the print shop and the HR record a closure also covers. */
+    printPartnerId: string | null;
+    employeeId: string | null;
+  };
   wallets: WalletLine[];
   summary: {
     /** Every wallet the account's profiles own, added up. */
@@ -85,6 +95,9 @@ export type ClosureReview = {
     openCampaigns: number;
     openAgreements: number;
     openTickets: number;
+    /** Account lifecycle: a print partner's jobs not yet collected, and quotes still submitted. */
+    openPrintJobs: number;
+    openPrintQuotes: number;
     canClose: boolean;
   };
   blockers: Blocker[];
@@ -110,6 +123,8 @@ async function walletLines(parties: PartyIds): Promise<WalletLine[]> {
     ...(parties.publisherId ? [{ kind: 'PUBLISHER' as const, id: parties.publisherId }] : []),
     ...(parties.advertiserId ? [{ kind: 'ADVERTISER' as const, id: parties.advertiserId }] : []),
     ...(parties.agentProfileId ? [{ kind: 'AGENT' as const, id: parties.agentProfileId }] : []),
+    // Account lifecycle (2 Oct 2026): a print partner is a payee too.
+    ...(parties.printPartnerId ? [{ kind: 'PRINT_PARTNER' as const, id: parties.printPartnerId }] : []),
   ];
 
   const lines: WalletLine[] = [];
@@ -180,6 +195,9 @@ export async function closureReview(userId: string): Promise<ClosureReview> {
     countOpenTicketsForUser(userId),
   ]);
 
+  // Account lifecycle (2 Oct 2026): a print partner's jobs in hand refuse the close like any running order; open quotes are reported.
+  const printWork = parties.printPartnerId ? await repository.countOpenPrintWork(parties.printPartnerId) : { jobs: [] as string[], quotes: 0 };
+
   const balance = wallets.reduce((total, line) => total.plus(new Decimal(line.balance)), new Decimal(0));
 
   const blockers: Blocker[] = [];
@@ -234,6 +252,19 @@ export async function closureReview(userId: string): Promise<ClosureReview> {
     count: tickets,
     blocking: false,
   });
+  add({
+    kind: 'OPEN_PRINT_JOBS',
+    label: 'Print jobs in hand',
+    count: printWork.jobs.length,
+    blocking: true,
+    detail: printWork.jobs,
+  });
+  add({
+    kind: 'OPEN_PRINT_QUOTES',
+    label: 'Print quotes awaiting a decision',
+    count: printWork.quotes,
+    blocking: false,
+  });
 
   return {
     userId,
@@ -244,6 +275,8 @@ export async function closureReview(userId: string): Promise<ClosureReview> {
       publisherId: parties.publisherId,
       advertiserId: parties.advertiserId,
       agentProfileId: parties.agentProfileId,
+      printPartnerId: parties.printPartnerId ?? null,
+      employeeId: parties.employeeId ?? null,
     },
     wallets,
     summary: {
@@ -254,6 +287,8 @@ export async function closureReview(userId: string): Promise<ClosureReview> {
       openCampaigns: campaigns.length,
       openAgreements: agreements,
       openTickets: tickets,
+      openPrintJobs: printWork.jobs.length,
+      openPrintQuotes: printWork.quotes,
       canClose: blockers.every((blocker) => !blocker.blocking),
     },
     blockers,

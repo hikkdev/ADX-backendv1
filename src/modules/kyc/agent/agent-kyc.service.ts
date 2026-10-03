@@ -1,3 +1,4 @@
+import { assertOpenForKyc } from '../../../shared/party-status';
 import type { Request } from 'express';
 import { ApiError } from '../../../shared/errors';
 import { auditDiff, logActivity } from '../../../shared/audit';
@@ -7,7 +8,7 @@ import { agentExists, findAgentProfile, upsertDocumentsFromKyc } from '../../age
 import { notify } from '../../notifications';
 import { kycChannelLabel, pageMeta, type KycRequestInput } from '../kyc.schema';
 import { kycCaseExtras } from '../case-read';
-import { agentDigioStatus, initiateAgentDigioKyc } from './agent-digio.service';
+import { agentDigioStatus, initiateAgentDigioKyc, startAgentKyc } from './agent-digio.service';
 import { prismaAgentKycRepository as repository } from './prisma-agent-kyc.repository';
 import type { AgentKycFilter } from './agent-kyc.repository';
 import type { AgentKycDocuments } from './agent-kyc.schema';
@@ -52,12 +53,14 @@ export async function getMyAgentKyc(userId: string) {
 }
 
 /** KYC-D: the agent starts Digio from their own phone — the primary path; the papers are the fallback. */
-export async function initiateMyAgentDigioKyc(userId: string, now = new Date()) {
+export async function initiateMyAgentDigioKyc(userId: string, now = new Date(), supports?: readonly string[]) {
   const profile = await findAgentProfile(userId);
   if (!profile) throw new ApiError(404, 'NOT_FOUND', 'Agent profile not found');
   const agent = await repository.findAgentContact(profile.id);
   if (!agent) throw new ApiError(404, 'NOT_FOUND', 'Agent not found');
-  return initiateAgentDigioKyc(agent, { onBehalf: false }, now);
+  // Cashfree Phase 1 (E-bis): the agent's own start is the one that may be handed a Cashfree session,
+  // and only when the client said it can draw one (`supports`).
+  return startAgentKyc(agent, { onBehalf: false, supports }, now);
 }
 
 export async function myAgentDigioStatus(userId: string) {
@@ -121,6 +124,8 @@ export async function reviewAgentKyc(agentId: string, status: KycStatus, rejecti
 export async function requestAgentKyc(agentId: string, input: KycRequestInput, byUserId: string, req?: Request, now = new Date()) {
   const agent = await repository.findAgentContact(agentId);
   if (!agent) throw new ApiError(404, 'NOT_FOUND', 'Agent not found');
+  // Account lifecycle (2 Oct 2026): a closed account is never asked; one suspended from new work, not until reinstated.
+  assertOpenForKyc({ closedAt: agent.user.closedAt ?? null, suspensionScopes: agent.suspensionScopes ?? [] });
   const current = await repository.findByAgentId(agentId);
   if (current?.status === 'VERIFIED') {
     throw new ApiError(409, 'KYC_ALREADY_VERIFIED', 'This agent is already verified; there is nothing to request');

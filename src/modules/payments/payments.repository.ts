@@ -2,6 +2,7 @@ import type { Prisma } from '../../shared/database';
 import type {
   Payment,
   PaymentGateway,
+  PaymentPurpose,
   PaymentRefund,
   PaymentRefundStatus,
   PaymentStatus,
@@ -24,7 +25,7 @@ export type WebhookEventRow = WebhookEvent;
 export type PaymentView = Payment & { refunds: PaymentRefund[] };
 
 export const PAYMENT_STATUSES = ['CREATED', 'AUTHORIZED', 'CAPTURED', 'FAILED', 'REFUNDED', 'PARTIALLY_REFUNDED'] as const;
-export const PAYMENT_GATEWAYS = ['RAZORPAY', 'CASHFREE', 'CCAVENUE'] as const;
+export const PAYMENT_GATEWAYS = ['RAZORPAY', 'CASHFREE', 'CCAVENUE', 'BANK_TRANSFER'] as const;
 
 export type NewPayment = {
   reference: string;
@@ -35,7 +36,14 @@ export type NewPayment = {
   packageSaleId: string | null;
   /** Lot J (B2): a publisher's plan order, the third target. */
   subscriptionOrderId: string | null;
+  /** LM-1: a display ad (the advertiser pays) or a sponsored listing (the publisher pays) — the fourth and fifth. */
+  adBookingId?: string | null;
+  listingBoostId?: string | null;
   gateway: PaymentGateway;
+  /** RF-1: SETTLEMENT (the target's full amount) or RESERVATION_FEE on a campaign. */
+  purpose: PaymentPurpose;
+  /** UP-1: the UPI id the payer typed, when they did. */
+  payerUpiId: string | null;
   amount: Prisma.Decimal;
   currency: string;
   createdByUserId: string | null;
@@ -52,6 +60,12 @@ export type PaymentPatch = Partial<{
   ledgerTransactionId: string | null;
   invoiceId: string | null;
   capturedAt: Date | null;
+  /** BT-1: what the payer claimed about their transfer. */
+  bankUtr: string | null;
+  bankPaidOn: Date | null;
+  bankClaimedAmount: Prisma.Decimal | null;
+  bankProofFileId: string | null;
+  bankClaimedAt: Date | null;
 }>;
 
 export type NewRefund = {

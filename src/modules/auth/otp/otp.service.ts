@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { normalizeMobile } from '../../../shared/validation';
 import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import { env } from '../../../config/env';
 import { ApiError } from '../../../shared/errors';
 import { logger } from '../../../shared/logging';
@@ -31,6 +32,20 @@ export { normalizeMobile };
 function generateOtp(): string {
   return String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
 }
+
+/**
+ * EC-8 (the owner, 25 Sep 2026): a code sent to an EMAIL is eight capital
+ * letters, not six digits — I and O left out so nothing is misread for a
+ * digit. Typed in any case; the verifiers fold the input up. SMS codes stay
+ * six digits, which is what a phone's keyboard autofills.
+ */
+export const EMAIL_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+export const EMAIL_CODE_LENGTH = 8;
+function generateEmailCode(): string {
+  return Array.from({ length: EMAIL_CODE_LENGTH }, () => EMAIL_CODE_ALPHABET[crypto.randomInt(0, EMAIL_CODE_ALPHABET.length)]).join('');
+}
+/** What a typed email code is compared as. */
+const foldEmailCode = (code: string): string => code.trim().toUpperCase();
 
 /** The seeded roles a `DEV_LOGIN_MOBILES` entry may name. */
 const DEV_LOGIN_ROLES: readonly Role[] = ['AGENT_PUBLISHER', 'AGENT_ADVERTISER', 'PUBLISHER', 'ADVERTISER', 'PARTNER', 'ADMIN'];
@@ -260,26 +275,28 @@ async function sendOtpForUser(
 // Email-delivered OTP login — an alternative channel to the mobile/SMS flow
 // above, for accounts that already have an email on file. LOGIN only: unlike
 // mobile OTP there's no self-registration path via email.
+/**
+ * ED-1 (the owner, 25 Sep 2026): register-or-login by email, the twin of
+ * `sendOtp`. A known address gets its login code as before. An unknown
+ * address is a sign-up: the code is filed in `EmailSignup` (no user can be
+ * minted from an email alone — `User.mobile` is the identity and required)
+ * and the phone is proved next, on `POST /auth/verify-otp` with the signup
+ * token `verifyEmailDoor` answers. Known and unknown addresses take the
+ * same budget and answer the same shape, so the door does not say which.
+ */
 export async function sendEmailOtp(email: string): Promise<SendOtpResult> {
+  email = email.trim().toLowerCase();
+  await assertOtpNotLocked(email);
   const user = await repository.findUserByEmail(email);
 
-  if (!user) {
-    // Email has no registration path, so an unknown address is answered like
-    // a successful send rather than revealing there is no account behind it.
-    logger.info('OTP requested for unregistered email', { email });
-    return {
-      resendAfterSeconds: 0,
-      sendsRemaining: 0,
-      expiresInSeconds: OTP_TTL_MINUTES * 60,
-    };
-  }
+  if (!user) return sendEmailSignupCode(email);
 
   const budget = await reserveOtpSend(email);
   logger.info('Email OTP generation started', { userId: user.id, email });
 
   await repository.expireOutstandingByEmail(email);
 
-  const code = generateOtp();
+  const code = generateEmailCode();
   const codeHash = await bcrypt.hash(code, 10);
   const expiresAt = new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000);
 
@@ -318,7 +335,7 @@ export async function sendEmailCodeToAddressForUser(userId: string, email: strin
 
   await repository.expireOutstandingByEmail(email, purpose);
 
-  const code = generateOtp();
+  const code = generateEmailCode();
   const codeHash = await bcrypt.hash(code, 10);
   const expiresAt = new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000);
   await repository.createForEmail({ userId, email, codeHash, expiresAt, purpose });
@@ -339,6 +356,7 @@ export async function sendEmailCodeToAddressForUser(userId: string, email: strin
  */
 export async function verifyEmailCodeFor(email: string, code: string, purpose: OtpPurpose): Promise<string> {
   email = email.trim().toLowerCase();
+  code = foldEmailCode(code);
   await assertOtpNotLocked(email);
 
   const otp = await repository.findLatestUnverifiedByEmail(email, purpose);
@@ -382,31 +400,215 @@ export async function expireOutstandingOtpsForUser(userId: string): Promise<void
   await repository.expireOutstandingForUser(userId);
 }
 
+/**
+ * The email login code. ED-1: refuses with the same `OtpError` vocabulary
+ * as the mobile door (a wrong guess counts against the address; the fifth
+ * locks it), and a correct code stamps `User.emailVerifiedAt` the first time.
+ */
 export async function verifyEmailOtp(email: string, code: string): Promise<string> {
+  email = email.trim().toLowerCase();
+  code = foldEmailCode(code);
   logger.info('Email OTP verification started', { email });
+  await assertOtpNotLocked(email);
 
   const otp = await repository.findLatestUnverifiedByEmail(email);
 
   if (!otp) {
     logger.warn('Email OTP verification failed: not found or expired', { email });
-    throw new Error('OTP expired or not found');
+    throw new OtpError(401, 'This code has expired. Request a new one.', { reason: 'OTP_EXPIRED' });
   }
 
   if (otp.attempts >= MAX_ATTEMPTS) {
     logger.warn('Email OTP verification failed: too many attempts', { email });
-    throw new Error('Too many incorrect attempts');
+    throw new OtpError(401, 'Too many incorrect attempts on this code. Request a new one.', {
+      reason: 'OTP_ATTEMPTS_EXCEEDED',
+    });
   }
 
   if (!(await bcrypt.compare(code, otp.codeHash))) {
     await repository.incrementAttempts(otp.id);
-    logger.warn('Email OTP verification failed: invalid code', { email });
-    throw new Error('Invalid OTP');
+    const outcome = await registerOtpFailure(email);
+    logger.warn('Email OTP verification failed: invalid code', { email, locked: outcome.locked });
+    if (outcome.locked) {
+      throw new OtpError(429, 'Too many incorrect attempts. Sign-in is temporarily paused.', {
+        reason: 'OTP_LOCKED',
+        lockedUntil: outcome.lockedUntil,
+        retryAfterSeconds: outcome.retryAfterSeconds,
+      });
+    }
+    throw new OtpError(401, 'Incorrect code. Try again.', { reason: 'OTP_INVALID', attemptsRemaining: outcome.attemptsRemaining });
   }
 
   await repository.markVerified(otp.id);
+  await Promise.all([clearOtpFailures(email), repository.markEmailVerified(otp.userId, email)]);
 
   logger.info('Email OTP verification completed', { email, userId: otp.userId });
   return otp.userId;
+}
+
+/* ── ED-1: the email door ─────────────────────────────────────────────── */
+
+/** How long the proved address waits for its phone. */
+export const EMAIL_SIGNUP_TTL_SECONDS = 30 * 60;
+const EMAIL_SIGNUP_PURPOSE = 'EMAIL_SIGNUP' as const;
+
+type SignupClaims = { sub: string; email: string; purpose: typeof EMAIL_SIGNUP_PURPOSE };
+
+export type EmailDoorAnswer =
+  | { kind: 'account'; userId: string }
+  | { kind: 'signup'; signupToken: string; email: string; expiresInSeconds: number };
+
+export type SignupAttachment = {
+  email: string | null;
+  attached: boolean;
+  /**
+   * PRIMARY — the address is the account's verified primary email now.
+   * KEPT — the account already had a verified email; the proven one was not
+   * written over it. TAKEN — another account holds the address (it was free
+   * when the code went out). EXPIRED — the token is stale, spent or not ours.
+   */
+  outcome: 'PRIMARY' | 'KEPT' | 'TAKEN' | 'EXPIRED';
+};
+
+/**
+ * The sign-up half of `sendEmailOtp`: one live row per address, the same
+ * per-recipient budget, the same `login-otp-email` mail — to the bare
+ * address, since there is no account to file the delivery under.
+ */
+async function sendEmailSignupCode(email: string): Promise<SendOtpResult> {
+  const budget = await reserveOtpSend(email);
+  logger.info('Email sign-up code generation started', { email });
+
+  const code = generateEmailCode();
+  const codeHash = await bcrypt.hash(code, 10);
+  const expiresAt = new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000);
+  await repository.upsertEmailSignup({ email, codeHash, expiresAt });
+
+  printDevOtp(email, code, 'EMAIL_SIGNUP');
+  await notify('LOGIN_OTP_EMAIL', null, { code, minutes: OTP_TTL_MINUTES }, { type: 'SYSTEM', recipient: { email }, immediate: true });
+  logger.info('Email sign-up code dispatch completed', { email, expiresAt });
+
+  const result: SendOtpResult = { ...budget, expiresInSeconds: OTP_TTL_MINUTES * 60 };
+  return env.NODE_ENV === 'production' ? result : { ...result, devOtp: code };
+}
+
+/**
+ * `POST /auth/verify-otp-email`: a known address answers the account the
+ * code was for (the login as before); an unknown one answers a signup
+ * token — the proof that this address was read, carried to the phone step.
+ * The refusals are the OTP vocabulary either way.
+ */
+export async function verifyEmailDoor(email: string, code: string): Promise<EmailDoorAnswer> {
+  email = email.trim().toLowerCase();
+  code = foldEmailCode(code);
+  const user = await repository.findUserByEmail(email);
+  if (user) return { kind: 'account', userId: await verifyEmailOtp(email, code) };
+
+  await assertOtpNotLocked(email);
+  const row = await repository.findEmailSignup(email);
+  if (!row || row.verifiedAt || row.expiresAt.getTime() <= Date.now()) {
+    throw new OtpError(401, 'This code has expired. Request a new one.', { reason: 'OTP_EXPIRED' });
+  }
+  if (row.attempts >= MAX_ATTEMPTS) {
+    throw new OtpError(401, 'Too many incorrect attempts on this code. Request a new one.', { reason: 'OTP_ATTEMPTS_EXCEEDED' });
+  }
+  if (!(await bcrypt.compare(code, row.codeHash))) {
+    await repository.incrementEmailSignupAttempts(row.id);
+    const outcome = await registerOtpFailure(email);
+    if (outcome.locked) {
+      throw new OtpError(429, 'Too many incorrect attempts. Sign-up is temporarily paused.', {
+        reason: 'OTP_LOCKED',
+        lockedUntil: outcome.lockedUntil,
+        retryAfterSeconds: outcome.retryAfterSeconds,
+      });
+    }
+    throw new OtpError(401, 'Incorrect code. Try again.', { reason: 'OTP_INVALID', attemptsRemaining: outcome.attemptsRemaining });
+  }
+
+  await repository.markEmailSignupVerified(row.id);
+  await clearOtpFailures(email);
+  const claims: SignupClaims = { sub: row.id, email, purpose: EMAIL_SIGNUP_PURPOSE };
+  const signupToken = jwt.sign(claims, env.JWT_ACCESS_SECRET, { expiresIn: EMAIL_SIGNUP_TTL_SECONDS });
+  logger.info('Email sign-up code verified; waiting for the phone', { email });
+  return { kind: 'signup', signupToken, email, expiresInSeconds: EMAIL_SIGNUP_TTL_SECONDS };
+}
+
+/**
+ * A mailbox proved some other way — an invitation accepted from its link, a
+ * password reset from its link, the admin's email second factor, a Google
+ * or Facebook sign-in — earns the same stamp a code does. A no-op when the
+ * address is not the account's primary, or already stamped.
+ */
+export async function stampProvenEmail(userId: string, email: string): Promise<void> {
+  await repository.markEmailVerified(userId, email.trim().toLowerCase());
+}
+
+/**
+ * Google and Facebook (FB-1, G-2): the provider vouches for the mailbox, so
+ * a new address skips the code and goes straight to the phone step — the
+ * same hand-off `verifyEmailDoor` answers, minted on a row already marked
+ * verified. The phone step then writes the address onto the new account.
+ */
+export async function signupHandoffForProvenEmail(email: string): Promise<Extract<EmailDoorAnswer, { kind: 'signup' }>> {
+  email = email.trim().toLowerCase();
+  const row = await repository.upsertEmailSignup({
+    email,
+    codeHash: await bcrypt.hash(crypto.randomBytes(16).toString('hex'), 4),
+    expiresAt: new Date(Date.now() + EMAIL_SIGNUP_TTL_SECONDS * 1000),
+  });
+  await repository.markEmailSignupVerified(row.id);
+  const claims: SignupClaims = { sub: row.id, email, purpose: EMAIL_SIGNUP_PURPOSE };
+  const signupToken = jwt.sign(claims, env.JWT_ACCESS_SECRET, { expiresIn: EMAIL_SIGNUP_TTL_SECONDS });
+  logger.info('Provider-proven address handed to the phone step', { email });
+  return { kind: 'signup', signupToken, email, expiresInSeconds: EMAIL_SIGNUP_TTL_SECONDS };
+}
+
+/**
+ * The end of an email sign-up: the phone has just been proved on
+ * `POST /auth/verify-otp`, and the token says which address was proved
+ * before it. The address becomes the account's verified primary email —
+ * unless the account (the number's, which may be years old) already has a
+ * verified one, which is kept, or another account took the address in the
+ * meantime. Never throws: the phone is proved and the person is signed in
+ * whatever became of the email; the outcome says what did.
+ */
+export async function attachSignupEmail(userId: string, signupToken: string): Promise<SignupAttachment> {
+  let claims: SignupClaims;
+  try {
+    claims = jwt.verify(signupToken, env.JWT_ACCESS_SECRET) as SignupClaims;
+  } catch {
+    return { email: null, attached: false, outcome: 'EXPIRED' };
+  }
+  if (claims?.purpose !== EMAIL_SIGNUP_PURPOSE || typeof claims.sub !== 'string' || typeof claims.email !== 'string') {
+    return { email: null, attached: false, outcome: 'EXPIRED' };
+  }
+  const email = claims.email;
+  const row = await repository.findEmailSignup(email);
+  if (!row || row.id !== claims.sub || !row.verifiedAt) return { email, attached: false, outcome: 'EXPIRED' };
+
+  const holder = await repository.findEmailHolder(email);
+  if (holder && !(holder.which === 'PRIMARY' && holder.userId === userId)) {
+    await repository.deleteEmailSignup(row.id);
+    logger.warn('Email sign-up address taken before the phone was proved', { userId, email, holder });
+    return { email, attached: false, outcome: 'TAKEN' };
+  }
+
+  const user = await repository.findUserById(userId);
+  if (user?.email && user.email !== email && user.emailVerifiedAt) {
+    await repository.deleteEmailSignup(row.id);
+    return { email, attached: false, outcome: 'KEPT' };
+  }
+
+  await repository.setPrimaryEmailVerified(userId, email);
+  await repository.deleteEmailSignup(row.id);
+  await logActivity(userId, 'EMAIL_VERIFIED', {
+    module: 'auth',
+    targetType: 'User',
+    targetId: userId,
+    metadata: { email, via: 'EMAIL_DOOR', replaced: user?.email && user.email !== email ? user.email : null },
+  });
+  logger.info('Email sign-up completed', { userId, email });
+  return { email, attached: true, outcome: 'PRIMARY' };
 }
 
 /**

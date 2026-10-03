@@ -1,6 +1,8 @@
 import { Prisma, prisma } from '../../../shared/database';
 import type { KycStatus, PrintPartner, PrintPartnerKyc } from '../../../shared/database';
+import { PROVIDER_FAILED_STATUS } from '../../../shared/verification';
 import { KYC_QUEUE_STATES, deriveKycState, kycPartyStateWhere, kycQueueBaseWhere, type KycQueueState } from '../../../shared/kyc-state';
+import { accountStateOf, workingPrintPartnerWhere } from '../../../shared/party-status';
 import type {
   DigioFields,
   DigioWebhookUpdate,
@@ -12,7 +14,7 @@ import type {
   RequestStamp,
 } from './print-partner-kyc.repository';
 
-const partnerSelect = { id: true, displayId: true, name: true, mobile: true, email: true, userId: true, city: true, isActive: true, kycStatus: true, createdAt: true } as const;
+const partnerSelect = { id: true, displayId: true, name: true, mobile: true, email: true, userId: true, city: true, isActive: true, kycStatus: true, entityType: true, createdAt: true } as const;
 
 const partnerInclude = { printPartner: { select: partnerSelect } } as const;
 
@@ -42,6 +44,8 @@ function searchWhere(q: string | undefined): Prisma.PrintPartnerWhereInput {
  */
 function partyWhere(filter: PrintPartnerKycFilter): Prisma.PrintPartnerWhereInput {
   const parts: Prisma.PrintPartnerWhereInput[] = [kycQueueBaseWhere(true)];
+  // Account lifecycle (2 Oct 2026): partners on the roster only, unless the desk asks for the inactive.
+  if (!filter.includeInactive) parts.push(workingPrintPartnerWhere());
   const state = stateOf(filter);
   if (state) parts.push(kycPartyStateWhere(state, true));
   if (filter.requested === false && !state) parts.push({ NOT: kycPartyStateWhere('REQUESTED', true) });
@@ -55,7 +59,7 @@ function partyWhere(filter: PrintPartnerKycFilter): Prisma.PrintPartnerWhereInpu
 /** A row with no record spreads every record column as null. */
 const EMPTY_RECORD = Object.fromEntries(Object.values(Prisma.PrintPartnerKycScalarFieldEnum).map((column) => [column, null])) as { [K in keyof PrintPartnerKyc]: null };
 
-function toQueueRow(partner: Pick<PrintPartner, keyof typeof partnerSelect> & { kyc: PrintPartnerKyc | null }): PrintPartnerKycQueueRow {
+function toQueueRow(partner: Pick<PrintPartner, keyof typeof partnerSelect> & { kyc: PrintPartnerKyc | null }, closedAt: Date | null = null): PrintPartnerKycQueueRow {
   const { kyc, ...slice } = partner;
   const printPartner: PartnerSlice = slice;
   return {
@@ -64,6 +68,8 @@ function toQueueRow(partner: Pick<PrintPartner, keyof typeof partnerSelect> & { 
     printPartnerId: partner.id,
     kycId: kyc?.id ?? null,
     state: deriveKycState(kyc, partner.kycStatus),
+    // The partner row has no relation to its User, so the closure is read beside it (see findPage).
+    accountState: accountStateOf({ isActive: partner.isActive, closedAt }),
     printPartner,
   };
 }
@@ -90,7 +96,12 @@ export const prismaPrintPartnerKycRepository: PrintPartnerKycRepository = {
       prisma.printPartner.findMany({ where: partyWhere(where), skip: (page - 1) * pageSize, take: pageSize, orderBy, select: { ...partnerSelect, kyc: true } }),
       prisma.printPartner.count({ where: partyWhere(where) }),
     ]);
-    return { items: rows.map(toQueueRow), total };
+    // Account lifecycle: whose account is closed — `PrintPartner.userId` carries no relation to join through.
+    const closed = rows.length
+      ? await prisma.user.findMany({ where: { id: { in: rows.map((row) => row.userId) }, closedAt: { not: null } }, select: { id: true, closedAt: true } })
+      : [];
+    const closedAt = new Map(closed.map((user) => [user.id, user.closedAt]));
+    return { items: rows.map((row) => toQueueRow(row, closedAt.get(row.userId) ?? null)), total };
   },
 
   countBreached(where, cutoff) {
@@ -180,6 +191,40 @@ export const prismaPrintPartnerKycRepository: PrintPartnerKycRepository = {
     });
   },
 
+  markProviderFailed(printPartnerId) {
+    return prisma.printPartnerKyc.upsert({
+      where: { printPartnerId },
+      update: { digioStatus: PROVIDER_FAILED_STATUS },
+      create: { printPartnerId, digioStatus: PROVIDER_FAILED_STATUS },
+    });
+  },
+
+  setEntityType(printPartnerId, entityType) {
+    return prisma.printPartner.update({ where: { id: printPartnerId }, data: { entityType } });
+  },
+
+  reopenDigioForUpgrade(printPartnerId, entityType, fields: DigioFields) {
+    // Phase D: the individual's decision cleared off the row (the audit keeps
+    // it), the record and the mirror back to PENDING, the new legal form on
+    // the partner — one transaction.
+    const reopened = {
+      ...fields,
+      status: 'PENDING' as const,
+      digioPayload: Prisma.DbNull,
+      digioVerifiedAt: null,
+      reviewedAt: null,
+      reviewedById: null,
+      reviewNote: null,
+      rejectionReason: null,
+      recordedVia: null,
+      recordedById: null,
+    };
+    return prisma.$transaction(async (tx) => {
+      await tx.printPartner.update({ where: { id: printPartnerId }, data: { entityType, kycStatus: 'PENDING' } });
+      return tx.printPartnerKyc.upsert({ where: { printPartnerId }, update: reopened, create: { printPartnerId, ...reopened }, include: partnerInclude });
+    });
+  },
+
   applyDigioWebhook(id, update: DigioWebhookUpdate) {
     const { digioPayload, ...rest } = update;
     // Lot N: Digio's completion is the recording — nobody at ADX held the
@@ -187,7 +232,8 @@ export const prismaPrintPartnerKycRepository: PrintPartnerKycRepository = {
     // was sent by hand while the session was open.
     return writeWithMirror(
       id,
-      { ...rest, digioPayload: digioPayload as Prisma.InputJsonValue, recordedById: null, ...(update.status === 'VERIFIED' ? { method: 'DIGIO' } : {}) },
+      // Cashfree Phase 1: the same road carries a Cashfree session's outcome — `recordedVia` says who answered.
+      { ...rest, digioPayload: digioPayload as Prisma.InputJsonValue, recordedById: null, ...(update.status === 'VERIFIED' ? { method: update.recordedVia } : {}) },
       update.status,
     );
   },

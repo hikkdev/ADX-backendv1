@@ -142,6 +142,8 @@ export interface InvoicesRepository {
   /** The invoice that stands for a campaign: not a credit note, not void. */
   findLiveInvoiceForCampaign(campaignId: string): Promise<InvoiceWithLines | null>;
   findLiveInvoiceForPackageSale(packageSaleId: string): Promise<InvoiceWithLines | null>;
+  /** LM-1: the invoice standing for a paid placement, found by the reference its advertising line carries. */
+  findLiveInvoiceForAdvertising(advertiserId: string, reference: string): Promise<InvoiceWithLines | null>;
   findCreditNoteFor(invoiceId: string): Promise<InvoiceWithLines | null>;
   /**
    * Allocates the next number in the series and writes the invoice with its

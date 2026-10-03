@@ -200,7 +200,8 @@ export async function flagChangesHandler(req: Request, res: Response): Promise<v
 }
 
 /**
- * GET /app/flags — every feature on an app surface as this caller sees it,
+ * GET /app/flags — every feature on an app surface or the website (which
+ * makes the same read) as this caller sees it,
  * `{ key: { enabled, variant } }`, plus the flat boolean under each legacy
  * key for one release.
  *

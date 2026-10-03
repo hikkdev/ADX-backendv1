@@ -11,6 +11,8 @@ kyc/
   agent/            AgentKyc — recorded at ADX's desk on the agent's behalf (D4); KYC-D: Digio from the agent's own phone
   employee/         EmployeeKyc — the agent record's twin for staff (Lot D, Q131)
   document-review/  KycDocumentReview — one decision per tile, both party types (Lot D, Q42)
+  verification/     Cashfree Phase 1 (1 Oct 2026): the Cashfree session (Digio's backup) a person walks on ADX's own
+                    screens, the desk's attempt list / health / "Resend on backup", Cashfree Secure ID's webhook, the sweep
   purge.rules.ts    what a purge keeps: the PAN's last four, a trimmed Digio payload (Lot D, Q127)
 ```
 
@@ -144,9 +146,9 @@ all five request routes**, so the console's one click needs no body.
 **Authority.** Every request route is guarded by
 `requirePermission('kyc.edit')` beside `requireRole('ADMIN')` — the
 catalogue's **KYC edit tier**: a role config granted `kyc.edit` may send
-requests; the super admin and an admin with no role config pass under the
-launch rule (`hasPermission`: a token with no `perms` and the ADMIN role
-holds everything). Pinned by `tests/contract/kyc-one-click-authority.test.ts`;
+requests; the super admin passes on its full list, and an admin with no role
+config is refused (RP-1: `hasPermission` reads exactly the token's `perms`).
+Pinned by `tests/contract/kyc-one-click-authority.test.ts`;
 `tests/contract/permission-catalogue.test.ts` stays green (`kyc.edit` is a
 catalogue id).
 
@@ -597,3 +599,107 @@ escalated, or once a decision cleared it), and `GET /advertiser-kyc` carries
 both on every row beside `assignedTo` — still one label lookup per read, the
 ids folded in (`kycCasePeopleIds`, `kycLabelFor`). The publisher queue does
 the same through the index (`publishers/README.md`, D7).
+
+## 26 Sep 2026 — the advertiser's PAN photo under both names
+
+The onboarding manifest (and the phone and the website with it) names the PAN
+photo `panFrontUrl`; the advertiser row keeps `panCardUrl`. `PUT
+/advertiser-kyc/me` stripped `panFrontUrl` and the photo was lost. Now both
+names go in (`panFrontUrl` folds into `panCardUrl`; an explicit `panCardUrl`
+wins), every advertiser read answers both (`withPanAlias`), a flagged
+`panCardUrl` is also listed as `panFrontUrl` so the manifest's partial ladder
+draws the PAN tile flagged (`withFlaggedPanAlias`), and the desk may name the
+tile either way on `PATCH …/documents/:field` and `POST …/request-reupload`.
+Pinned in `advertiser/__tests__/pan-alias.test.ts`.
+
+## Phase D (1 Oct 2026) — Digio KYC by entity type
+
+The owner built twenty-five Digio KYC workflows ("ADX Digio KYC Workflows"),
+one per party and legal form, and a request names one by `template_id`. So a
+publisher, an advertiser and a print partner carry an **entity type** —
+`KycEntityType`: INDIVIDUAL, SOLE_PROPRIETOR, COMPANY, LLP_PARTNERSHIP,
+NON_PROFIT, GOVERNMENT_EDUCATION, OTHER_ENTITY, POLITICAL — on their own row
+(`entityType`, nullable). The rules live in `shared/kyc-state/entity-type.ts`
+and the workflow map in `shared/integrations/digio-workflows.ts`; this module
+applies them to the advertiser, `publishers` and `print-partners` to theirs.
+
+- **`GET /kyc/entity-types`** (any signed-in user) →
+  `{ PUBLISHER: [{ value, label }], ADVERTISER: [...], PRINT_PARTNER: [...] }`
+  — each party's allowed forms in the enum's order (a print partner: the
+  first four). Every surface draws its picker from it.
+- **The effective entity type** is the stored value, else what the legacy
+  `type` settles (INDIVIDUAL → INDIVIDUAL, NGO → NON_PROFIT, a POLITICAL
+  publisher → POLITICAL), else **null — "ask at the KYC start"**. KYC is never
+  a sign-up gate, so it is asked nowhere earlier.
+- **Every Digio start takes `{ entityType? }`** — `POST
+  /advertiser-kyc/me/digio/initiate`, `POST /advertiser-kyc/:id/digio/restart`
+  and `POST /advertiser-kyc/:id/request { channel?, note?, entityType? }` here
+  (the publisher's and the print partner's twins in their modules):
+  - nothing known and nothing sent → **409 `ENTITY_TYPE_REQUIRED`**,
+    `details { party, options: [{ value, label }] }` — nothing is stored,
+    stamped, notified or sent to Digio;
+  - a value that is not one of the eight → 400 `VALIDATION_ERROR` (the body);
+    one the party may not take → 400 `VALIDATION_ERROR` (`details.allowed`);
+  - valid → stored on the party row (audit `KYC_ENTITY_TYPE_SET`, before and
+    after), then the request goes out on that workflow. A MANUAL desk request
+    stores a sent value and asks for none.
+- **The upgrade.** A VERIFIED party sending an `entityType` that differs
+  from its own is allowed only from INDIVIDUAL to a business form: once Digio
+  has the new request the record and the party's mirror go back to PENDING,
+  the old decision is cleared off the row and kept — trimmed to the decision
+  — in the audit (`KYC_ENTITY_UPGRADED`). A refused request leaves the
+  individual verified. Anything else on a verified record is the 409 it
+  always was (`KYC_ALREADY_VERIFIED`; `CONFLICT` on a restart).
+- **Agents and employees take no body field.** Agents (field and sales) run
+  the one `AGENT` workflow; employees run `EMPLOYEE.FULL_TIME` (part time too,
+  until the owner says otherwise) or `EMPLOYEE.INTERN_CONTRACT` (contract,
+  intern) by `Employee.employmentType`. A political publisher runs
+  `PUBLISHER.OTHER_ENTITY`.
+- **The webhook.** `approved` verifies, `rejected` rejects, anything else —
+  including statuses a workflow may send that the first request never did
+  (`approval_pending`, …) — is kept raw on `digioStatus` and read as PENDING;
+  and a PENDING answer never overwrites a VERIFIED or REJECTED record
+  (logged, answered 200). The same on all five parties.
+- **Digio failing.** A timeout (15 s), the network, a 5xx or a 429 is **503
+  `KYC_PROVIDER_UNAVAILABLE`** `details { provider: 'DIGIO', reason:
+  'PROVIDER_ERROR' }`; any other refusal (a template Digio does not know is a
+  404) is **502 `KYC_PROVIDER_REFUSED`** `details { status, code }`. The log
+  carries the status and Digio's code, never the body.
+
+Pinned in `shared/kyc-state/__tests__/entity-type.test.ts`,
+`shared/integrations/__tests__/digio-workflows.test.ts`,
+`digio-kyc-request.test.ts`, `__tests__/phase-d-entity-types-route.test.ts`
+and `advertiser/__tests__/advertiser-digio.test.ts`. No test reaches Digio —
+the templates are in Digio production.
+
+## Cashfree Phase 1 (the owner, 1 Oct 2026): Cashfree Secure ID as Digio's backup
+
+The verification layer lives in `shared/verification` (the router, the
+breaker, the providers, the attempt / session / event stores); this module
+owns the HTTP surface over its sessions and the desk beside them. Rules:
+Digio stays primary; Cashfree is asked only when Digio could not be (a
+technical failure — a business answer is final); a Cashfree session is
+handed out only with `verificationRouting.hostedKycBackup` ON, to the
+party's OWN start, from a client that sent `supports: ['CASHFREE']`, and
+never while a Digio request is already out (the mid-flow rule — the record
+is marked `PROVIDER_FAILED` on its raw provider-status column and the desk
+is offered "Resend on backup"). Aadhaar is never stored: of DigiLocker's
+answer the attempt keeps the name, the year of birth, the last four and the
+status; the photograph is fetched again at selfie time, compared in memory
+and dropped; the selfie itself is never stored.
+
+| Method | Path | Guard | Answers |
+| --- | --- | --- | --- |
+| GET | `/verification/sessions/:id` | the session's own login (404 otherwise) | `{ id, provider: 'CASHFREE', caseType, caseId, workflowKey, status, steps: [{ check, required, status, at, failureCode, triesLeft }], expiresAt }` |
+| POST | `/verification/sessions/:id/digilocker` `{ redirectUrl }` (https) | own | `{ url, expiresAt, session }` |
+| POST | `/verification/sessions/:id/digilocker/refresh` | own | `{ status, failureCode, name, documents: { AADHAAR: { status, last4 }, PAN: … }, session }` |
+| POST | `/verification/sessions/:id/selfie` (multipart `file`, JPEG/PNG ≤ 5 MB) | own | `{ liveness: { status, failureCode, score }, faceMatch: … \| null, session }`; 409 `DIGILOCKER_CONSENT_REQUIRED` when the hour of consent ran out |
+| POST | `/verification/sessions/:id/bank` `{ accountNumber, ifsc }` | own | `{ bank: { status, failureCode, bankName }, nameMatch: { status, failureCode, score } \| null, session }` |
+| POST | `/verification/sessions/:id/business` `{ pan, gstin? }` | own | `{ pan: { status, failureCode, score, registeredName }, gstin: { status, failureCode, legalName } \| null, session }` |
+| POST | `/verification/sessions/:id/driving-licence` `{ dlNumber, dob }` / `…/vehicle` `{ vehicleNumber }` | own | `{ drivingLicence \| vehicle: { status, failureCode }, session }` (an agent's steps) |
+| GET | `/verification/attempts?caseType=&caseId=` | ADMIN + `kyc.view` | `{ attempts: [AttemptRecord + providerLabel], sessions: [session view], backup: { setting, available } }` |
+| GET | `/verification/health` | ADMIN + `kyc.view` | per provider: `{ name, label, configured, capabilities, breaker: { state, failures, openedAt, retryAt }, last24h: { attempts, technicalFailures, successRate, p95LatencyMs }, failoversToday }` |
+| POST | `/verification/cases/:caseType/:caseId/resend-on-backup` | ADMIN + `kyc.edit` | `{ session, notified }` — audited `KYC_RESENT_ON_BACKUP`; 409 `BACKUP_NOT_AVAILABLE` `{ reason: SWITCHED_OFF \| NOT_CONFIGURED \| ENTITY_TYPE_UNKNOWN \| NOT_A_KYC_CASE }` |
+| POST | `/webhooks/cashfree/verification` | `x-webhook-signature` = Base64 HMAC-SHA256(`x-webhook-timestamp` + raw body, Secure ID client secret); ±5 min | 200 at once, handled once per event (`ProviderEvent`), DigiLocker and async bank events applied after |
+
+Session statuses: OPEN, NEEDS_USER_ACTION, IN_REVIEW, VERIFIED, FAILED, EXPIRED. Step errors: 409 `VERIFICATION_SESSION_CLOSED`, 409 `VERIFICATION_STEP_NOT_OPEN` (`details.needs` names the step to finish first), 503 `VERIFICATION_UNAVAILABLE` (`details.errorClass`) when Cashfree could not answer — nothing is held against the person. The decision reaches the party's record down the Digio callback road with request id `cf_<sessionId>` (`approved` / `in_review` / `failed` / `expired`); `method` and `recordedVia` say CASHFREE.

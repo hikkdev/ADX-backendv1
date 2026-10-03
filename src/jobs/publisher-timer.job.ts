@@ -1,4 +1,4 @@
-import { redis } from '../shared/cache';
+import { redis, orSkipWhenRedisDown } from '../shared/cache';
 import { logger } from '../shared/logging';
 import { reportError } from '../shared/errors';
 import { recordHeartbeat } from '../shared/jobs';
@@ -21,7 +21,8 @@ export function startPublisherTimerJob(): void {
     // Every instance runs this interval, but only the one that wins the lock
     // for a given minute actually processes it — otherwise N instances would
     // each notify admins about the same expired order.
-    const acquired = await redis.set(LOCK_KEY, '1', 'PX', LOCK_TTL_MS, 'NX');
+    // Redis away (Docker stopped): skip this tick rather than take the API down.
+    const acquired = await orSkipWhenRedisDown(redis.set(LOCK_KEY, '1', 'PX', LOCK_TTL_MS, 'NX'), TAG);
     if (!acquired) return;
 
     try {

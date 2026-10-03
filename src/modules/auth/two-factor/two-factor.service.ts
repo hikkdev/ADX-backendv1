@@ -1,3 +1,4 @@
+import { isWorkingUser } from '../../../shared/party-status';
 import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
@@ -7,7 +8,7 @@ import { logger } from '../../../shared/logging';
 import { logActivity } from '../../../shared/audit';
 import { notify } from '../../notifications';
 import type { Role } from '../../../shared/database';
-import { normalizeMobile, sendOtp, verifyOtp } from '../otp/otp.service';
+import { normalizeMobile, sendOtp, stampProvenEmail, verifyOtp } from '../otp/otp.service';
 import { OtpError, reserveOtpSend } from '../otp/otp-security';
 import { prismaTwoFactorRepository as repository, type TwoFactorUser } from './prisma-two-factor.repository';
 import { CODE_ALPHABET, TWO_FACTOR_METHODS, type TwoFactorMethod } from './two-factor.schema';
@@ -89,7 +90,7 @@ export function maskMobile(mobile: string | null | undefined): string | null {
   return `${head} ***** ${tail}`.trim();
 }
 
-/** `asha.rao@adx.co` → `a******o@adx.co`. */
+/** `asha.rao@adx.in` → `a******o@adx.in`. */
 export function maskEmail(email: string | null | undefined): string | null {
   if (!email) return null;
   const at = email.indexOf('@');
@@ -228,9 +229,14 @@ function fallbackSpent(user: TwoFactorUser, now = new Date()): boolean {
 }
 
 async function requireAdmin(userId: string): Promise<TwoFactorUser> {
-  const user = await repository.findUser(userId);
-  if (!user || !user.isActive) throw new ApiError(401, 'UNAUTHORIZED', 'Account not active');
+  const user = await requireActive(userId);
   if (!isAdmin(user.roles)) throw new ApiError(401, 'UNAUTHORIZED', 'Account not active');
+  return user;
+}
+
+async function requireActive(userId: string): Promise<TwoFactorUser> {
+  const user = await repository.findUser(userId);
+  if (!user || !isWorkingUser(user)) throw new ApiError(401, 'UNAUTHORIZED', 'Account not active');
   return user;
 }
 
@@ -368,7 +374,9 @@ export type VerifiedChallenge = {
  */
 export async function verifyTwoFactorCode(challengeToken: string, rawCode: string): Promise<VerifiedChallenge> {
   const { userId, methods: allowed } = readChallengeClaims(challengeToken);
-  const user = await requireAdmin(userId);
+  // 2FA-A: a challenge names the account that earned it — an admin, or any
+  // account with an authenticator — so an active account is what is required here.
+  const user = await requireActive(userId);
   const roles = user.roles.map((r) => r.role) as Role[];
   const allows = (method: TwoFactorMethod) => allowed === null || allowed.includes(method);
 
@@ -458,6 +466,8 @@ export async function verifyTwoFactorCode(challengeToken: string, rawCode: strin
   }
 
   await repository.markVerified(outstanding.id);
+  // ED-1: the mailbox answered — proved.
+  if (user.email) await stampProvenEmail(user.id, user.email);
   await logActivity(user.id, 'LOGIN_2FA_PASSED', { module: 'auth', targetType: 'User', targetId: user.id, metadata: { method: 'EMAIL' } });
   return { userId: user.id, roles, method: 'EMAIL' };
 }

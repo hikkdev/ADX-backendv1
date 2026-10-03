@@ -25,6 +25,8 @@ const { prisma } = vi.hoisted(() => {
       $transaction: vi.fn<AnyFn>(async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx)),
       printPartnerKyc: { update: vi.fn<AnyFn>(), upsert: vi.fn<AnyFn>(), findMany: vi.fn<AnyFn>(), count: vi.fn<AnyFn>(), groupBy: vi.fn<AnyFn>(async () => []) },
       printPartner: { update: vi.fn<AnyFn>(), findMany: vi.fn<AnyFn>(async () => []), count: vi.fn<AnyFn>(async () => 0) },
+      // Account lifecycle: the closure of the accounts behind the page's partners.
+      user: { findMany: vi.fn<AnyFn>(async () => []) },
     },
   };
 });
@@ -115,6 +117,8 @@ describe('the queue filter', () => {
     expect(call.where.AND).toEqual([
       // every partner not yet verified, plus every partner with a record
       { OR: [{ kycStatus: { not: 'VERIFIED' } }, { kyc: { isNot: null } }] },
+      // account lifecycle: partners on the roster only
+      { isActive: true },
       // the REQUESTED state
       { kyc: { is: { status: 'PENDING', submittedAt: null, requestedAt: { not: null } } } },
       { kyc: { is: { assignedToId: null } } },
@@ -133,12 +137,12 @@ describe('the queue filter', () => {
 
     await repository.countBreached({}, NOW);
     expect(prisma.printPartner.count).toHaveBeenLastCalledWith({
-      where: { AND: [{ AND: [{ OR: [{ kycStatus: { not: 'VERIFIED' } }, { kyc: { isNot: null } }] }] }, { kyc: { is: { status: 'PENDING', submittedAt: { not: null, lt: NOW } } } }] },
+      where: { AND: [{ AND: [{ OR: [{ kycStatus: { not: 'VERIFIED' } }, { kyc: { isNot: null } }] }, { isActive: true }] }, { kyc: { is: { status: 'PENDING', submittedAt: { not: null, lt: NOW } } } }] },
     });
 
     await repository.countRequested({ requested: false, status: 'PENDING' });
     expect(prisma.printPartner.count).toHaveBeenLastCalledWith({
-      where: { AND: [{ OR: [{ kycStatus: { not: 'VERIFIED' } }, { kyc: { isNot: null } }] }, { kyc: { is: { status: 'PENDING', submittedAt: null, requestedAt: { not: null } } } }] },
+      where: { AND: [{ OR: [{ kycStatus: { not: 'VERIFIED' } }, { kyc: { isNot: null } }] }, { isActive: true }, { kyc: { is: { status: 'PENDING', submittedAt: null, requestedAt: { not: null } } } }] },
     });
   });
 
@@ -158,7 +162,7 @@ describe('the queue filter', () => {
     prisma.printPartner.count.mockClear();
     await repository.countByState({ state: 'PENDING', q: 'x' });
     expect(prisma.printPartner.count).toHaveBeenCalledTimes(6);
-    expect(prisma.printPartner.count.mock.calls.map((c) => c[0].where.AND[1])).toEqual([
+    expect(prisma.printPartner.count.mock.calls.map((c) => c[0].where.AND[2])).toEqual([
       { OR: [{ kyc: null, kycStatus: { not: 'VERIFIED' } }, { kyc: { is: { status: 'PENDING', submittedAt: null, requestedAt: null } } }] },
       { kyc: { is: { status: 'PENDING', submittedAt: null, requestedAt: { not: null } } } },
       { kyc: { is: { status: 'PENDING', submittedAt: { not: null } } } },
@@ -166,6 +170,19 @@ describe('the queue filter', () => {
       { kyc: { is: { status: 'REJECTED' } } },
       { kyc: { is: { status: 'VERIFIED' } } },
     ]);
+  });
+
+  it('account lifecycle (2 Oct 2026): include=inactive puts partners off the roster back, and each row says where the account stands', async () => {
+    prisma.printPartner.findMany.mockResolvedValue([
+      { id: 'prt_on', displayId: 'PRT-1', name: 'On', mobile: '+91', email: null, userId: 'usr_on', city: null, isActive: true, kycStatus: 'PENDING', createdAt: NOW, kyc: null },
+      { id: 'prt_off', displayId: 'PRT-2', name: 'Off', mobile: '+92', email: null, userId: 'usr_off', city: null, isActive: false, kycStatus: 'PENDING', createdAt: NOW, kyc: null },
+      { id: 'prt_closed', displayId: 'PRT-3', name: 'Closed', mobile: '+93', email: null, userId: 'usr_closed', city: null, isActive: false, kycStatus: 'PENDING', createdAt: NOW, kyc: null },
+    ]);
+    prisma.user.findMany.mockResolvedValue([{ id: 'usr_closed', closedAt: NOW }]);
+    const { items } = await repository.findPage({ includeInactive: true }, 1, 20);
+    expect(prisma.printPartner.findMany.mock.calls[0]![0].where.AND).not.toContainEqual({ isActive: true });
+    expect(items.map((item) => item.accountState)).toEqual(['ACTIVE', 'DEACTIVATED', 'CLOSED']);
+    expect(prisma.user.findMany).toHaveBeenCalledWith({ where: { id: { in: ['usr_on', 'usr_off', 'usr_closed'] }, closedAt: { not: null } }, select: { id: true, closedAt: true } });
   });
 
   it('only Digio-path VERIFIED rows with images are purgeable', async () => {

@@ -8,7 +8,8 @@ import { isFeatureEnabled } from '../feature-flags';
 import { assertCityAllows, cityKeyFor } from '../pricing';
 import { assertVisitOutcome } from '../visits';
 import { prismaCampaignsRepository as repository } from './prisma-campaigns.repository';
-import type { CampaignAggregate, CampaignPatch, CampaignRow } from './campaigns.repository';
+import type { CampaignAggregate, CampaignPatch, CampaignRow, CampaignScopeFilter } from './campaigns.repository';
+import { campaignCityScope, idsWaitingOn, withConsoleColumns } from './console.service';
 import type { ListCampaignsQuery } from './campaigns.schema';
 import { currentCreatives } from './moderation.service';
 
@@ -244,9 +245,10 @@ export async function listCampaigns(
  * `search` and `q` are the same field; the alias is folded here so nothing
  * downstream has to know there were ever two names for it.
  */
-export async function listCampaignsPage(actor: Actor, query: ListCampaignsQuery) {
+export async function listCampaignsPage(actor: Actor, query: ListCampaignsQuery, now = new Date()) {
   const q = query.q ?? query.search;
-  const { items, total, counts } = await repository.listCampaignsPage({
+  if (query.from && query.to && query.to < query.from) throw new ApiError(400, 'VALIDATION_ERROR', 'to must not be before from');
+  const scope: CampaignScopeFilter = {
     ...(actor.isAdmin
       ? // Only ADX may narrow to somebody else's advertiser; for everyone else
         // the scope below IS their identity and the parameter is ignored.
@@ -254,13 +256,26 @@ export async function listCampaignsPage(actor: Actor, query: ListCampaignsQuery)
       : actor.advertiserId
         ? { advertiserId: actor.advertiserId }
         : { agentId: actor.agentId ?? '__none__' }),
-    ...(query.status ? { status: query.status as never } : {}),
     ...(q ? { q } : {}),
+    // The Campaigns lot: the console's filter bar. Flight days are UTC, the way the flight is stored.
+    ...(await campaignCityScope(query.city)),
+    ...(query.from ? { from: new Date(`${query.from}T00:00:00.000Z`) } : {}),
+    ...(query.to ? { to: new Date(Date.parse(`${query.to}T00:00:00.000Z`) + 86_400_000) } : {}),
+    ...(query.goal?.length ? { goal: query.goal } : {}),
+  };
+  // `waitingOn` is ADX's: resolved to the ids it keeps through the same
+  // derivation the rows carry, then paged like any other facet.
+  const ids = actor.isAdmin && query.waitingOn?.length ? await idsWaitingOn({ ...scope, reasons: query.waitingOn }) : undefined;
+  const { items, total, counts } = await repository.listCampaignsPage({
+    ...scope,
+    ...(ids ? { ids } : {}),
+    ...(query.status ? { status: query.status as never } : {}),
     sort: query.sort,
     page: query.page,
     pageSize: query.pageSize,
   });
-  return toListPage(items, total, counts, query);
+  // ADX's rows carry the console's columns; a party's rows stay exactly as the apps read them.
+  return actor.isAdmin ? toListPage(await withConsoleColumns(items, now), total, counts, query) : toListPage(items, total, counts, query);
 }
 
 /** Only a draft takes edits. After payment the brief is what was paid for. */

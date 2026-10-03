@@ -11,7 +11,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  */
 
 const { repository, digio, notifications, audit } = vi.hoisted(() => ({
-  repository: { findSummaryById: vi.fn() },
+  repository: { findKycDetail: vi.fn() },
   digio: { initiateDigioKyc: vi.fn() },
   notifications: { createNotification: vi.fn() },
   audit: { logActivity: vi.fn() },
@@ -31,31 +31,45 @@ const publisher = { id: 'pub_1', userId: 'usr_1', name: 'Asha Rao', email: null,
 
 beforeEach(() => {
   vi.clearAllMocks();
-  repository.findSummaryById.mockResolvedValue(publisher);
+  repository.findKycDetail.mockResolvedValue(publisher);
   digio.initiateDigioKyc.mockResolvedValue({ kycId: 'kyc_2', accessToken: 'tok', validTill: '2026-09-11T00:00:00.000Z', sdkUrl: 'https://digio/#kyc_2?token=tok' });
 });
 
 describe('restarting a Digio check from the desk', () => {
   it('asks Digio with the publisher’s own identity, records who asked, and nudges the publisher', async () => {
     const result = await restartDigioKyc('pub_1', 'usr_admin');
-    expect(digio.initiateDigioKyc).toHaveBeenCalledWith('pub_1', 'Asha Rao', '', '+919876543210');
+    // Phase D: the publisher row goes in — its entity type picks the workflow.
+    expect(digio.initiateDigioKyc).toHaveBeenCalledWith(publisher, { byUserId: 'usr_admin', entityType: undefined, req: undefined });
     expect(audit.logActivity).toHaveBeenCalledWith('usr_admin', 'PUBLISHER_KYC_DIGIO_RESTARTED', undefined, { publisherId: 'pub_1', kycId: 'kyc_2' });
     expect(notifications.createNotification).toHaveBeenCalledWith(expect.objectContaining({ userId: 'usr_1', type: 'KYC', title: 'Finish your Digio check', relatedId: 'pub_1' }));
     expect(result).toEqual({ kycId: 'kyc_2', validTill: '2026-09-11T00:00:00.000Z', digioStatus: 'pending', notified: true });
   });
 
   it('restarts without a nudge when the publisher has no app account', async () => {
-    repository.findSummaryById.mockResolvedValue({ ...publisher, userId: null });
+    repository.findKycDetail.mockResolvedValue({ ...publisher, userId: null });
     const result = await restartDigioKyc('pub_1', 'usr_admin');
     expect(notifications.createNotification).not.toHaveBeenCalled();
     expect(result.notified).toBe(false);
   });
 
   it('has nothing to restart once verified, and 404s a publisher that is not there', async () => {
-    repository.findSummaryById.mockResolvedValueOnce({ ...publisher, kycStatus: 'VERIFIED' });
+    repository.findKycDetail.mockResolvedValueOnce({ ...publisher, kycStatus: 'VERIFIED' });
     await expect(restartDigioKyc('pub_1', 'usr_admin')).rejects.toMatchObject({ statusCode: 409 });
-    repository.findSummaryById.mockResolvedValueOnce(null);
+    repository.findKycDetail.mockResolvedValueOnce(null);
     await expect(restartDigioKyc('pub_9', 'usr_admin')).rejects.toMatchObject({ statusCode: 404 });
+    expect(digio.initiateDigioKyc).not.toHaveBeenCalled();
+  });
+
+  it('Phase D: restarts a verified individual only as the upgrade to a business form', async () => {
+    const verified = { ...publisher, kycStatus: 'VERIFIED', type: 'INDIVIDUAL', entityType: null };
+    repository.findKycDetail.mockResolvedValue(verified);
+    await restartDigioKyc('pub_1', 'usr_admin', undefined, { entityType: 'COMPANY' });
+    expect(digio.initiateDigioKyc).toHaveBeenCalledWith(verified, { byUserId: 'usr_admin', entityType: 'COMPANY', req: undefined });
+
+    vi.clearAllMocks();
+    await expect(restartDigioKyc('pub_1', 'usr_admin', undefined, { entityType: 'INDIVIDUAL' })).rejects.toMatchObject({ statusCode: 409, code: 'CONFLICT' });
+    repository.findKycDetail.mockResolvedValue({ ...verified, entityType: 'COMPANY' });
+    await expect(restartDigioKyc('pub_1', 'usr_admin', undefined, { entityType: 'LLP_PARTNERSHIP' })).rejects.toMatchObject({ statusCode: 409 });
     expect(digio.initiateDigioKyc).not.toHaveBeenCalled();
   });
 });

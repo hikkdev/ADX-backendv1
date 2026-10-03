@@ -3,7 +3,7 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { prismaSectionOverviewsRepository } from '../prisma-section-overviews.repository';
 import type { SectionOverviewsRepository } from '../section-overviews.repository';
-import { NOW, QUERY, advertisersSeed, agentsSeed, employeesSeed, leadsSeed, printPartnersSeed, publishersSeed, usersSeed } from './fixtures';
+import { NOW, QUERY, advertisersSeed, agentsSeed, campaignsSeed, employeesSeed, leadsSeed, listingsSeed, printPartnersSeed, publishersSeed, usersSeed } from './fixtures';
 import { inMemoryRepository, type Seed } from './in-memory.repository';
 import { resolveWindow } from '../section-overviews.service';
 
@@ -27,6 +27,7 @@ const scope = { city: 'Bengaluru' };
 
 type Method = keyof SectionOverviewsRepository;
 const CALLS: Record<Method, unknown[]> = {
+  onboardingsByProvenance: [window, scope, 'PUBLISHER'],
   publishersAsAt: [window.end, scope],
   publishersCreated: [window, scope],
   publishersCreatedByDay: [window, scope],
@@ -121,6 +122,33 @@ const CALLS: Record<Method, unknown[]> = {
   leadTopUpsRecorded: [window, scope],
   leadsRecycled: [window, scope],
   leadsConvertedAfterRecycle: [window, scope],
+  listingsAsAt: [window.end, scope],
+  listingsCreated: [window, scope],
+  listingsCreatedByDay: [window, scope],
+  listingsPublishedByDay: [window, scope],
+  listingsByStatus: [scope],
+  listingsSuspended: [scope],
+  listingBookings: [window, scope],
+  listingGmv: [window, scope],
+  listingsByCity: [window, scope],
+  listingsByCategory: [window, scope],
+  topPublishersByListings: [scope, 10],
+  listingRenewalsDue: [NOW, 60, scope],
+  listingClaimsOpen: [scope],
+  listingVerificationsDue: [NOW, 15, scope],
+  campaignsByStatus: [scope],
+  campaignsCompleted: [window, scope],
+  campaignsCancelled: [window, scope],
+  campaignsPaid: [window, scope],
+  campaignBookedValue: [window, scope],
+  campaignBookedValueByDay: [window, scope],
+  campaignEngagement: [window, scope],
+  campaignScansByDay: [window, scope],
+  campaignsByCity: [window, scope],
+  campaignsByGoal: [scope],
+  topAdvertisersByBookedValue: [window, scope, 10],
+  campaignsLaunchingIn: [window, scope],
+  campaignsEndingIn: [window, scope],
 };
 
 const MONEY = /^-?\d+\.\d{2}$/;
@@ -164,7 +192,17 @@ export function isAggregate(value: unknown): boolean {
   if (value === null) return true;
   if (isCount(value) || isMoney(value)) return true;
   if (Array.isArray(value)) return value.every(isGroup);
-  return isCountMap(value);
+  if (isCountMap(value)) return true;
+  /* CP-2: a plain record whose every field is itself an aggregate — counts
+     beside the groups they split into, `{ byAgent, selfServe, byCity }`.
+     Still not a row: a row carries an id, a name or a date, and none of
+     those is an aggregate, so the rejection test below still holds. */
+  return (
+    !!value &&
+    typeof value === 'object' &&
+    Object.getPrototypeOf(value) === Object.prototype &&
+    Object.values(value as Record<string, unknown>).every(isAggregate)
+  );
 }
 
 const merge = (...seeds: Seed[]): Seed => {
@@ -179,7 +217,7 @@ const merge = (...seeds: Seed[]): Seed => {
 };
 
 describe('the repository contract', () => {
-  const memory = inMemoryRepository(merge(publishersSeed(), advertisersSeed(), agentsSeed(), printPartnersSeed(), employeesSeed(), usersSeed(), leadsSeed()));
+  const memory = inMemoryRepository(merge(publishersSeed(), advertisersSeed(), agentsSeed(), printPartnersSeed(), employeesSeed(), usersSeed(), leadsSeed(), listingsSeed(), campaignsSeed()));
   const methods = Object.keys(CALLS) as Method[];
 
   it('names every method the Prisma repository implements, and nothing else', () => {

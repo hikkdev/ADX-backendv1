@@ -24,6 +24,10 @@ vi.mock('../../../../shared/database', async (importOriginal) => {
 });
 
 import { prismaAgentKycRepository as repository } from '../prisma-agent-kyc.repository';
+import { workingAgentAccountWhere } from '../../../../shared/party-status';
+
+// Account lifecycle (2 Oct 2026): by default the queue is working accounts past none of the ladder's dead ends.
+const ACTIVE_ONLY = [workingAgentAccountWhere(), { stage: { notIn: ['REJECTED', 'WITHDRAWN', 'EXITED'] } }];
 
 const NOW = new Date('2026-09-14T22:00:00.000Z');
 const slice = { id: 'agt_new', userId: 'usr_new', displayId: 'AGT-1', city: 'Pune', createdAt: NOW, user: { name: 'Rahul', mobile: '+91', email: null } };
@@ -46,22 +50,23 @@ describe('the agent queue is every agent', () => {
     expect(items[0]).toMatchObject({ id: 'agt_new', agentId: 'agt_new', kycId: null, state: 'AWAITING_DOCUMENTS', status: null, submittedAt: null, agent: { id: 'agt_new', displayId: 'AGT-1', user: { name: 'Rahul' } } });
     expect(items[1]).toMatchObject({ id: 'akyc_1', agentId: 'agt_1', kycId: 'akyc_1', state: 'PENDING', submittedAt: NOW });
     expect(prisma.agentProfile.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { AND: [] }, orderBy: [{ kyc: { submittedAt: { sort: 'asc', nulls: 'last' } } }, { createdAt: 'asc' }], select: expect.objectContaining({ kyc: true }) }),
+      expect.objectContaining({ where: { AND: ACTIVE_ONLY }, orderBy: [{ kyc: { submittedAt: { sort: 'asc', nulls: 'last' } } }, { createdAt: 'asc' }], select: expect.objectContaining({ kyc: true }) }),
     );
   });
 
   it('`state=` narrows (no mirror: AWAITING_DOCUMENTS is no record or an untouched one); `status=` is the alias; `q=` reaches the agent', async () => {
     await repository.findPage({ state: 'AWAITING_DOCUMENTS', q: 'Rahul' }, 1, 20);
     expect(prisma.agentProfile.findMany.mock.calls[0]![0].where.AND).toEqual([
+      ...ACTIVE_ONLY,
       { OR: [{ kyc: null }, { kyc: { is: { status: 'PENDING', submittedAt: null, requestedAt: null } } }] },
       { OR: [{ displayId: { contains: 'Rahul', mode: 'insensitive' } }, { user: { name: { contains: 'Rahul', mode: 'insensitive' } } }, { user: { mobile: { contains: 'Rahul' } } }] },
     ]);
     await repository.findPage({ status: 'REJECTED' }, 1, 20);
-    expect(prisma.agentProfile.findMany.mock.calls[1]![0].where.AND).toEqual([{ kyc: { is: { status: 'REJECTED' } } }]);
+    expect(prisma.agentProfile.findMany.mock.calls[1]![0].where.AND).toEqual([...ACTIVE_ONLY, { kyc: { is: { status: 'REJECTED' } } }]);
   });
 
   it('the chips are one count per state, the state facet and its alias removed', async () => {
-    prisma.agentProfile.count.mockImplementation(async ({ where }: { where: { AND: unknown[] } }) => (JSON.stringify(where.AND[0]).includes('"kyc":null') ? 5 : 1));
+    prisma.agentProfile.count.mockImplementation(async ({ where }: { where: { AND: unknown[] } }) => (JSON.stringify(where.AND[2]).includes('"kyc":null') ? 5 : 1));
     expect(await repository.countByState({ state: 'PENDING', status: 'PENDING' })).toEqual({ AWAITING_DOCUMENTS: 5, REQUESTED: 1, PENDING: 1, NEEDS_INFO: 1, REJECTED: 1, VERIFIED: 1 });
     expect(prisma.agentProfile.count).toHaveBeenCalledTimes(6);
   });

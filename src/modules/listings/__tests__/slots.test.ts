@@ -20,6 +20,7 @@ const repository = vi.hoisted(() => ({
   publisherMeetingPlace: vi.fn(),
   mediaTypeLoopHint: vi.fn(),
   slotsHeld: vi.fn(),
+  datedHolds: vi.fn(),
   findActive: vi.fn(),
   findActiveById: vi.fn(),
   savedListingIds: vi.fn(),
@@ -125,6 +126,7 @@ beforeEach(() => {
   repository.findById.mockResolvedValue(existing());
   repository.mediaTypeLoopHint.mockResolvedValue(null);
   repository.slotsHeld.mockResolvedValue(new Map());
+  repository.datedHolds.mockResolvedValue([]);
   repository.findActive.mockResolvedValue({ items: [spot()], total: 1 });
   repository.findActiveById.mockResolvedValue(spot());
   repository.savedListingIds.mockResolvedValue([]);
@@ -237,6 +239,19 @@ describe('slots held', () => {
     expect(held.get('lst_3') ?? 0).toBe(0);
   });
 
+  it('BD-1: a blocked date takes the whole loop, on top of whatever else holds the spot', () => {
+    const held = sumSlotHolds({
+      orders: [{ listingId: 'lst_1', campaignSpot: null }],
+      reservations: [],
+      blocks: [
+        { listingId: 'lst_1', listing: { slotsTotal: 6 } },
+        { listingId: 'lst_2', listing: { slotsTotal: 1 } },
+      ],
+    });
+    expect(held.get('lst_1')).toBe(7);
+    expect(held.get('lst_2')).toBe(1);
+  });
+
   it('today is the UTC day, start to end', () => {
     const window = todayWindow(new Date('2026-09-13T15:42:00Z'));
     expect(window.from.toISOString()).toBe('2026-09-13T00:00:00.000Z');
@@ -245,31 +260,35 @@ describe('slots held', () => {
 });
 
 describe('browse cards', () => {
-  it('carry slotsTotal and slotsLeft for the asked window', async () => {
-    repository.slotsHeld.mockResolvedValue(new Map([['lst_1', 2]]));
+  const held = (quantity: number, from: string | null = null, to: string | null = null) => ({ listingId: 'lst_1', quantity, from: from ? new Date(`${from}T00:00:00Z`) : null, to: to ? new Date(`${to}T00:00:00Z`) : null });
+
+  it('carry slotsTotal and slotsLeft for the asked window — the busiest day — and the days with room', async () => {
+    // AV-1: 2 held 1–5 Oct and 2 held 10–14 Oct never run together: the busiest day holds 2.
+    repository.datedHolds.mockResolvedValue([held(2, '2026-10-01', '2026-10-05'), held(2, '2026-10-10', '2026-10-14')]);
     const from = new Date('2026-10-01T00:00:00Z');
     const to = new Date('2026-10-14T00:00:00Z');
     const page = await browseListings({ sort: 'NEWEST', from, to });
-    expect(page.items[0]).toMatchObject({ slotsTotal: 6, slotsLeft: 4 });
-    expect(repository.slotsHeld).toHaveBeenCalledWith(['lst_1'], { from, to });
+    expect(page.items[0]).toMatchObject({ slotsTotal: 6, slotsLeft: 4, freeDays: 14, windowDays: 14 });
+    expect(repository.datedHolds).toHaveBeenCalledWith(['lst_1'], { from, to });
   });
 
   it('use today when no window is asked for, and never go below zero', async () => {
-    repository.slotsHeld.mockResolvedValue(new Map([['lst_1', 9]]));
+    repository.datedHolds.mockResolvedValue([held(9)]);
     const page = await browseListings({ sort: 'NEWEST' });
-    expect(page.items[0]).toMatchObject({ slotsTotal: 6, slotsLeft: 0 });
-    const [, window] = repository.slotsHeld.mock.calls[0]!;
+    expect(page.items[0]).toMatchObject({ slotsTotal: 6, slotsLeft: 0, freeDays: 0, windowDays: 1 });
+    const [, window] = repository.datedHolds.mock.calls[0]!;
     expect(window.from.getUTCHours()).toBe(0);
     expect(window.to.getTime()).toBeGreaterThan(window.from.getTime());
   });
 
-  it('a static spot reads 1 of 1, and 0 left once booked', async () => {
+  it('a static spot reads 1 of 1, 0 left once booked — and says how many of the days are still free', async () => {
     repository.findActiveById.mockResolvedValue(spot({ subType: null, slotsTotal: 1 }));
     await expect(getBrowseListing('lst_1')).resolves.toMatchObject({ slotsTotal: 1, slotsLeft: 1 });
-    repository.slotsHeld.mockResolvedValue(new Map([['lst_1', 1]]));
-    const window = { from: new Date('2026-10-01T00:00:00Z'), to: new Date('2026-10-02T00:00:00Z') };
-    await expect(getBrowseListing('lst_1', undefined, window)).resolves.toMatchObject({ slotsTotal: 1, slotsLeft: 0 });
-    expect(repository.slotsHeld).toHaveBeenLastCalledWith(['lst_1'], window);
+    // Booked 1–10 Oct, asked about 1–31 Oct: none left over the whole range, but 21 days free.
+    repository.datedHolds.mockResolvedValue([held(1, '2026-10-01', '2026-10-10')]);
+    const window = { from: new Date('2026-10-01T00:00:00Z'), to: new Date('2026-10-31T23:59:59.999Z') };
+    await expect(getBrowseListing('lst_1', undefined, window)).resolves.toMatchObject({ slotsTotal: 1, slotsLeft: 0, freeDays: 21, windowDays: 31 });
+    expect(repository.datedHolds).toHaveBeenLastCalledWith(['lst_1'], window);
   });
 });
 

@@ -13,9 +13,33 @@ import type {
 import type { EvidenceInput } from './order-milestones.types';
 
 const planInclude = { items: { include: { template: true }, orderBy: { order: 'asc' } } } as const;
+/*
+ * 2 Oct 2026: the publisher on an agent's milestone is the business the agent
+ * visits — the name, the number and the address. It used to be the whole
+ * Publisher row (GSTIN, email, KYC and suspension facts) in the agent's answer.
+ */
+const visitPublisherSelect = {
+  id: true,
+  userId: true,
+  displayId: true,
+  name: true,
+  mobile: true,
+  address: true,
+  city: true,
+  state: true,
+} as const;
+
+/** The agent holding a milestone, as the console's order page names them — never the whole User row. */
+const assignedAgentSelect = {
+  id: true,
+  userId: true,
+  displayId: true,
+  user: { select: { id: true, name: true, firstName: true, lastName: true, displayId: true, avatarUrl: true, mobile: true } },
+} as const;
+
 const agentWorkInclude = {
   template: true,
-  orderRecord: { include: { listing: { include: { publisher: true } } } },
+  orderRecord: { include: { listing: { include: { publisher: { select: visitPublisherSelect } } } } },
   evidence: true,
 } as const;
 
@@ -90,7 +114,7 @@ export const prismaOrderMilestonesRepository: OrderMilestonesRepository = {
   findForOrder(orderId: string) {
     return prisma.orderMilestone.findMany({
       where: { orderId },
-      include: { template: true, assignedAgent: { include: { user: true } }, evidence: true },
+      include: { template: true, assignedAgent: { select: assignedAgentSelect }, evidence: true },
       orderBy: { order: 'asc' },
     });
   },
@@ -133,11 +157,19 @@ export const prismaOrderMilestonesRepository: OrderMilestonesRepository = {
     }) as never;
   },
 
+  async findSiteCode(orderId: string) {
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      select: { listingId: true, listing: { select: { qrToken: true } } },
+    });
+    return order ? { listingId: order.listingId, qrToken: order.listing.qrToken } : null;
+  },
+
   updateMilestone(milestoneId: string, patch: OrderMilestonePatch) {
     return prisma.orderMilestone.update({
       where: { id: milestoneId },
       data: patch,
-      include: { template: true, assignedAgent: { include: { user: true } } },
+      include: { template: true, assignedAgent: { select: assignedAgentSelect } },
     });
   },
 
@@ -238,6 +270,31 @@ export const prismaOrderMilestonesRepository: OrderMilestonesRepository = {
       select: { id: true, orderId: true },
       orderBy: { createdAt: 'asc' },
     });
+  },
+
+  // ST-2: the agent sent to a listing — a visit of theirs on one of its
+  // orders (open, or completed since `since`), or the order's own agent.
+  async agentHasWorkOnListing(agentId: string, listingId: string, since: Date) {
+    const [visit, order] = await Promise.all([
+      prisma.orderMilestone.findFirst({
+        where: {
+          assignedAgentId: agentId,
+          orderRecord: { listingId },
+          OR: [{ status: { in: ['DISPATCHED', 'IN_PROGRESS'] } }, { status: 'COMPLETED', completedAt: { gte: since } }],
+        },
+        select: { id: true },
+      }),
+      prisma.order.findFirst({
+        where: {
+          agentId,
+          listingId,
+          status: { notIn: ['DRAFT', 'CANCELLED', 'PUBLISHER_REJECTED', 'AGENT_REJECTED'] },
+          OR: [{ status: { not: 'COMPLETED' } }, { updatedAt: { gte: since } }],
+        },
+        select: { id: true },
+      }),
+    ]);
+    return Boolean(visit || order);
   },
 
   findOfferExpired(windowStart: Date, now: Date) {

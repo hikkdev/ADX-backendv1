@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { asyncHandler } from '../../shared/http';
-import { authenticate, requireRole } from '../../shared/auth';
-import { csvUploadMiddleware } from '../uploads';
+import { authenticate, requireRole, requirePermission } from '../../shared/auth';
+import { csvUploadMiddleware, spreadsheetUploadMiddleware } from '../uploads';
 import {
   commitImportHandler,
   formatHandler,
@@ -29,25 +29,31 @@ import { LISTING_KINDS } from './party-imports.schema';
 export const partyImportsRouter = Router();
 partyImportsRouter.use(authenticate);
 
-partyImportsRouter.get('/formats', requireRole('ADMIN'), asyncHandler(formatsHandler));
-partyImportsRouter.get('/formats/:kind', requireRole('ADMIN'), asyncHandler(formatHandler));
-partyImportsRouter.get('/formats/:kind/template.csv', requireRole('ADMIN'), asyncHandler(formatTemplateHandler));
+partyImportsRouter.get('/formats', requireRole('ADMIN'), requirePermission('marketplace.view'), asyncHandler(formatsHandler));
+/* BL-1: the guide and the template for one kind are what a publisher (or their agent) reads before a bulk upload. */
+partyImportsRouter.get('/formats/:kind', requireRole('ADMIN', 'AGENT_PUBLISHER', 'PUBLISHER'), requirePermission('marketplace.view'), asyncHandler(formatHandler));
+partyImportsRouter.get('/formats/:kind/template.csv', requireRole('ADMIN', 'AGENT_PUBLISHER', 'PUBLISHER'), requirePermission('marketplace.view'), asyncHandler(formatTemplateHandler));
 
 for (const kind of LISTING_KINDS) {
   const handlers = listingKindHandlers(kind);
-  const forPublisher = requireRole('ADMIN', 'AGENT_PUBLISHER');
-  partyImportsRouter.post(`/${kind}`, forPublisher, csvUploadMiddleware, asyncHandler(handlers.import));
-  partyImportsRouter.get(`/${kind}`, forPublisher, asyncHandler(handlers.list));
-  partyImportsRouter.get(`/${kind}/:id`, forPublisher, asyncHandler(handlers.get));
-  partyImportsRouter.get(`/${kind}/:id/report.csv`, forPublisher, asyncHandler(handlers.report));
-  partyImportsRouter.post(`/${kind}/:id/commit`, forPublisher, asyncHandler(handlers.commit));
-  partyImportsRouter.post(`/${kind}/:id/revoke`, forPublisher, asyncHandler(handlers.revoke));
+  /* BL-1: the publisher too, for their own account only — the act rule in the service. */
+  const forPublisher = requireRole('ADMIN', 'AGENT_PUBLISHER', 'PUBLISHER');
+  /* RP-3: listings are publishers & listings; rate cards are pricing. */
+  const group = kind === 'rate-card' ? 'pricing' : 'supply';
+  /* RP-2: listings and rate cards are supply; an agent the role guard admits passes as the agent. */
+  /* 26 Sep 2026: a CSV or an .xlsx — the apps and the website promise both. */
+  partyImportsRouter.post(`/${kind}`, forPublisher, requirePermission(`${group}.import`), spreadsheetUploadMiddleware, asyncHandler(handlers.import));
+  partyImportsRouter.get(`/${kind}`, forPublisher, requirePermission(`${group}.view`), asyncHandler(handlers.list));
+  partyImportsRouter.get(`/${kind}/:id`, forPublisher, requirePermission(`${group}.view`), asyncHandler(handlers.get));
+  partyImportsRouter.get(`/${kind}/:id/report.csv`, forPublisher, requirePermission(`${group}.view`), asyncHandler(handlers.report));
+  partyImportsRouter.post(`/${kind}/:id/commit`, forPublisher, requirePermission(`${group}.import`), asyncHandler(handlers.commit));
+  partyImportsRouter.post(`/${kind}/:id/revoke`, forPublisher, requirePermission(`${group}.import`), asyncHandler(handlers.revoke));
 }
 
 const forAdmin = requireRole('ADMIN');
-partyImportsRouter.post('/:party', forAdmin, csvUploadMiddleware, asyncHandler(importPartyHandler));
-partyImportsRouter.get('/:party', forAdmin, asyncHandler(listImportsHandler));
-partyImportsRouter.get('/:party/:id', forAdmin, asyncHandler(getImportHandler));
-partyImportsRouter.get('/:party/:id/report.csv', forAdmin, asyncHandler(importReportHandler));
-partyImportsRouter.post('/:party/:id/commit', forAdmin, asyncHandler(commitImportHandler));
-partyImportsRouter.post('/:party/:id/revoke', forAdmin, asyncHandler(revokeImportHandler));
+partyImportsRouter.post('/:party', forAdmin, requirePermission('marketplace.import'), csvUploadMiddleware, asyncHandler(importPartyHandler));
+partyImportsRouter.get('/:party', forAdmin, requirePermission('marketplace.view'), asyncHandler(listImportsHandler));
+partyImportsRouter.get('/:party/:id', forAdmin, requirePermission('marketplace.view'), asyncHandler(getImportHandler));
+partyImportsRouter.get('/:party/:id/report.csv', forAdmin, requirePermission('marketplace.view'), asyncHandler(importReportHandler));
+partyImportsRouter.post('/:party/:id/commit', forAdmin, requirePermission('marketplace.import'), asyncHandler(commitImportHandler));
+partyImportsRouter.post('/:party/:id/revoke', forAdmin, requirePermission('marketplace.import'), asyncHandler(revokeImportHandler));

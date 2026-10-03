@@ -88,6 +88,17 @@ describe('public routes stay public', () => {
     expect(paths).toContain('/api/v1/qr/:qrId/image.png');
     expect(paths).toContain('/api/v1/webhooks/digio');
     expect(paths).toContain('/api/v1/users/bootstrap-admin');
+    // 26 Sep 2026: the website's signed-out reads — public data only, metered by IP (`publicReadLimiter`).
+    expect(paths).toContain('/api/v1/legal/agreements/:kind');
+    expect(paths).toContain('/api/v1/publishers/:publisherId/public');
+    expect(paths).toContain('/api/v1/app/geo/cities');
+    expect(paths).toContain('/api/v1/app/geo/resolve');
+    // LM-1 (27 Sep 2026): the resolved layout a screen draws — the website is read signed out and the
+    // app homes read it before anything else; `authenticateOptional` reads a token as its side when sent.
+    expect(paths).toContain('/api/v1/app/layouts/:surface');
+    // … and the writes beside them stay signed-in.
+    expect(paths).not.toContain('/api/v1/app/geo/waitlist');
+    expect(paths).not.toContain('/api/v1/agreements/mine');
   });
 
   it('GET /api/v1/health answers without a token', async () => {

@@ -2,10 +2,10 @@
  * `npm run features:sync` — Lot G (answer 144).
  *
  * Folds every backend declaration (`src/modules/<m>/features.ts`,
- * `src/bootstrap/features.ts`) and the three package manifests (console,
- * user app, agent app) into `docs/feature-registry.json`, which is committed:
- * `ensureFeatureRegistry()` reads it at boot so a console screen or an app
- * folder gets a row and a kill switch too, and `GET /flags/registry` serves it
+ * `src/bootstrap/features.ts`) and the four package manifests (console,
+ * user app, agent app, website) into `docs/feature-registry.json`, which is
+ * committed: `ensureFeatureRegistry()` reads it at boot so a console screen,
+ * an app folder or a website page gets a row and a kill switch too, and `GET /flags/registry` serves it
  * so the console can show surfaces the backend cannot see at runtime.
  *
  * `--check` writes nothing and exits 1 when the committed document is behind,

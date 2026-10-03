@@ -12,6 +12,8 @@
 export { sectionOverviewsRouter } from './section-overviews.routes';
 export type {
   SectionOverview,
+  CampaignsOverview,
+  ListingsOverview,
   PublishersOverview,
   AdvertisersOverview,
   AgentsOverview,

@@ -1,6 +1,7 @@
 import { Decimal } from '../../shared/money';
 import { Prisma, prisma } from '../../shared/database';
 import { listArgs } from '../../shared/pagination';
+import { workingAdvertiserWhere } from '../../shared/party-status';
 import type { PackagesRepository, TrialStart, TrialStartResult } from './packages.repository';
 import { EXPIRING_WITHIN_DAYS, type PackageShelf } from './packages.schema';
 
@@ -291,7 +292,8 @@ export const prismaPackagesRepository: PackagesRepository = {
 
   findEndingBetween(from, to) {
     return prisma.packageSale.findMany({
-      where: { status: { in: ['ACTIVE', 'EXPIRED'] }, endsAt: { gt: from, lte: to } },
+      // Account lifecycle (2 Oct 2026): a suspended, deactivated or closed advertiser is neither reminded nor renewed.
+      where: { status: { in: ['ACTIVE', 'EXPIRED'] }, endsAt: { gt: from, lte: to }, advertiser: workingAdvertiserWhere() },
       orderBy: { endsAt: 'asc' },
       take: 500,
       include: saleInclude,

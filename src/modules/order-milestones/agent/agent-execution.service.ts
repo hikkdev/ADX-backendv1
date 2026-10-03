@@ -14,6 +14,7 @@ import {
 } from '../../orders';
 import { prismaOrderMilestonesRepository as repository } from '../prisma-order-milestones.repository';
 import { autoAssignMilestones, isFrozen } from '../order/order-milestones.service';
+import { isSignedCodeFor } from '../../qr';
 import { checkEvidence } from '../order-milestones.evidence';
 import type { EvidenceInput } from '../order-milestones.types';
 
@@ -270,6 +271,47 @@ export async function countDispatchedMilestones(agentId: string): Promise<number
   return (await repository.findDispatchedForAgent(agentId)).length;
 }
 
+/** ST-2: how long after a visit or an order is done its agent can still open the listing's papers. */
+export const LISTING_VISIT_WINDOW_DAYS = 30;
+
+/**
+ * ST-2 (28 Sep 2026): is this agent sent to this listing? The rule the
+ * verification drawer's own read already applies — the milestone is
+ * assigned to them (`getMilestoneDetail`) — widened from one milestone to the
+ * listing: a visit of theirs on one of its orders that is dispatched or in
+ * progress, or completed within the last `LISTING_VISIT_WINDOW_DAYS`; or the
+ * order's own agent while the order is live, or within that window after.
+ * What it opens is the listing's venue papers and audience reports, which
+ * went private in ST-2 (asked for by `uploads` through bootstrap).
+ */
+export async function agentSentToListing(agentId: string, listingId: string, now = new Date()): Promise<boolean> {
+  const since = new Date(now.getTime() - LISTING_VISIT_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  return repository.agentHasWorkOnListing(agentId, listingId, since);
+}
+
+/**
+ * A `qr_scan` is the code read off the sticker at the spot, checked the way
+ * the order check-in checks it: the listing's own token, or a signed SITE /
+ * ORDER code that resolves to this listing or order. Until 3 Oct 2026 any
+ * text passed, and the agent app sent the token the order read handed it —
+ * so the sign-off proved nothing about being there. Now the token never
+ * leaves the server and the app scans.
+ */
+async function assertSiteCode(orderId: string, evidence: EvidenceInput[]): Promise<void> {
+  const scans = evidence.filter((e) => e.kind === 'qr_scan');
+  if (scans.length === 0) return;
+  const site = await repository.findSiteCode(orderId);
+  for (const scan of scans) {
+    const code = scan.value.trim();
+    const matches =
+      (site !== null && code === site.qrToken) ||
+      (await isSignedCodeFor(code, { listingId: site?.listingId, orderId }));
+    if (!matches) {
+      throw new ApiError(400, 'INVALID_QR', "That code is not this spot's QR. Scan the sticker at the site.");
+    }
+  }
+}
+
 export async function completeMilestone(
   milestoneId: string,
   agentId: string,
@@ -284,6 +326,7 @@ export async function completeMilestone(
   // repository then flips the status conditionally so two concurrent
   // completions cannot both succeed.
   const deduped = checkEvidence(milestone.template.requirements, evidence);
+  await assertSiteCode(milestone.orderId, deduped);
 
   return repository.complete(milestoneId, deduped);
 }

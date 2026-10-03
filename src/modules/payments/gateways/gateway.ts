@@ -38,6 +38,8 @@ export type CreateOrderInput = {
   returnUrl: string;
   /** Where the gateway posts its server-to-server notification. */
   notifyUrl: string;
+  /** UP-1: the payer's UPI id — Cashfree raises a collect request on it, Razorpay prefills it; CCAvenue ignores it. */
+  upiId?: string | undefined;
 };
 
 export type CreateOrderResult = {

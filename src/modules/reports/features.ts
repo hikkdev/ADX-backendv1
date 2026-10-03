@@ -18,7 +18,7 @@ feature('reports.catalogue', {
   kind: 'FEATURE',
   launch: 'on',
   description:
-    'Lot G (Q129/Q143): the twelve reports defined in code — run on demand or on a schedule, mailed as a time-limited link.',
+    'Lot G (Q129/Q143): the thirteen reports defined in code — run on demand or on a schedule, mailed as a time-limited link.',
   routes: ['/api/v1/reports'],
   jobs: ['report-schedule'],
 });

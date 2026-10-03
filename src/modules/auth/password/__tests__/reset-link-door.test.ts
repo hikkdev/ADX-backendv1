@@ -42,8 +42,8 @@ const response = () => {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  repository.findByEmail.mockResolvedValue({ id: 'usr_1', email: 'asha@adx.co' });
-  config.getEffectiveResendConfig.mockResolvedValue({ apiKey: 're_key', fromEmail: 'ADX <hello@adx.co>' });
+  repository.findByEmail.mockResolvedValue({ id: 'usr_1', email: 'asha@adx.in' });
+  config.getEffectiveResendConfig.mockResolvedValue({ apiKey: 're_key', fromEmail: 'ADX <hello@adx.in>' });
   mail.sendMail.mockResolvedValue({ messageId: '<smtp@adx>', response: '250 OK', previewUrl: null });
   resend.sendViaResend.mockResolvedValue({ messageId: 're_1', response: '{"id":"re_1"}' });
 });
@@ -51,12 +51,12 @@ beforeEach(() => {
 describe('the reset link and the one door', () => {
   it('forgot-password with the primary on RESEND asks Resend, not SMTP', async () => {
     config.getEffectiveEmailConfig.mockResolvedValue({ primary: 'RESEND', mode: 'SMTP', host: 'smtp.local' });
-    const req = { body: { email: 'asha@adx.co' }, ip: '127.0.0.1', headers: {} } as never;
+    const req = { body: { email: 'asha@adx.in' }, ip: '127.0.0.1', headers: {} } as never;
     await forgotPasswordHandler(req, response());
 
     expect(resend.sendViaResend).toHaveBeenCalledTimes(1);
     const [to, subject, html] = resend.sendViaResend.mock.calls[0]! as [string, string, string];
-    expect(to).toBe('asha@adx.co');
+    expect(to).toBe('asha@adx.in');
     expect(subject).toBe('Reset your ADX Admin password');
     expect(html).toContain('/reset-password?token=');
     expect(mail.sendMail).not.toHaveBeenCalled();
@@ -65,15 +65,15 @@ describe('the reset link and the one door', () => {
 
   it('the desk`s reset link (sendPasswordResetLink) goes by the same door', async () => {
     config.getEffectiveEmailConfig.mockResolvedValue({ primary: 'RESEND', mode: 'SMTP' });
-    await sendPasswordResetLink('usr_1', 'asha@adx.co');
+    await sendPasswordResetLink('usr_1', 'asha@adx.in');
     expect(resend.sendViaResend).toHaveBeenCalledTimes(1);
     expect(mail.sendMail).not.toHaveBeenCalled();
   });
 
   it('with the primary on SMTP the SMTP helper is the one asked', async () => {
     config.getEffectiveEmailConfig.mockResolvedValue({ primary: 'SMTP', mode: 'ETHEREAL' });
-    await sendPasswordResetLink('usr_1', 'asha@adx.co');
-    expect(mail.sendMail).toHaveBeenCalledWith('asha@adx.co', 'Reset your ADX Admin password', expect.stringContaining('/reset-password?token='));
+    await sendPasswordResetLink('usr_1', 'asha@adx.in');
+    expect(mail.sendMail).toHaveBeenCalledWith('asha@adx.in', 'Reset your ADX Admin password', expect.stringContaining('/reset-password?token='));
     expect(resend.sendViaResend).not.toHaveBeenCalled();
   });
 });

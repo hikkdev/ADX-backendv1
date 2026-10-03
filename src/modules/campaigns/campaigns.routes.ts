@@ -1,14 +1,26 @@
 import { Router } from 'express';
 import { asyncHandler } from '../../shared/http';
-import { authenticate, requireRole } from '../../shared/auth';
+import { authenticate, requireRole, requirePermission } from '../../shared/auth';
 import { trackingInteractionLimiter } from '../../shared/security';
 import { requireFeature, requireFeatureWhen } from '../feature-flags';
 import {
   acceptCreativeHandler,
+  analyseCreativeHandler,
+  analyseCreativesHandler,
+  applyPromoHandler,
+  removePromoHandler,
+  designQuoteHandler,
+  designQuoteResponseHandler,
+  reserveHandler,
+  payReservationFeeHandler,
   authorizeHandler,
   bulkReviewHandler,
   campaignAnalyticsHandler,
   cancelHandler,
+  cancelImpactHandler,
+  campaignPerformanceHandler,
+  launchQueueHandler,
+  remindPaymentHandler,
   contentCategoriesHandler,
   createCampaignHandler,
   deleteCreativeHandler,
@@ -31,6 +43,7 @@ import {
   requestCreativeChangesHandler,
   reviewCreativeHandler,
   reviewHandler,
+  designRequestsHandler,
   reviewQueueHandler,
   scanHandler,
   setCartHandler,
@@ -68,14 +81,23 @@ campaignRouter.get('/analytics', asyncHandler(portfolioAnalyticsHandler));
 /* Lot D (Q44): the creative review desk — ADMIN, and declared before /:id so
    "creatives" is never read as a campaign id. The list contract: status
    chips with counts, plus kind, flagged, resubmitted and q. */
-campaignRouter.get('/creatives/review-queue', requireRole('ADMIN'), asyncHandler(reviewQueueHandler));
-campaignRouter.post('/creatives/review', requireRole('ADMIN'), asyncHandler(bulkReviewHandler));
-campaignRouter.get('/creatives/:creativeId', requireRole('ADMIN'), asyncHandler(getCreativeHandler));
+campaignRouter.get('/creatives/review-queue', requireRole('ADMIN'), requirePermission('content.view'), asyncHandler(reviewQueueHandler));
+/* CR-1: the designs ADX owes — campaigns on the ADX path with nothing standing. ADMIN, before /:id. */
+campaignRouter.get('/design-requests', requireRole('ADMIN'), requirePermission('content.view'), asyncHandler(designRequestsHandler));
+campaignRouter.post('/creatives/review', requireRole('ADMIN'), requirePermission('content.approve'), asyncHandler(bulkReviewHandler));
+campaignRouter.post('/creatives/analyse', requireRole('ADMIN'), requirePermission('content.edit'), asyncHandler(analyseCreativesHandler));
+campaignRouter.get('/creatives/:creativeId', requireRole('ADMIN'), requirePermission('content.view'), asyncHandler(getCreativeHandler));
+/* VA-1: the vision pass — ADMIN, on demand. The answer is a row beside the creative, never a decision. */
+campaignRouter.post('/creatives/:creativeId/analyse', requireRole('ADMIN'), requirePermission('content.edit'), asyncHandler(analyseCreativeHandler));
 /* Lot D (Q138): the wizard's content-category question reads the seeded list. */
 campaignRouter.get('/content-categories', asyncHandler(contentCategoriesHandler));
 /* Lot E (Q106): the landing-page review list — ADMIN, and declared before /:id
    so "landing-pages" is never read as a campaign id. */
-campaignRouter.get('/landing-pages', requireRole('ADMIN'), landingPages, asyncHandler(listLandingPagesHandler));
+campaignRouter.get('/landing-pages', requireRole('ADMIN'), requirePermission('demand.view'), landingPages, asyncHandler(listLandingPagesHandler));
+
+/* The Campaigns lot (2 Oct 2026): the launch queue — ADMIN, before /:id so
+   "launch-queue" is never read as a campaign id. */
+campaignRouter.get('/launch-queue', requireRole('ADMIN'), requirePermission('demand.view'), asyncHandler(launchQueueHandler));
 
 campaignRouter.get('/', asyncHandler(listCampaignsHandler));
 campaignRouter.post('/', multiMarketSwitch, asyncHandler(createCampaignHandler));
@@ -90,21 +112,35 @@ campaignRouter.put('/:id/spots', asyncHandler(setCartHandler));
 campaignRouter.post('/:id/creatives', asyncHandler(uploadCreativeHandler));
 campaignRouter.delete('/:id/creatives/:creativeId', asyncHandler(deleteCreativeHandler));
 /* Lot D (Q44): ops' decision on one artwork. */
-campaignRouter.patch('/:id/creatives/:creativeId/review', requireRole('ADMIN'), asyncHandler(reviewCreativeHandler));
+campaignRouter.patch('/:id/creatives/:creativeId/review', requireRole('ADMIN'), requirePermission('content.approve'), asyncHandler(reviewCreativeHandler));
 /* Lot D (Q120): the advertiser's (or their agent's) answer to ADX-designed artwork. */
 campaignRouter.post('/:id/creatives/:creativeId/accept', asyncHandler(acceptCreativeHandler));
 campaignRouter.post('/:id/creatives/:creativeId/request-changes', asyncHandler(requestCreativeChangesHandler));
 
 campaignRouter.get('/:id/review', asyncHandler(reviewHandler));
+/* PC-1 (DR 12): "Have a promo code?" — on and off the booking, before it is paid. */
+campaignRouter.post('/:id/promo', asyncHandler(applyPromoHandler));
+campaignRouter.delete('/:id/promo', asyncHandler(removePromoHandler));
+/* DQ-1 (DR 12 board 05): the desk's price for designing the artwork, and the advertiser's answer. */
+campaignRouter.post('/:id/design-quote', requireRole('ADMIN'), requirePermission('content.edit'), asyncHandler(designQuoteHandler));
+campaignRouter.post('/:id/design-quote/respond', asyncHandler(designQuoteResponseHandler));
+/* RF-1 (the owner, 25 Sep 2026): reserve a big checkout against a fee; pay the fee from the wallet. */
+campaignRouter.post('/:id/reserve', asyncHandler(reserveHandler));
+campaignRouter.post('/:id/reserve/pay', asyncHandler(payReservationFeeHandler));
 /* Lot C (Q88): ops or the agent send a prepared campaign to the advertiser to pay. */
 campaignRouter.post('/:id/submit-for-payment', asyncHandler(submitForPaymentHandler));
 campaignRouter.post('/:id/authorize', asyncHandler(authorizeHandler));
 campaignRouter.post('/:id/cancel', asyncHandler(cancelHandler));
+/* The Campaigns lot: what a cancel would do, first (whoever may cancel); the reminder to pay (ADMIN, once a day). */
+campaignRouter.get('/:id/cancel-impact', asyncHandler(cancelImpactHandler));
+campaignRouter.post('/:id/remind-payment', requireRole('ADMIN'), requirePermission('demand.edit'), asyncHandler(remindPaymentHandler));
 
 campaignRouter.get('/:id/analytics', asyncHandler(campaignAnalyticsHandler));
+/* The Campaigns lot: the campaign page's Performance card — the owner or ADX, as the analytics read. */
+campaignRouter.get('/:id/performance', asyncHandler(campaignPerformanceHandler));
 campaignRouter.get('/:id/tracking-codes', asyncHandler(trackingCodesHandler));
 /* QR-1: ops put the engine's dynamic code in front of codes issued while it was down. */
-campaignRouter.post('/:id/tracking-codes/sync-engine', requireRole('ADMIN'), asyncHandler(syncTrackingCodesHandler));
+campaignRouter.post('/:id/tracking-codes/sync-engine', requireRole('ADMIN'), requirePermission('demand.edit'), asyncHandler(syncTrackingCodesHandler));
 /* Lot D (Q139) / QR-1: the code's QR — the engine's styled artwork when it hosts the code — for the artwork to embed. */
 campaignRouter.get('/:id/tracking-codes/:code/image.png', asyncHandler(trackingCodeImageHandler));
 campaignRouter.get('/:id/tracking-codes/:code/image.svg', asyncHandler(trackingCodeImageHandler));
@@ -116,7 +152,7 @@ campaignRouter.post('/:id/landing-page/generate', landingPages, asyncHandler(gen
 campaignRouter.get('/:id/landing-page', landingPages, asyncHandler(getLandingPageHandler));
 campaignRouter.patch('/:id/landing-page', landingPages, asyncHandler(patchLandingPageHandler));
 campaignRouter.post('/:id/landing-page/publish', landingPages, asyncHandler(publishLandingPageHandler));
-campaignRouter.post('/:id/landing-page/unpublish', requireRole('ADMIN'), landingPages, asyncHandler(unpublishLandingPageHandler));
+campaignRouter.post('/:id/landing-page/unpublish', requireRole('ADMIN'), requirePermission('demand.edit'), landingPages, asyncHandler(unpublishLandingPageHandler));
 
 /**
  * The scan redirect, mounted at the application root rather than under

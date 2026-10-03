@@ -19,7 +19,7 @@ Mounted at `/api/v1/users`.
 | POST | `/bootstrap-admin` | **none** |
 | GET | `/me` | `authenticate` — E11-1: carries `emailUnsubscribedAt` (`string \| null`, which now backfills people too and answers ): stamped by the public `GET /comms/unsubscribe/:token` link in `notifications`, cleared by `POST /me/email-resubscribe`; null while ADX's email still goes. M-B: `roleConfig { id, name, isSystem } \| null` and `isSuperAdmin` (`access-control.consoleStandingFor`: a member of the system role, or an ADMIN with no role config under the launch rule — the predicate the grant guard applies), so the console stops making a second read to decide it; a non-admin reads null / false |
 | POST | `/me/consent` | `authenticate` — **QR-6 (17 Sep 2026):** the terms of use and privacy policy click, the first screen after the OTP (the owner: "asked before we gather any details, and not part of the progress bar"). Stamps `consentAcceptedAt` and the versions of the live `TERMS_OF_SERVICE` / `PRIVACY_POLICY` documents (`legal.currentLegalDocument`, read server-side — the body is ignored; an unpublished document records as null). Idempotent — a later click re-stamps with what is live then. `GET /users/me` carries `consentAcceptedAt` (null until then), `consentTermsVersion`, `consentPrivacyVersion`; the app gates on the first. Logged as `CONSENT_RECORDED`. |
-| PATCH | `/me` | `authenticate` — name / email / language / avatarUrl (QR-7: the profile picture — the URL an `AVATAR` upload answered; `null` removes it; `/publishers/me` and every browse card carry it); K-B1 (verifier, which now backfills people too and answers ): the email is lower-cased and, when it actually moves, runs the one-value-one-account rule — **409 `CONTACT_TAKEN`** with `details.which` when it is another account's primary or any contact row (the same `assertIdentityFree` the desk's editor runs) | **QR-4 (17 Sep 2026):** also `firstName` / `lastName` (1–60 each); the display name is composed from what is on file unless `name` is given outright. `GET /users/me` carries `displayId` (the person's own `ADX-DDMM-YYNN`, the USER series, minted the moment the number is registered — before a party, before a name — and backfilled for older rows by `POST /identifiers/backfill/publishers`, which now backfills people too and answers `{ assigned, remaining, users: { assigned, remaining } }`), `firstName` and `lastName`. The app asks for the two names right after the first OTP, before "Join ADX as". **QR-5 (17 Sep 2026):** also `dateOfBirth` (`YYYY-MM-DD`, 18–120 years ago; stored as a date) and `gender` (`MALE \| FEMALE \| OTHER \| PREFER_NOT_TO_SAY`, any casing) — the same two User columns `PATCH /publishers/me` writes; `GET /users/me` carries both (`dateOfBirth` as `YYYY-MM-DD \| null`).
+| PATCH | `/me` | `authenticate` — name / email / language / avatarUrl (QR-7: the profile picture — the URL an `AVATAR` upload answered; `null` removes it; `/publishers/me` and every browse card carry it); K-B1 (verifier, which now backfills people too and answers ): the email is lower-cased and, when it actually moves, runs the one-value-one-account rule — **409 `CONTACT_TAKEN`** with `details.which` when it is another account's primary or any contact row (the same `assertIdentityFree` the desk's editor runs) | **QR-4 (17 Sep 2026):** also `firstName` / `lastName` (1–60 each); the display name is composed from what is on file unless `name` is given outright. `GET /users/me` carries `displayId` (the person's own `ADX-DDMM-YYNN`, the USER series, minted the moment the number is registered — before a party, before a name — and backfilled for older rows by `POST /identifiers/backfill/publishers`, which now backfills people too and answers `{ assigned, remaining, users: { assigned, remaining } }`), `firstName` and `lastName`. The app asks for the two names right after the first OTP, before "Join ADX as". **QR-5 (17 Sep 2026):** also `dateOfBirth` (`YYYY-MM-DD`; stored as a date — AGE-1, 29 Sep 2026: any real day, not in the future, at most 120 years back, under 18 included; 18 or over is asked only where an order is placed, `shared/age-gate`, 403 `AGE_REQUIRED`) and `gender` (`MALE \| FEMALE \| OTHER \| PREFER_NOT_TO_SAY`, any casing) — the same two User columns `PATCH /publishers/me` writes; `GET /users/me` carries both (`dateOfBirth` as `YYYY-MM-DD \| null`).
 | POST | `/me/party` | `authenticate` (**201** when the party was opened, 200 when it already existed, which now backfills people too and answers ) | **QR-2 (16 Sep 2026):** the answer also carries `accessToken` — the caller's own session re-signed (`auth`'s `reissueAccessToken`) with the role this call granted, because the roles ride inside the token and the one the app held was signed before the side existed; without it the publisher's home answered 403 `Insufficient permissions` until the token expired. The refresh token is untouched. The app adopts the token at once; against an older backend it renews the session instead. **PP-1 (21 Sep 2026):** `party` also takes `PRINT_PARTNER` — the sign-up's third side, "I print and install" — which opens a print-partner *application* through the `PartnerApplicationPort` this module declares (`users.ports.ts`) and `print-partners` fills at bootstrap (`applyAsPartner`: the row under the caller's user with `appliedAt`, the PRT id, the PARTNER role; 409 when the account already holds a publisher, advertiser or agent side); the desk reviews and activates it. No agreement of its own; the app goes straight to the partner floor, which shows the application. 503 `PARTY_UNAVAILABLE` on a server where nothing fills the port.
 | GET | `/me/onboarding-manifest` | `authenticate` — the DR 08 ladder for the caller's side; 409 before Step 1. Lot D: composed in `onboarding-manifest.service.ts` — `mode: full|partial` (partial while the KYC record is NEEDS_INFO: only the flagged capture steps, each tile marked `flagged` with the reviewer's `note`, plus the review step; a rejected liveness video brings its step back, which now backfills people too and answers ), `verification` (`digio.available` and why not — the Q129 switch; `liveness.status` — Q131; `kycStatus`, `reviewNote`), and a "Record a short video" capture step (`liveness`, field `selfVideoUrl`, sent to `POST /user-kyc/me { fileId }`) after the selfie on the manual branch, so a business now climbs twelve and an individual ten. Q83: composed from `flows.onboarding` on the AppConfig `main` row (a library of steps and a ladder per party × account type, edited by the console through `PATCH /config/flows/onboarding`) when the row holds one that passes `app-config`'s validator, and from `CODE_ONBOARDING_TEMPLATE` — the same ladder as code — when it does not; the manifest carries `manifestVersion`; Lot F moved the pin **server-side** — the KYC row (`PublisherKyc.manifestVersion` / `AdvertiserKyc.manifestVersion`) records the version at the first submission, and this read answers it whenever the row has one and no `?version=` is given (`flows.onboarding:v<N>`, the last five kept; today's when that snapshot is gone), so a console edit does not move the rungs under someone mid-climb; an explicit `?version=` still wins. `Cache-Control: no-store` |
 | GET | `/me/preferences` | `authenticate` — DR 07 wave 5: every preference key, saved or defaulted (`preferences.ts`, which now backfills people too and answers ); E11-1: `emailUnsubscribedAt` (`string \| null`) beside them — an account fact, not a key, so the `.strict()` save does not take it |
@@ -154,9 +154,24 @@ address the account answers to. Three rules, in `users-identity.ts` and
   promote a verified contact; the desk may promote an unverified one with a
   reason, and the audit row says so.
 
-`primary.emailVerified` on the contacts read is derived from the codes the
-address has answered (`auth.hasProvenEmail`, which now backfills people too and answers ): `User` carries no
-`emailVerifiedAt` column, which is the honest gap.
+`primary.emailVerified` on the contacts read is `User.emailVerifiedAt`
+(ED-1, 25 Sep 2026 — stamped at the email door, at `POST /me/email/verify`
+and by a verified EMAIL make-primary; cleared when `PATCH /me` moves the
+address), falling back to the codes the address answered before the column
+existed (`auth.hasProvenEmail`).
+
+## ED-1: proving the primary email
+
+Every account proves its number and its email. An account that came in by
+the number proves the email here:
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| POST | `/me/email/send-code` | `authenticate` — `{ email }`; the one-value-one-account rule (409 `CONTACT_TAKEN`), 409 `ALREADY_VERIFIED` for the account's own verified address; a code under `CONTACT_VERIFY` through `auth.sendEmailCodeToAddressForUser`; answers the send budget (+ `devOtp` outside production) |
+| POST | `/me/email/verify` | `authenticate` — `{ email, code }`; the OTP refusal vocabulary; on the answer the address becomes `User.email` with `emailVerifiedAt` now, mirrored onto the party rows, `EMAIL_VERIFIED` audited with the before/after pair; answers the profile |
+
+An account that came in by the email door has both already — see auth's
+README, "ED-1: the email door".
 
 ## Owned Prisma entities
 
@@ -300,3 +315,34 @@ npx vitest run src/modules/users
 ## Suggested ownership
 
 Senior owner, shared with `auth`.
+
+## Phase D (1 Oct 2026) — the legal form on the profile reads
+
+`GET /users/me` (and the admin's user list) hand `publisherProfile` and
+`advertiserProfile` out with **`entityType`** as every party read answers it
+— the stored value, else what the legacy `type` settles, else null ("ask at
+the KYC start") — and **`entityTypeStored`**; `GET
+/users/me/onboarding-manifest` carries the same two beside the ladder. The
+rules are in `kyc/README.md` under the same heading. Pinned in
+`__tests__/phase-d-entity-type-on-profile.test.ts`.
+
+## Account lifecycle (2 Oct 2026)
+
+- **Deactivate cascades.** `PATCH /users/:id { isActive: false }` also
+  suspends the person's publisher, advertiser and agent profiles with
+  BLOCK_NEW (event metadata `cause: USER_DEACTIVATED`), through the
+  `AccountLifecyclePort` bootstrap fills from `suspension`; Reactivate lifts
+  exactly that, never a block ops placed. The edit's audit row names the
+  profiles as `cascaded`.
+- **Closed stays closed.** `isActive: true` on a closed account is 409
+  `ACCOUNT_CLOSED`, nothing written.
+- **`GET /users/:id/deletable`** → `{ deletable, blockers: [{ kind, label, count }] }`
+  — the history kinds below, `self`, `lastSuperAdmin`. The history now also
+  counts invoices, campaigns, package purchases, claimed access grants, a
+  print shop's jobs and quotes and an employee's desk work, and a KYC row
+  only when something is in it (a publisher's blank row made at sign-up is
+  not history). `DELETE /users/:id` refuses on the same list (`details.blockers`,
+  `details.has` kept) and its cascade now removes the advertiser profile and
+  the print shop too, in the one transaction.
+- **ERASED** joins the directory's state facet (`User.erasedAt`, stamped by
+  the erasure's execute); CLOSED counts the closed-not-erased.

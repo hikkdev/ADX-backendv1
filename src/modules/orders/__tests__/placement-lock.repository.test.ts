@@ -17,7 +17,9 @@ const { prisma, tx } = vi.hoisted(() => {
   const tx = {
     $executeRaw: vi.fn(),
     order: { findMany: vi.fn(), create: vi.fn() },
-    campaignSpot: { groupBy: vi.fn() },
+    campaignSpot: { findMany: vi.fn() },
+    // BD-1: the third hold the count reads.
+    listingBlockedDate: { findMany: vi.fn(async () => []) },
   };
   return { tx, prisma: { $transaction: vi.fn(async (fn: (client: typeof tx) => unknown) => fn(tx)) } };
 });
@@ -36,7 +38,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   tx.$executeRaw.mockResolvedValue(1);
   tx.order.findMany.mockResolvedValue([{ listingId: 'lst_1', campaignSpot: { quantity: 2 } }]);
-  tx.campaignSpot.groupBy.mockResolvedValue([{ listingId: 'lst_1', _sum: { quantity: 1 } }]);
+  tx.campaignSpot.findMany.mockResolvedValue([{ listingId: 'lst_1', quantity: 1, startDate: null, endDate: null }]);
   tx.order.create.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => ({ id: 'ord_1', ...data }));
 });
 
@@ -59,7 +61,7 @@ describe('placeUnderListingLock', () => {
     expect(Math.min(...calls())).toBe(lockAt);
     expect(tx.order.findMany.mock.invocationCallOrder[0]!).toBeLessThan(tx.order.create.mock.invocationCallOrder[0]!);
     expect(tx.order.findMany.mock.calls[0]![0].where.listingId).toEqual({ in: ['lst_1'] });
-    expect(tx.campaignSpot.groupBy.mock.calls[0]![0].where).toMatchObject({ campaignId: { not: 'cmp_9' } });
+    expect(tx.campaignSpot.findMany.mock.calls[0]![0].where).toMatchObject({ campaignId: { not: 'cmp_9' } });
     expect(placed).toMatchObject({ id: 'ord_1', status: 'PENDING_PUBLISHER', listingId: 'lst_1' });
   });
 

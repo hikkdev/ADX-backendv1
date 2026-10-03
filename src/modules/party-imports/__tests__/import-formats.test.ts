@@ -96,6 +96,18 @@ describe('the format guide', () => {
     expect([...columns].sort()).toEqual(Object.keys(schema.shape).sort());
   });
 
+  it('onboarding addresses (1 Oct 2026): the publisher PIN and the print partner state and PIN are optional columns, a bad PIN refused in words', () => {
+    const pin = 'A PIN code is six digits and does not start with 0 — 560001, say.';
+    expect(publisherImportRowSchema.parse({ mobile: '9876543210', postalCode: ' 411001 ' }).postalCode).toBe('411001');
+    expect(publisherImportRowSchema.parse({ mobile: '9876543210', postalCode: '' }).postalCode).toBeUndefined();
+    expect(publisherImportRowSchema.safeParse({ mobile: '9876543210', postalCode: '011001' }).error?.issues[0]?.message).toBe(pin);
+    expect(printPartnerRowSchema.parse({ mobile: '9000000021', state: ' Maharashtra ', postalCode: '411019' })).toMatchObject({ state: 'Maharashtra', postalCode: '411019' });
+    expect(printPartnerRowSchema.safeParse({ mobile: '9000000021', postalCode: '41101' }).error?.issues[0]?.message).toBe(pin);
+    expect(validateSample('print-partners', { mobile: '9000000021', postalCode: '41101' })).toContain('postalCode');
+    expect(formatGuide('publishers').columns.find((column) => column.name === 'postalCode')).toMatchObject({ required: false });
+    expect(formatGuide('print-partners').columns.filter((column) => ['state', 'postalCode'].includes(column.name))).toHaveLength(2);
+  });
+
   it('404s an unknown kind', () => {
     expect(() => formatGuide('spaceships' as never)).toThrow(expect.objectContaining({ statusCode: 404 }));
   });

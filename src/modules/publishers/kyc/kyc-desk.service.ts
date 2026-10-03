@@ -20,14 +20,18 @@ import {
   type BulkAssignInput,
   type DocumentDecisionInput,
   type KycEscalateInput,
+  type KycEntityRequestInput,
   type KycRequestInput,
   type ReuploadRequestInput,
 } from '../../kyc';
+import { isUpgradeRequest } from '../../../shared/kyc-state';
+import { assertOpenForKyc } from '../../../shared/party-status';
+import { cashfreeIdentityProven } from '../../../shared/verification';
 import { createNotification, notify, type KycDecisionAgentPayload } from '../../notifications';
 import { fileIdFromUrl, purgeStoredFile } from '../../uploads';
 import { getAgentWithUser } from '../../agents';
 import { logger } from '../../../shared/logging';
-import { initiateDigioKyc } from './digio.service';
+import { initiateDigioKyc, noteEntityTypeForManualRequest } from './digio.service';
 import { prismaPublishersRepository as repository } from '../prisma-publishers.repository';
 import { PUBLISHER_KYC_DOCUMENT_FIELDS } from '../publishers.schema';
 import type { KycDocuments, KycQueueRow } from '../publishers.repository';
@@ -128,9 +132,10 @@ export async function reviewKyc(
 ) {
   const row = await requireCase(publisherId);
 
+  // Cashfree Phase 1: a Cashfree session whose liveness and face match passed proved the person the way Digio does.
   if (status === 'VERIFIED' && row.kyc.method !== 'DIGIO') {
     const hasVideo = row.userId ? await hasSubmittedLiveness(row.userId) : false;
-    if (!hasVideo) {
+    if (!hasVideo && !(await cashfreeIdentityProven('PUBLISHER_KYC', publisherId))) {
       throw new ApiError(
         409,
         'LIVENESS_REQUIRED',
@@ -243,14 +248,21 @@ async function tellAgentOfDecision(row: KycQueueRow, reviewed: PublisherKyc): Pr
  * account, and `PUBLISHER_KYC_REQUESTED` is audited. A VERIFIED record is
  * 409 `KYC_ALREADY_VERIFIED`.
  */
-export async function requestKycFromDesk(publisherId: string, input: KycRequestInput, byUserId: string, req?: Request, now = new Date()) {
+export async function requestKycFromDesk(publisherId: string, input: KycEntityRequestInput, byUserId: string, req?: Request, now = new Date()) {
   const row = await repository.findKycDetail(publisherId);
   if (!row) throw new ApiError(404, 'NOT_FOUND', 'Publisher not found');
-  if (row.kyc?.status === 'VERIFIED' || row.kycStatus === 'VERIFIED') {
+  // Account lifecycle (2 Oct 2026): a closed account is never asked; one suspended from new work, not until reinstated.
+  assertOpenForKyc({ closedAt: row.user?.closedAt ?? null, suspensionScopes: row.suspensionScopes });
+  // Phase D: the upgrade — a verified individual verifying again as a business — is the one Digio request a verified publisher may have.
+  const upgrade = input.channel === 'DIGIO' && isUpgradeRequest('PUBLISHER', row, input.entityType);
+  if ((row.kyc?.status === 'VERIFIED' || row.kycStatus === 'VERIFIED') && !upgrade) {
     throw new ApiError(409, 'KYC_ALREADY_VERIFIED', 'This publisher is already verified; there is nothing to request');
   }
 
-  const digio = input.channel === 'DIGIO' ? await initiateDigioKyc(publisherId, row.name, row.email ?? '', row.mobile) : null;
+  // Phase D: Digio needs the legal form (409 ENTITY_TYPE_REQUIRED before anything is stamped); a manual request stores one when given.
+  const start = { byUserId, entityType: input.entityType, req };
+  const digio = input.channel === 'DIGIO' ? await initiateDigioKyc(row, start, now) : null;
+  if (input.channel !== 'DIGIO') await noteEntityTypeForManualRequest(row, start);
   const kyc = await repository.requestKyc(publisherId, { requestedById: byUserId, requestedChannel: input.channel, at: now });
 
   await logActivity(byUserId, 'PUBLISHER_KYC_REQUESTED', {

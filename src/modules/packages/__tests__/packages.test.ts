@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Decimal } from '../../../shared/money';
 
+/* AGE-1: the order gate, passing unless a test says otherwise (its own tests: shared/age-gate). */
+const ageGate = vi.hoisted(() => ({ assertPartyAdultForOrders: vi.fn(), assertAdultForOrders: vi.fn() }));
+vi.mock('../../../shared/age-gate', async (importOriginal) => ({ ...(await importOriginal<object>()), ...ageGate }));
+
 /**
  * Selling a package.
  *
@@ -66,6 +70,7 @@ vi.mock('../../wallets', () => wallets);
 vi.mock('../../advertisers', () => advertisers);
 
 import { DEFAULT_PLATFORM_SETTINGS, type SubscriptionPolicy } from '../../app-config';
+import { ageRequiredError } from '../../../shared/age-gate';
 import {
   ANNUAL_DISCOUNT_PCT,
   EXPIRING_TITLE,
@@ -844,6 +849,21 @@ describe('a free trial', () => {
 
 describe('the auto-renew switch', () => {
   const NOW = new Date('2026-09-14T06:00:00Z');
+
+  it("AGE-1: switching it on buys the next term — the advertiser's account holder is asked; off asks nothing", async () => {
+    settings.getSubscriptionPolicy.mockResolvedValue(policy({ autoRenew: { allowed: true, chargeFromWallet: true } }));
+    repository.findActiveSale.mockResolvedValue(sale({ status: 'ACTIVE' }));
+    ageGate.assertPartyAdultForOrders.mockRejectedValueOnce(ageRequiredError('MISSING'));
+    await expect(setActivePackageAutoRenew('adv_1', true, NOW)).rejects.toMatchObject({ statusCode: 403, code: 'AGE_REQUIRED' });
+    expect(ageGate.assertPartyAdultForOrders).toHaveBeenCalledWith({ kind: 'ADVERTISER', id: 'adv_1' });
+    expect(repository.updateSale).not.toHaveBeenCalled();
+
+    ageGate.assertPartyAdultForOrders.mockClear();
+    repository.findActiveSale.mockResolvedValue(sale({ status: 'ACTIVE', autoRenew: true }));
+    await setActivePackageAutoRenew('adv_1', false, NOW);
+    expect(ageGate.assertPartyAdultForOrders).not.toHaveBeenCalled();
+    expect(repository.updateSale).toHaveBeenCalledWith('sale_1', { autoRenew: false });
+  });
 
   it('is refused 409 "Auto-renew is not offered" while the policy does not allow it', async () => {
     repository.findActiveSale.mockResolvedValue(sale({ status: 'ACTIVE' }));

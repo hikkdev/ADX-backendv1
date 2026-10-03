@@ -166,6 +166,14 @@ describe('the live map', () => {
     expect((await liveAgents({ state: 'STILL' }, later(51))).agents.map((r) => r.agent.id)).toEqual(['agt_1']);
     expect((await liveAgents({ q: 'agt-2' }, later(51))).agents.map((r) => r.agent.id)).toEqual(['agt_2']);
   });
+
+  it('account lifecycle (2 Oct 2026): shows working agents only — a fix from a suspended or exited agent is not drawn', async () => {
+    state.agents.push({ id: 'agt_3', displayId: 'AGT-3', userId: 'usr_3', name: 'Held', mobile: '+919000000303', city: 'Bengaluru', sides: ['PUBLISHER'], status: 'SUSPENDED', stage: 'EXITED' });
+    state.fixes.set('agt_3', { agentId: 'agt_3', latitude: 12.97, longitude: 77.6, at: NOW.toISOString(), accuracy: 5, speed: 0, heading: null });
+    const snapshot = await liveAgents({}, later(1));
+    expect(snapshot.agents.map((row) => row.agent.id)).not.toContain('agt_3');
+    expect(repository.agentSummaries).not.toHaveBeenCalled();
+  });
 });
 
 describe('the order timeline', () => {

@@ -63,6 +63,8 @@ export type { KycCaptureColumn, OnboardingStepDef, OnboardingTemplate, Onboardin
  */
 export { DEFAULT_PLATFORM_SETTINGS, getPlatformSettings } from './platform-settings';
 export type { PlatformSettings, SupportPriority, LiveChatSettings, AdminTwoFactorPolicy } from './platform-settings';
+export type { OrderScreeningSettings } from './platform-settings';
+export { DEFAULT_ORDER_SCREENING } from './platform-settings';
 /**
  * Lot J2: the subscription purchase rules, one policy per audience.
  * `revenue` reads `publisher`, `packages` reads `advertiser`; `payments`

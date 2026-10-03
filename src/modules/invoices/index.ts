@@ -50,6 +50,13 @@ export function registerInvoicesModule(): void {
 export { markInvoicePaid, liveInvoiceFor, issueInvoiceForCampaign, issueInvoiceForPackage, voidInvoice } from './invoices.service';
 export type { InvoiceView, InvoiceListView } from './invoices.service';
 
+/**
+ * LM-1: the generic advertising line — a display ad bought in a slot is
+ * invoiced here once it is paid, and credited when it is refunded.
+ */
+export { issueInvoiceForAdvertising, creditNoteForAdvertising, ADVERTISING_SAC_CODE } from './invoices.service';
+export type { AdvertisingInvoiceInput } from './invoices.service';
+
 /** Run by the scheduler on the first of the month: the previous month's payment advices. */
 export {
   runMonthlyStatements,

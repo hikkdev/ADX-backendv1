@@ -368,8 +368,8 @@ describe('committing', () => {
 
   it('print partners: creates through createPartner with the capabilities split, merges through updatePartner', async () => {
     const rows = [
-      { id: 'r0', rowNumber: 2, outcome: 'CREATED', targetId: null, message: null, data: { mobile: '+919000000001', name: 'New Press', capabilities: 'flex|vinyl', maxWidthFt: '12.5', turnaroundDays: '3', plan: { action: 'CREATE', warnings: [] } } },
-      { id: 'r1', rowNumber: 3, outcome: 'MERGED', targetId: 'prt_1', message: null, data: { mobile: '+919876543210', legalName: 'Old Press Pvt Ltd', turnaroundDays: '2', plan: { action: 'MERGE', targetId: 'prt_1', fill: { legalName: 'Old Press Pvt Ltd', turnaroundDays: '2' }, warnings: [] } } },
+      { id: 'r0', rowNumber: 2, outcome: 'CREATED', targetId: null, message: null, data: { mobile: '+919000000001', name: 'New Press', state: 'Maharashtra', postalCode: '411019', capabilities: 'flex|vinyl', maxWidthFt: '12.5', turnaroundDays: '3', plan: { action: 'CREATE', warnings: [] } } },
+      { id: 'r1', rowNumber: 3, outcome: 'MERGED', targetId: 'prt_1', message: null, data: { mobile: '+919876543210', legalName: 'Old Press Pvt Ltd', turnaroundDays: '2', postalCode: '411001', plan: { action: 'MERGE', targetId: 'prt_1', fill: { legalName: 'Old Press Pvt Ltd', turnaroundDays: '2', postalCode: '411001' }, warnings: [] } } },
     ] as unknown as Row[];
     repository.findImport.mockResolvedValue(validated('PRINT_PARTNER', rows));
     repository.matchPrintPartners.mockResolvedValue({ ...emptyMatch(), byMobile: [{ id: 'prt_1', displayId: 'PRT-1', mobile: '+919876543210', label: 'Old Press', fields: { legalName: null, turnaroundDays: null } }] });
@@ -379,9 +379,10 @@ describe('committing', () => {
     await commitImport('print-partners', 'imp_1', 'usr_admin');
 
     expect(printPartners.createPartner).toHaveBeenCalledWith(
-      expect.objectContaining({ mobile: '+919000000001', name: 'New Press', capabilities: ['flex', 'vinyl'], maxWidthFt: '12.5', turnaroundDays: 3 }),
+      // Onboarding addresses (1 Oct 2026): the shop address's state and PIN ride the create and the merge.
+      expect.objectContaining({ mobile: '+919000000001', name: 'New Press', state: 'Maharashtra', postalCode: '411019', capabilities: ['flex', 'vinyl'], maxWidthFt: '12.5', turnaroundDays: 3 }),
     );
-    expect(printPartners.updatePartner).toHaveBeenCalledWith('prt_1', { legalName: 'Old Press Pvt Ltd', turnaroundDays: 2 });
+    expect(printPartners.updatePartner).toHaveBeenCalledWith('prt_1', { legalName: 'Old Press Pvt Ltd', turnaroundDays: 2, postalCode: '411001' });
     expect(audit.logActivity).toHaveBeenCalledWith('usr_admin', 'PRINT_PARTNER_CREATED', expect.objectContaining({ targetType: 'PrintPartner', targetId: 'prt_new' }));
     expect(audit.logActivity).toHaveBeenCalledWith('usr_admin', 'PRINT_PARTNER_UPDATED', expect.objectContaining({ targetId: 'prt_1' }));
   });

@@ -27,8 +27,8 @@ const order = {
   customer: { id: 'adv_1', name: 'Anita', email: 'anita@example.com', mobile: '+919999999999' },
   description: 'Campaign ADX-CMP-2026-482913',
   // E9: the API's own return page, under the intent's one-time return token — never a UI page.
-  returnUrl: 'https://api.adx.local/api/v1/payments/pay_local_1/return?t=tok_return',
-  notifyUrl: 'https://api.adx.local/api/v1/webhooks/cashfree',
+  returnUrl: 'https://api.adx.in/api/v1/payments/pay_local_1/return?t=tok_return',
+  notifyUrl: 'https://api.adx.in/api/v1/webhooks/cashfree',
 };
 
 describe('cashfree adapter', () => {
@@ -59,7 +59,7 @@ describe('cashfree adapter', () => {
       order_amount: 34810,
       order_currency: 'INR',
       customer_details: { customer_id: 'adv_1', customer_phone: '9999999999' },
-      order_meta: { return_url: 'https://api.adx.local/api/v1/payments/pay_local_1/return?t=tok_return', notify_url: 'https://api.adx.local/api/v1/webhooks/cashfree' },
+      order_meta: { return_url: 'https://api.adx.in/api/v1/payments/pay_local_1/return?t=tok_return', notify_url: 'https://api.adx.in/api/v1/webhooks/cashfree' },
     });
     // The return URL is the API return page for this payment, carrying the token.
     const returnUrl = new URL(JSON.parse(calls[0]!.init!.body as string).order_meta.return_url);

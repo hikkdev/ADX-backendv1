@@ -8,6 +8,7 @@ import { prismaLeadsRepository as leads } from './prisma-leads.repository';
 import { prismaOutreachRepository as repository } from './prisma-outreach.repository';
 import { acceptProposal, listProposalsFor, proposalView, PROPOSAL_KINDS, sendProposal } from './proposals.service';
 import { findAgentProfile } from '../agents';
+import { reissueAccessToken } from '../auth';
 
 /**
  * LH7: the invite's doors — the agent's (issue, re-issue, the proposals)
@@ -126,7 +127,14 @@ const linkSchema = z.object({ name: z.string().trim().max(120).optional(), accou
 /** The app, opened by the deep link on a signed-in phone. */
 export async function landingLinkHandler(req: Request, res: Response): Promise<void> {
   const body = parse(linkSchema, req.body ?? {});
-  res.json({ success: true, data: await linkInviteToAccount(codeOf(req), req.user!.sub, body) });
+  const linked = await linkInviteToAccount(codeOf(req), req.user!.sub, body);
+  // 26 Sep 2026: the way `POST /users/me/party` does (QR-2) — when the link
+  // put the account on a side its token does not carry yet, the same
+  // session's token is re-signed with the roles as they are now and handed
+  // back, so the next request already carries PUBLISHER / ADVERTISER.
+  const roleChanged = !req.user!.roles.includes(linked.party.party);
+  const accessToken = roleChanged && req.user!.sid ? await reissueAccessToken(req.user!.sub, req.user!.sid) : undefined;
+  res.json({ success: true, data: { ...linked, ...(accessToken ? { accessToken } : {}) } });
 }
 
 const callbackSchema = z.object({ when: z.coerce.date().optional(), note: z.string().trim().max(500).optional() });

@@ -17,6 +17,6 @@ feature('finance.ledger', {
   kind: 'FEATURE',
   launch: 'on',
   description:
-    'The ledger read, the verify walk and a reversal by finance.',
+    'The ledger read (searchable, paged with totals), its CSV export, the verify walk and a reversal by finance.',
   routes: ['/api/v1/finance/ledger'],
 });

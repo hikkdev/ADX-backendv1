@@ -49,6 +49,7 @@ const { repository, agents, payouts, notifications, pricing, settings, redisStor
       countOpenFor: vi.fn().mockResolvedValue(0),
       candidateAgents: vi.fn().mockResolvedValue([]),
       findAgentBrief: vi.fn(),
+      findOpenHeldBy: vi.fn().mockResolvedValue([]),
     },
     agents: {
       requireAgentProfile: vi.fn(async () => ({ id: 'agt_1', userId: 'usr_agent', tier: 'BRONZE' })),
@@ -107,7 +108,7 @@ import {
   zoneCovers,
   type ZoneRow,
 } from '../map.rules';
-import { alertNearbyHot, assignInPolygon, claimLead, createTerritory, createZone, mapView, payPriorityTopUp, releaseLead, sweepClaims, territoryFor } from '../map.service';
+import { alertNearbyHot, assignInPolygon, claimLead, createTerritory, createZone, mapView, payPriorityTopUp, releaseLead, releaseLeadsHeldBy, sweepClaims, territoryFor } from '../map.service';
 
 const now = new Date('2026-09-22T09:00:00.000Z');
 const HOUR = 60 * 60 * 1000;
@@ -450,5 +451,23 @@ describe('the nearby-hot alert', () => {
     repository.findById.mockResolvedValue(lead({ assignedAgentId: 'agt_2' }));
     expect(await alertNearbyHot('led_1', now)).toBe(0);
     expect(repository.candidateAgents).not.toHaveBeenCalled();
+  });
+});
+
+describe('account lifecycle (2 Oct 2026): a suspended agent hands their leads back', () => {
+  it('closes each open claim, clears the holder, and notes why on the thread', async () => {
+    const now = new Date('2026-10-02T10:00:00.000Z');
+    repository.findOpenHeldBy.mockResolvedValue([{ id: 'led_1' }, { id: 'led_2' }]);
+    const released = await releaseLeadsHeldBy('agt_1', 'Agent suspended: fraud review', now);
+    expect(released).toEqual(['led_1', 'led_2']);
+    expect(repository.closeOpenClaims).toHaveBeenCalledWith('led_1', now, 'Agent suspended: fraud review');
+    expect(repository.update).toHaveBeenCalledWith('led_2', { assignedAgentId: null, claimedByAgentId: null, claimExpiresAt: null });
+    expect(repository.logActivity).toHaveBeenCalledWith({ leadId: 'led_1', actorUserId: null, kind: 'NOTE', note: 'Released: Agent suspended: fraud review' });
+  });
+
+  it('holds nothing, releases nothing', async () => {
+    repository.findOpenHeldBy.mockResolvedValue([]);
+    expect(await releaseLeadsHeldBy('agt_1', 'x')).toEqual([]);
+    expect(repository.update).not.toHaveBeenCalled();
   });
 });

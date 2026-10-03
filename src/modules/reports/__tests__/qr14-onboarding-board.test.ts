@@ -89,13 +89,14 @@ describe('the on-screen read', () => {
 });
 
 describe('the actor label', () => {
-  it('is the console role for an admin, Super admin for one, Agent for the agent roles', async () => {
+  it('is the console role for an admin, Super admin for a member of the system role, plain Admin with no role, Agent for the agent roles', async () => {
     standing.findMembership.mockResolvedValue({ roleConfig: { id: 'r1', name: 'Ops manager', isSystem: false } });
     expect(await actorLabelFor('usr_1', ['ADMIN'])).toBe('Ops manager');
     standing.findMembership.mockResolvedValue({ roleConfig: { id: 'r0', name: 'Super admin', isSystem: true } });
     expect(await actorLabelFor('usr_1', ['ADMIN'])).toBe('Super admin');
+    /* RP-1: an admin with no role config is plain "Admin" — no longer a super admin under the launch rule. */
     standing.findMembership.mockResolvedValue(null);
-    expect(await actorLabelFor('usr_1', ['ADMIN'])).toBe('Super admin');
+    expect(await actorLabelFor('usr_1', ['ADMIN'])).toBe('Admin');
     expect(await actorLabelFor('usr_2', ['AGENT_PUBLISHER'])).toBe('Agent');
     expect(await actorLabelFor('usr_3', ['PUBLISHER'])).toBe('Publisher');
   });

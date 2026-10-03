@@ -225,6 +225,8 @@ export type AccruableSpot = {
   commissionPct: Prisma.Decimal | null;
   commissionSource: string | null;
   orderId: string | null;
+  /** Order fraud screening: the order's hold — a held order's spot earns nothing until it is released. */
+  order?: { heldAt: Date | null } | null;
   campaign: { id: string; startDate: Date | null; endDate: Date | null };
   /**
    * `suspensionScopes` is Lot A's STOP_ACCRUAL: a publisher's is cascaded onto
@@ -285,6 +287,8 @@ export type AccrualRow = {
 };
 
 export interface PayoutsRepository {
+  /** The owner's own name — the name a UPI check is matched against when the method names no holder (2 Oct 2026). */
+  findHolderName(userId: string): Promise<string | null>;
   /** Who a wallet belongs to, and the facts the withdrawal rules need. */
   findPartyContext(walletId: string): Promise<PartyContext | null>;
   findWalletForUser(userId: string): Promise<{ id: string; kind: 'PUBLISHER' | 'AGENT' | 'PRINT_PARTNER' } | null>;
@@ -413,6 +417,8 @@ export interface PayoutsRepository {
     event: IncentiveEvent;
     tier: string;
     amount: Prisma.Decimal;
+    /** CP-4: this key is switched off — a row that exists to pay nothing. */
+    paysNothing?: boolean;
     effectiveFrom: Date;
   }): Promise<IncentiveRateRow>;
   createIncentive(data: {

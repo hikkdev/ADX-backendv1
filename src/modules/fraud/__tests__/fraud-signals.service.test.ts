@@ -150,8 +150,9 @@ describe('the linked accounts', () => {
     index.partiesWithPayoutHandle.mockResolvedValue([other, { type: 'PUBLISHER', id: 'pub_2', name: null }]);
     const result = await linkedAccounts('frd_1', now);
     expect(result.linked).toEqual([
-      { party: other, via: ['SHARED_PAN', 'SHARED_BANK', 'SELF_DEALING'], walletBalance: null, openBookings: 0 },
-      { party: { type: 'PUBLISHER', id: 'pub_2', name: null }, via: ['SHARED_BANK'], walletBalance: null, openBookings: 0 },
+      // 28 Sep 2026: each party resolved once for its KYC status — this index resolves every id to the subject's row.
+      { party: other, via: ['SHARED_PAN', 'SHARED_BANK', 'SELF_DEALING'], walletBalance: null, openBookings: 0, kycStatus: subject.kycStatus },
+      { party: { type: 'PUBLISHER', id: 'pub_2', name: null }, via: ['SHARED_BANK'], walletBalance: null, openBookings: 0, kycStatus: subject.kycStatus },
     ]);
     expect(result.valueAtRisk).toBe('0.00');
     // Only the linking signals are evaluated for this read.

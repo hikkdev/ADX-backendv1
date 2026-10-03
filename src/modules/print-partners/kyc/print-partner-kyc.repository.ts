@@ -1,4 +1,5 @@
-import type { KycStatus, PrintPartner, PrintPartnerKyc } from '../../../shared/database';
+import type { AccountState } from '../../../shared/party-status';
+import type { KycEntityType, KycStatus, PrintPartner, PrintPartnerKyc } from '../../../shared/database';
 import type { KycQueueState } from '../../../shared/kyc-state';
 import type { SubmitPrintPartnerKycInput } from './print-partner-kyc.schema';
 
@@ -13,7 +14,7 @@ import type { SubmitPrintPartnerKycInput } from './print-partner-kyc.schema';
 export type PrintPartnerKycRow = PrintPartnerKyc;
 
 /** What the queue and the case carry of the partner behind the row. */
-export type PartnerSlice = Pick<PrintPartner, 'id' | 'displayId' | 'name' | 'mobile' | 'email' | 'userId' | 'city' | 'isActive' | 'kycStatus' | 'createdAt'>;
+export type PartnerSlice = Pick<PrintPartner, 'id' | 'displayId' | 'name' | 'mobile' | 'email' | 'userId' | 'city' | 'isActive' | 'kycStatus' | 'entityType' | 'createdAt'>;
 
 export type PrintPartnerKycWithPartner = PrintPartnerKycRow & { printPartner: PartnerSlice };
 
@@ -29,6 +30,8 @@ export type PrintPartnerKycQueueRow = { [K in keyof PrintPartnerKycRow]: PrintPa
   printPartnerId: string;
   kycId: string | null;
   state: KycQueueState;
+  /** Account lifecycle: ACTIVE, DEACTIVATED (off the roster) or CLOSED (`shared/party-status`). */
+  accountState: AccountState;
   printPartner: PartnerSlice;
 };
 
@@ -44,6 +47,8 @@ export type PrintPartnerKycFilter = {
   escalated?: boolean;
   /** The partner's name, display id or mobile. */
   q?: string;
+  /** Account lifecycle (2 Oct 2026): partners on the roster only, unless true (`?include=inactive`). */
+  includeInactive?: boolean;
 };
 
 export type PrintPartnerKycSort = 'oldest' | 'newest';
@@ -59,7 +64,8 @@ export type ReviewStamp = { reviewedById: string; reviewNote?: string | null };
 export type RequestStamp = { requestedAt: Date; requestedById: string; requestedChannel: 'DIGIO' | 'MANUAL' };
 
 export type DigioFields = {
-  method: 'DIGIO';
+  /** Cashfree Phase 1: CASHFREE when the start was handed a Cashfree session — the request id is then `cf_<sessionId>`. */
+  method: 'DIGIO' | 'CASHFREE';
   digioRequestId: string;
   digioReferenceId: string;
   digioStatus: string;
@@ -82,7 +88,8 @@ export type DigioWebhookUpdate = {
   reviewedAt?: Date | undefined;
   rejectionReason?: string | undefined;
   submittedAt?: Date | undefined;
-  recordedVia: 'DIGIO';
+  /** Cashfree Phase 1: who answered — also what `method` becomes when the answer verifies. */
+  recordedVia: 'DIGIO' | 'CASHFREE';
 };
 
 export interface PrintPartnerKycRepository {
@@ -113,6 +120,16 @@ export interface PrintPartnerKycRepository {
   markRequested(printPartnerId: string, stamp: RequestStamp): Promise<PrintPartnerKycWithPartner>;
   /** A Digio session on the row — made if there is none. */
   upsertDigio(printPartnerId: string, fields: DigioFields): Promise<PrintPartnerKycWithPartner>;
+  /**
+   * Cashfree Phase 1: Digio could not be asked and the desk may send the
+   * backup — the record says PROVIDER_FAILED on its raw provider status
+   * (made if there is none). Nothing else on the record moves.
+   */
+  markProviderFailed(printPartnerId: string): Promise<unknown>;
+  /** Phase D: the legal form the partner verifies as, stored on the partner. */
+  setEntityType(printPartnerId: string, entityType: KycEntityType | null): Promise<unknown>;
+  /** Phase D, the upgrade: a verified individual verifying again as a business — the record and the mirror back to PENDING on the fresh request. */
+  reopenDigioForUpgrade(printPartnerId: string, entityType: KycEntityType, fields: DigioFields): Promise<PrintPartnerKycWithPartner>;
   applyDigioWebhook(id: string, update: DigioWebhookUpdate): Promise<PrintPartnerKycWithPartner>;
   /** Digio-verified rows still holding images, verified before `cutoff`. */
   findPurgeable(cutoff: Date, limit: number): Promise<PrintPartnerKycRow[]>;

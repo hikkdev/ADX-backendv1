@@ -128,7 +128,7 @@ beforeEach(() => {
   repository.deleteSchedule.mockImplementation(async (id: string) => {
     delete schedules[id];
   });
-  repository.adminEmails.mockResolvedValue(['ops@adx.local', 'ceo@adx.local']);
+  repository.adminEmails.mockResolvedValue(['ops@adx.in', 'ceo@adx.in']);
   repository.findRunsStartedSince.mockResolvedValue([]);
   repository.enabledScheduleRecipients.mockResolvedValue([]);
   uploads.storeGeneratedFile.mockImplementation(async (_userId: string, input: { filename: string; content: Buffer }) => ({ id: `file-${input.filename}`, filename: input.filename }));
@@ -327,9 +327,9 @@ describe('schedules', () => {
     const res = await request(app())
       .post('/api/v1/reports/schedules')
       .set('Authorization', `Bearer ${admin}`)
-      .send({ kind: 'support-sla', name: 'Morning SLA', cadence: 'DAILY', format: 'PDF', recipients: ['Ops@ADX.local'], filters: { priority: 'URGENT' } })
+      .send({ kind: 'support-sla', name: 'Morning SLA', cadence: 'DAILY', format: 'PDF', recipients: ['Ops@ADX.in'], filters: { priority: 'URGENT' } })
       .expect(201);
-    expect(res.body.data).toMatchObject({ id: 'sch-1', kind: 'support-sla', name: 'Morning SLA', cadence: 'DAILY', format: 'PDF', recipients: ['ops@adx.local'], filters: { priority: 'URGENT' }, enabled: true, createdById: 'adm-1' });
+    expect(res.body.data).toMatchObject({ id: 'sch-1', kind: 'support-sla', name: 'Morning SLA', cadence: 'DAILY', format: 'PDF', recipients: ['ops@adx.in'], filters: { priority: 'URGENT' }, enabled: true, createdById: 'adm-1' });
     // 03:00 UTC on the 14th is past 06:00 IST: tomorrow.
     expect(new Date(res.body.data.nextRunAt).toISOString()).toBe('2026-09-15T00:30:00.000Z');
     expect(audit.logActivity).toHaveBeenCalledWith('adm-1', 'REPORT_SCHEDULE_CREATED', expect.objectContaining({ targetType: 'ReportSchedule', targetId: 'sch-1', diff: expect.objectContaining({ cadence: { before: null, after: 'DAILY' } }) }));
@@ -438,7 +438,7 @@ describe('runDueSchedules', () => {
     schedules['sch-1'] = due({ recipients: [] });
     repository.findDueSchedules.mockResolvedValue([schedules['sch-1']]);
     await runDueSchedules(NOW);
-    expect(notifications.notify.mock.calls.map((call) => (call[3] as { recipient: { email: string } }).recipient.email)).toEqual(['ops@adx.local', 'ceo@adx.local']);
+    expect(notifications.notify.mock.calls.map((call) => (call[3] as { recipient: { email: string } }).recipient.email)).toEqual(['ops@adx.in', 'ceo@adx.in']);
   });
 
   it('mails nobody for a failed run but still moves the schedule on', async () => {

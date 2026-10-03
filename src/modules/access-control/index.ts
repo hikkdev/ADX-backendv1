@@ -38,7 +38,7 @@ export { assertNotLastSuperAdmin, type SuperAdminRemoval } from './access-contro
 export { assignRoleConfigSchema, type AssignRoleConfigInput } from './access-control.schema';
 
 /** `bootstrap` — the resolver behind the token's `perms`, and the seeded roles. */
-export { ensureSystemRoles, permissionsFor } from './access-control.service';
+export { ensureSuperAdminHolder, ensureSystemRoles, permissionsFor } from './access-control.service';
 
 // Lot G (answer 144): the module's feature declarations, loaded with the module so the registry sees them at boot.
 import './features';

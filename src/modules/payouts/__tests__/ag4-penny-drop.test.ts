@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 /**
  * AG-4 (the owner, 20 Sep 2026): the bank penny drop through Cashfree's
@@ -19,18 +19,24 @@ vi.mock('../prisma-payouts.repository', () => ({ prismaPayoutsRepository: reposi
 vi.mock('../../wallets', () => ({ ensureWallet: vi.fn(), move: vi.fn(), snapshot: vi.fn() }));
 vi.mock('../../notifications', () => ({ notify: vi.fn(), createNotification: vi.fn() }));
 vi.mock('../../ledger', () => ({ platformAccount: vi.fn(), post: vi.fn() }));
-vi.mock('../../../shared/integrations', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../../shared/integrations')>()), verifyBankAccount: cashfree.verifyBankAccount }));
+// Cashfree Phase 1: the penny drop goes through the verification router; the vendor's answer is mocked at that door.
+vi.mock('../../../shared/verification', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../../shared/verification')>()), routedBankAccount: cashfree.verifyBankAccount }));
 
+import { resetVerificationRuntime, resolveVerificationSettings, wireVerification } from '../../../shared/verification';
 import { verifyMethod } from '../payouts.service';
 
 const method = { id: 'pm_1', userId: 'usr_1', type: 'BANK', accountHolder: 'Deepak Rao', accountNumber: '1234567890', ifscCode: 'HDFC0001234', status: 'PENDING_VERIFICATION' };
 
 describe('the penny drop', () => {
+  afterEach(() => {
+    resetVerificationRuntime();
+  });
+
   it('asks Cashfree and verifies a live account with the reference and the name match', async () => {
     repository.findMethod.mockResolvedValue(method);
     cashfree.verifyBankAccount.mockResolvedValueOnce({ ok: true, facts: { valid: true, accountStatus: 'VALID', nameAtBank: 'DEEPAK RAO', nameMatchScore: 92.5, referenceId: 'b_1', utr: 'UTR1' }, raw: {} });
     const row = await verifyMethod('pm_1', { via: 'PENNY_DROP', byUserId: 'adm_1' }, new Date('2026-09-21T00:00:00Z'));
-    expect(cashfree.verifyBankAccount).toHaveBeenCalledWith({ accountNumber: '1234567890', ifsc: 'HDFC0001234', name: 'Deepak Rao' });
+    expect(cashfree.verifyBankAccount).toHaveBeenCalledWith({ accountNumber: '1234567890', ifsc: 'HDFC0001234', name: 'Deepak Rao' }, { caseType: 'PAYOUT_METHOD', caseId: 'pm_1' });
     expect(row).toMatchObject({ status: 'VERIFIED', verifiedVia: 'PENNY_DROP', verificationReference: 'b_1', verifiedByUserId: 'adm_1' });
     expect(String((row as { nameMatchPct: unknown }).nameMatchPct)).toBe('92.5');
   });
@@ -48,5 +54,24 @@ describe('the penny drop', () => {
     const manual = await verifyMethod('pm_1', { via: 'MANUAL', reference: 'seen the passbook', byUserId: 'adm_1' });
     expect(cashfree.verifyBankAccount).not.toHaveBeenCalled();
     expect(manual).toMatchObject({ status: 'VERIFIED', verifiedVia: 'MANUAL', verificationReference: 'seen the passbook' });
+  });
+
+  // Cashfree Phase 1 (contract §G): the hole the audit found — a PENNY_DROP that could run no check marked the method verified anyway.
+  it('a UPI method is refused 409 UPI_CHECK_NOT_CONFIGURED while the UPI check is NONE — never marked verified without one', async () => {
+    // 2 Oct 2026: the default is Digio's VPA lookup now; an owner who stored NONE keeps today's refusal.
+    wireVerification({ settings: async () => resolveVerificationSettings({ upiCheck: 'NONE' }) });
+    repository.findMethod.mockResolvedValue({ id: 'pm_2', userId: 'usr_1', type: 'UPI', upiVpa: 'deepak@upi', accountNumber: null, ifscCode: null, status: 'PENDING_VERIFICATION' });
+    await expect(verifyMethod('pm_2', { via: 'PENNY_DROP', byUserId: 'adm_1' })).rejects.toMatchObject({ statusCode: 409, code: 'UPI_CHECK_NOT_CONFIGURED', details: { upiCheck: 'NONE', reason: 'NOT_CHOSEN' } });
+    expect(cashfree.verifyBankAccount).not.toHaveBeenCalled();
+    expect(repository.updateMethod).not.toHaveBeenCalledWith('pm_2', expect.anything());
+    // The desk may still verify it by hand.
+    const manual = await verifyMethod('pm_2', { via: 'MANUAL', reference: 'collect request confirmed by the payee', byUserId: 'adm_1' });
+    expect(manual).toMatchObject({ status: 'VERIFIED', verifiedVia: 'MANUAL' });
+  });
+
+  it('a bank method with no account number or IFSC is a 409, not a verification', async () => {
+    repository.findMethod.mockResolvedValue({ ...method, id: 'pm_3', accountNumber: null, ifscCode: null });
+    await expect(verifyMethod('pm_3', { via: 'PENNY_DROP', byUserId: 'adm_1' })).rejects.toMatchObject({ statusCode: 409, code: 'VERIFICATION_UNAVAILABLE', details: { code: 'NOTHING_TO_CHECK' } });
+    expect(cashfree.verifyBankAccount).not.toHaveBeenCalled();
   });
 });

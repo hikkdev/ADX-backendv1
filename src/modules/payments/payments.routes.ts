@@ -45,12 +45,18 @@ paymentRouter.post('/:id/confirm', bearerOrCheckoutToken, asyncHandler(h.confirm
 paymentRouter.use(authenticate);
 
 paymentRouter.get('/gateways', asyncHandler(h.gatewaysHandler));
+/* BT-1 (DR 12): the receiving account for a bank transfer. A literal path, ahead of /:id. */
+paymentRouter.get('/bank-transfer/details', asyncHandler(h.bankTransferDetailsHandler));
 /* G10: the kill switch on money arriving — no new intent while `payments.gateways` is off; a payment already in flight still confirms and reads. */
 paymentRouter.post('/intents', requireFeature('payments.gateways'), asyncHandler(h.createIntentHandler));
 /* The register — ADMIN, on the list contract. Declared before /:id so nothing reads "gateways" or "intents" as an id. */
-paymentRouter.get('/', requireRole('ADMIN'), asyncHandler(h.listPaymentsHandler));
+paymentRouter.get('/', requireRole('ADMIN'), requirePermission('finance.view'), asyncHandler(h.listPaymentsHandler));
 paymentRouter.get('/:id', asyncHandler(h.getPaymentHandler));
 paymentRouter.post('/:id/refund', requireRole('ADMIN'), requirePermission('finance.approve'), asyncHandler(h.refundHandler));
+/* BT-1: the payer's claim, and ops' confirmation or rejection against the statement. */
+paymentRouter.post('/:id/bank-transfer/submit', asyncHandler(h.submitBankTransferHandler));
+paymentRouter.post('/:id/bank-transfer/confirm', requireRole('ADMIN'), requirePermission('finance.approve'), asyncHandler(h.confirmBankTransferHandler));
+paymentRouter.post('/:id/bank-transfer/reject', requireRole('ADMIN'), requirePermission('finance.approve'), asyncHandler(h.rejectBankTransferHandler));
 
 /* ── /advertisers/:id/payments — the advertiser's own record ───────── */
 

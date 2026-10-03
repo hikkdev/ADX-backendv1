@@ -21,7 +21,7 @@ export const updateProfileSchema = z.object({
   language: z.string().optional(),
   /** QR-7: the profile picture — an upload of purpose AVATAR; null removes it. */
   avatarUrl: z.string().url().nullable().optional(),
-  /** QR-5: the person's date of birth (YYYY-MM-DD, 18+) and gender; the same two columns `PATCH /publishers/me` writes. */
+  /** QR-5: the person's date of birth and gender; the same two columns `PATCH /publishers/me` writes. AGE-1: any valid date (under 18 too) — 18 or over is asked only when an order is placed. */
   dateOfBirth: dateOfBirthSchema.optional(),
   gender: genderSchema.optional(),
 });
@@ -83,6 +83,14 @@ export const bootstrapAdminSchema = z.object({ userId: z.string().min(1) });
 export const PARTIES = ['PUBLISHER', 'ADVERTISER', 'PRINT_PARTNER'] as const;
 export const ACCOUNT_TYPES = ['INDIVIDUAL', 'BUSINESS', 'ORGANISATION'] as const;
 
+/** ED-1: the person's own primary email, proved with a code — `POST /users/me/email/send-code` and `/verify`. */
+export const primaryEmailSchema = z.object({ email: z.string().trim().email() });
+export const verifyPrimaryEmailSchema = z.object({
+  email: z.string().trim().email(),
+  /** EC-8: eight capital letters, typed in any case. */
+  code: z.string().trim().min(6).max(8),
+});
+
 export const choosePartySchema = z.object({
   party: upperEnum(PARTIES),
   accountType: upperEnum(ACCOUNT_TYPES),
@@ -108,7 +116,8 @@ export const assignRoleSchema = z.object({
  * never removed from the table, so without this facet the list slowly fills
  * with rows nobody can act on.
  */
-export const USER_STATES = ['ACTIVE', 'INACTIVE', 'CLOSED'] as const;
+/** Account lifecycle (2 Oct 2026): ERASED beside CLOSED — a closed account whose person was erased (`User.erasedAt`). */
+export const USER_STATES = ['ACTIVE', 'INACTIVE', 'CLOSED', 'ERASED'] as const;
 export type UserState = (typeof USER_STATES)[number];
 export const USER_SORTS = ['newest', 'oldest', 'name', 'lastLogin'] as const;
 export type UserSort = (typeof USER_SORTS)[number];

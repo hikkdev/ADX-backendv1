@@ -77,10 +77,11 @@ beforeEach(() => {
 describe('GET /fraud/cases/:id/linked — what is at stake', () => {
   it('carries walletBalance and openBookings per linked party and sums valueAtRisk', async () => {
     const result = await linkedAccounts('frd_1', now);
+    // 28 Sep 2026: each carries its KYC status for the graph's hover card — null where the party does not resolve.
     expect(result.linked).toEqual([
-      { party: advertiser, via: ['SHARED_PAN', 'SHARED_BANK', 'SELF_DEALING'], walletBalance: '2500.50', openBookings: 2 },
-      { party: publisher, via: ['SHARED_BANK'], walletBalance: null, openBookings: 1 },
-      { party: agent, via: ['SHARED_PHONE_ACROSS_ROLES'], walletBalance: '100.00', openBookings: 0 },
+      { party: advertiser, via: ['SHARED_PAN', 'SHARED_BANK', 'SELF_DEALING'], walletBalance: '2500.50', openBookings: 2, kycStatus: 'PENDING' },
+      { party: publisher, via: ['SHARED_BANK'], walletBalance: null, openBookings: 1, kycStatus: null },
+      { party: agent, via: ['SHARED_PHONE_ACROSS_ROLES'], walletBalance: '100.00', openBookings: 0, kycStatus: null },
     ]);
     // 2500.50 + 100.00 in wallets, 8000.00 + 1500.00 + 0.00 in open orders.
     expect(result.valueAtRisk).toBe('12100.50');
@@ -124,7 +125,7 @@ describe('GET /fraud/cases/:id/linked — what is at stake', () => {
     index.partiesWithPayoutHandle.mockResolvedValue([]);
     index.partiesWithMobile.mockResolvedValue([]);
     const result = await linkedAccounts('frd_1', now);
-    expect(result.linked).toEqual([{ party: advertiser, via: ['SHARED_PAN', 'SELF_DEALING'], walletBalance: '2500.50', openBookings: 0 }]);
+    expect(result.linked).toEqual([{ party: advertiser, via: ['SHARED_PAN', 'SELF_DEALING'], walletBalance: '2500.50', openBookings: 0, kycStatus: null }]);
     expect(orders.openOrderExposureFor).not.toHaveBeenCalled();
     expect(result.valueAtRisk).toBe('2500.50');
 

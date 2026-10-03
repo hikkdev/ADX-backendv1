@@ -21,12 +21,15 @@ export { isSuspended, suspensionOf, SCOPES_BY_PARTY, PARTY_TYPES } from './suspe
 
 /** Used by the console and by `users`' deletion guard, which reports what it found. */
 export { suspendParty, reinstateParty } from './suspension.service';
+/** Account lifecycle (2 Oct 2026): a user's Deactivate / Reactivate, cascaded onto their profiles — filled into `users`' port by bootstrap. */
+export { suspendForUserDeactivation, reinstateAfterUserReactivation } from './suspension.service';
 export type {
   SuspensionView,
   SuspensionCaseView,
   SuspensionEffects,
   SuspendInput,
   ReinstateInput,
+  SuspensionCause,
 } from './suspension.service';
 export type { PartyType } from './suspension.repository';
 

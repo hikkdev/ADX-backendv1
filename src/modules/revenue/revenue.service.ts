@@ -170,6 +170,8 @@ export type QuoteInput = {
   /** Overrides the listing's current rate when a price lock holds an older one. */
   ratePerDay?: Money;
   at?: Date;
+  /** PS-1: fee kinds this booking does not take — PRINTING when the advertiser ships their own prints. */
+  excludeFeeKinds?: readonly FeeKind[];
 };
 
 /**
@@ -226,6 +228,8 @@ export async function quote(input: QuoteInput): Promise<Quote> {
   ];
 
   for (const fee of inputs.fees) {
+    // PS-1: a fee the booking does not take is not a line at all.
+    if (input.excludeFeeKinds?.includes(fee.kind)) continue;
     // A percentage fee is charged on the *discounted* media value: the discount
     // is a reduction in what the advertiser is buying, not a rebate afterwards,
     // so a fee computed on the undiscounted figure would quietly claw part of

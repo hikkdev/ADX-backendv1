@@ -1,4 +1,4 @@
-import { signAccessToken } from '../auth';
+import { PERMISSIONS, signAccessToken } from '../auth';
 import type { Role } from '../database';
 
 /**
@@ -19,8 +19,13 @@ export const ALL_ROLES: Role[] = [
   'ADVERTISER',
 ];
 
+/**
+ * RP-1: an ADMIN token carries every permission — the test operator is a
+ * super admin unless the test mints its own narrower token. A role-less
+ * admin holds nothing and is refused ROLE_REQUIRED on every admin route.
+ */
 export function tokenFor(roles: Role[], userId = 'contract-test-user'): string {
-  return signAccessToken(userId, roles);
+  return signAccessToken(userId, roles, undefined, roles.includes('ADMIN') ? { perms: [...PERMISSIONS] } : undefined);
 }
 
 /** Roles guarding a route, parsed out of a `requireRole(A|B)` chain entry. */

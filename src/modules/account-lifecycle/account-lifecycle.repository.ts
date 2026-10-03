@@ -36,6 +36,9 @@ export type PartyIds = {
   publisherId: string | null;
   advertiserId: string | null;
   agentProfileId: string | null;
+  /** Account lifecycle (2 Oct 2026): the print shop and the HR record a closure also covers. Optional for the callers that predate them. */
+  printPartnerId?: string | null;
+  employeeId?: string | null;
 };
 
 export type NewClosureCase = {
@@ -97,6 +100,11 @@ export type ErasurePlan = {
   agentProfileId: string | null;
   /** `AdvertiserKyc` is keyed by `User.id`, not by `Advertiser.id`. */
   advertiserKycUserId: string;
+  /** Account lifecycle (2 Oct 2026): the print shop and the HR record, erased too. Optional for the callers that predate them. */
+  printPartnerId?: string | null;
+  employeeId?: string | null;
+  /** Stamped as `User.erasedAt`. */
+  erasedAt?: Date;
 };
 
 /** What an erasure actually removed, for the audit row and the response. */
@@ -111,6 +119,12 @@ export interface AccountLifecycleRepository {
   findParties(userId: string): Promise<PartyIds | null>;
   /** The three columns Q21 added, written together or not at all (the table's CHECK). */
   closeUser(userId: string, data: { reason: string; byUserId: string; at: Date }): Promise<void>;
+  /** Account lifecycle (2 Oct 2026): a print partner's work in hand — jobs not yet collected or cancelled, quotes still submitted. */
+  countOpenPrintWork(printPartnerId: string): Promise<{ jobs: string[]; quotes: number }>;
+  /** Account lifecycle: the shop off the roster (`PrintPartner.isActive=false`) — a closure's step. */
+  retirePrintPartner(printPartnerId: string): Promise<void>;
+  /** Account lifecycle: the HR record switched off (`Employee.isActive=false`) — a closure's step. */
+  deactivateEmployee(employeeId: string): Promise<void>;
 
   /* ── Closure cases ──────────────────────────────────────────────── */
   createCase(data: NewClosureCase): Promise<AccountClosureCase>;

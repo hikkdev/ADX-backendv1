@@ -29,6 +29,22 @@ export interface CompletionRequest {
   maxTokens: number;
   /** Low for translation, higher for drafting. */
   temperature: number;
+  /**
+   * VA-1 (23 Sep 2026): pictures the question is about, sent before the
+   * prompt. Every named vendor takes an inline base64 image on the same
+   * message; the shapes differ and are settled below, so nothing above
+   * this file knows which one it is talking to. Keep them small — the
+   * caller downsizes to ~1,000 px, which is what a creative review needs
+   * and a fraction of the tokens a 12 MP original would cost.
+   */
+  images?: { mimeType: string; base64: string }[];
+  /**
+   * DR-1 (23 Sep 2026): a whole document — a PDF — the question is about.
+   * Anthropic and Google take one inline beside the prompt; the OpenAI-shaped
+   * paths do not here, and `complete` says so before any call is made, so
+   * the caller can tell "cannot" from "down".
+   */
+  documents?: { mimeType: string; base64: string }[];
 }
 
 export interface CompletionResult {
@@ -43,6 +59,14 @@ export class AiUnavailableError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'AiUnavailableError';
+  }
+}
+
+/** DR-1: the request carries something this provider cannot take on this path (a PDF to an OpenAI-shaped endpoint). Not an outage. */
+export class AiUnsupportedInputError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AiUnsupportedInputError';
   }
 }
 
@@ -89,7 +113,15 @@ async function openAiShaped(
       temperature: request.temperature,
       messages: [
         { role: 'system', content: request.system },
-        { role: 'user', content: request.prompt },
+        {
+          role: 'user',
+          content: request.images?.length
+            ? [
+                ...request.images.map((image) => ({ type: 'image_url', image_url: { url: `data:${image.mimeType};base64,${image.base64}` } })),
+                { type: 'text', text: request.prompt },
+              ]
+            : request.prompt,
+        },
       ],
     }),
   });
@@ -120,7 +152,18 @@ async function anthropic(
       temperature: request.temperature,
       // The system prompt is its own field here rather than a message.
       system: request.system,
-      messages: [{ role: 'user', content: request.prompt }],
+      messages: [
+        {
+          role: 'user',
+          content: request.images?.length || request.documents?.length
+            ? [
+                ...(request.images ?? []).map((image) => ({ type: 'image', source: { type: 'base64', media_type: image.mimeType, data: image.base64 } })),
+                ...(request.documents ?? []).map((doc) => ({ type: 'document', source: { type: 'base64', media_type: doc.mimeType, data: doc.base64 } })),
+                { type: 'text', text: request.prompt },
+              ]
+            : request.prompt,
+        },
+      ],
     }),
   });
 
@@ -147,7 +190,15 @@ async function google(
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: request.system }] },
-      contents: [{ role: 'user', parts: [{ text: request.prompt }] }],
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            ...[...(request.images ?? []), ...(request.documents ?? [])].map((part) => ({ inlineData: { mimeType: part.mimeType, data: part.base64 } })),
+            { text: request.prompt },
+          ],
+        },
+      ],
       generationConfig: {
         maxOutputTokens: request.maxTokens,
         temperature: request.temperature,
@@ -191,6 +242,10 @@ export async function complete(request: CompletionRequest): Promise<CompletionRe
   }
   if ((provider === 'custom' || provider === 'azure-openai') && !cfg.baseUrl) {
     throw new AiUnavailableError('This provider needs a base URL before it can be used.');
+  }
+  // DR-1: a whole document goes only where one is taken inline. Said here, outside the catch below, so it is never mistaken for an outage.
+  if (request.documents?.length && provider !== 'anthropic' && provider !== 'google') {
+    throw new AiUnsupportedInputError('The configured AI provider cannot read a PDF here. Send a photo of the document, or switch the provider to Anthropic or Google.');
   }
 
   try {

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 
-import { authenticate, requireRole } from '../../shared/auth';
+import { authenticate, requireRole, requirePermission } from '../../shared/auth';
 import { asyncHandler } from '../../shared/http';
 import {
   acceptVisitHandler,
@@ -26,7 +26,7 @@ visitRouter.use(authenticate);
 visitRouter.get('/mine', asyncHandler(myVisitsHandler));
 
 /* The dispatch board — the cross-agent view that did not exist. */
-visitRouter.get('/', requireRole('ADMIN'), asyncHandler(adminVisitsHandler));
+visitRouter.get('/', requireRole('ADMIN'), requirePermission('marketplace.view'), asyncHandler(adminVisitsHandler));
 
 /* An agent books for themselves; ADX dispatches to a named agent and it is an
  * offer with the 25-minute clock. Same route, told apart by the role. */
@@ -41,7 +41,7 @@ visitRouter.post('/:visitId/complete', asyncHandler(completeVisitHandler));
 /* G12-B: the live-position ping on the way to the visit — the order lane's
  * body; the visit's own agent. */
 visitRouter.post('/:visitId/update-location', asyncHandler(visitLocationHandler));
-visitRouter.patch('/:visitId', requireRole('ADMIN'), asyncHandler(patchVisitHandler));
+visitRouter.patch('/:visitId', requireRole('ADMIN'), requirePermission('marketplace.edit'), asyncHandler(patchVisitHandler));
 
 /**
  * GET /agents/me/day. Mounted there by bootstrap — an agent's own things live

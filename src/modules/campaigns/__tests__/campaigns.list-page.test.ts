@@ -14,7 +14,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  */
 
 const { repository } = vi.hoisted(() => ({
-  repository: { listCampaignsPage: vi.fn() },
+  // The Campaigns lot: ADX's rows read the gate facts and the engagement for the page.
+  repository: { listCampaignsPage: vi.fn(), campaignGateFacts: vi.fn(async () => []), performanceTotals: vi.fn(async () => ({})), gateCandidates: vi.fn(async () => []) },
 }));
 
 vi.mock('../prisma-campaigns.repository', () => ({ prismaCampaignsRepository: repository }));

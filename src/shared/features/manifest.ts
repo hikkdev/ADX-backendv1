@@ -12,8 +12,9 @@ import {
 /**
  * The surfaces the backend cannot see at runtime — Lot G (answer 144).
  *
- * The console and the two apps each ship a `features.manifest.json` at their
- * package root. `scripts/features-sync.ts` folds the three manifests and the
+ * The console, the two apps and the website each ship a
+ * `features.manifest.json` at their package root. `scripts/features-sync.ts`
+ * folds the four manifests and the
  * backend declarations into `docs/feature-registry.json`, which is committed
  * and read back at boot (`ensureFeatureRegistry`) and by
  * `GET /flags/registry`. Pure parsing here — no file system — so the sync

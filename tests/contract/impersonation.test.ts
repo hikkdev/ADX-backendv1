@@ -2,7 +2,8 @@ import request from 'supertest';
 import { describe, expect, it } from 'vitest';
 import { app } from '../../src/app';
 import inventory from '../../docs/route-inventory.json';
-import { signAccessToken, signImpersonationToken } from '../../src/shared/auth';
+import { signImpersonationToken } from '../../src/shared/auth';
+import { tokenFor } from '../../src/shared/testing/tokens';
 import type { RouteEntry } from '../../scripts/collect-routes';
 
 /**
@@ -59,7 +60,8 @@ describe('an impersonation token cannot write', () => {
 
   it('an ordinary token is unaffected on the same routes', async () => {
     const route = routes.find((r) => r.method === 'POST' && r.path === '/api/v1/users')!;
-    const res = await send(route, signAccessToken('adm_1', ['ADMIN']));
+    /* RP-1: an ordinary admin token carries its role's list; `tokenFor` mints a super admin's. */
+    const res = await send(route, tokenFor(['ADMIN'], 'adm_1'));
     expect(res.status).not.toBe(403);
   });
 });

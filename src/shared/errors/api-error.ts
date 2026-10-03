@@ -5,6 +5,10 @@ export type ApiErrorCode =
   | 'NOT_FOUND'
   | 'VALIDATION_ERROR'
   | 'CONFLICT'
+  // FL-1 (27 Sep 2026): PATCH /config/flows/:key for a key the code does not
+  // define. A flow exists only when the code defines it — that is deliberate —
+  // so the console names it apart from a body that fails the vocabulary.
+  | 'UNKNOWN_FLOW'
   | 'TOO_MANY_REQUESTS'
   | 'NOT_IMPLEMENTED'
   // An integration this endpoint needs has no working credentials — a 503 for
@@ -29,12 +33,21 @@ export type ApiErrorCode =
   // Demand: the app sends the advertiser to KYC on this one, so like
   // PLATFORM_AGREEMENT_REQUIRED it has to be more than a 403.
   | 'KYC_REQUIRED'
+  // AGE-1 (the owner, 29 Sep 2026): anyone may use ADX; placing an order
+  // needs the account holder's date of birth on file and them 18 or over.
+  // 403, `details: { reason: 'MISSING' | 'UNDER_18', self }` — the app
+  // offers its "Add your date of birth" field on MISSING when `self`.
+  | 'AGE_REQUIRED'
   // Supply (QR-3): a publisher may not start a listing until their name,
   // email and address are in. The app opens the setup ladder on it.
   | 'PROFILE_INCOMPLETE'
   // QR-7: a profile picture that is not an image, or too big to take in.
   | 'INVALID_IMAGE'
   | 'FILE_TOO_LARGE'
+  // ST-1 (28 Sep 2026): an SVG outside the brand files and the media library,
+  // and one that carries script, an event handler or an outside link (400).
+  | 'UNSUPPORTED_TYPE'
+  | 'UNSAFE_SVG'
   // QR-11: Publish on Settings › Brand & theme when the draft is what is live already. Paired with 409.
   | 'NOTHING_TO_PUBLISH'
   // Demand: opens top-up rather than reporting a failure. Paired with 402.
@@ -65,12 +78,22 @@ export type ApiErrorCode =
   | 'AI_UNAVAILABLE'
   // AI: the vendor answered badly. Somebody else's outage.
   | 'AI_FAILED'
+  | 'NO_FILE'
+  | 'ANALYSIS_UNSUPPORTED'
+  | 'FILE_UNREADABLE'
+  | 'READING_UNSUPPORTED'
   // Rate cards: the listing is priced under the approved floor. The app offers
   // to ask for a sign-off on this one, so it cannot be a plain conflict.
   | 'BELOW_RATE_CARD_FLOOR'
   // Console access (Lot A). A role write naming an id the catalogue does not
   // have; `details.unknown` lists them.
   | 'UNKNOWN_PERMISSION'
+  // AN-1: Analytics refuses a metric, a grain or a cut by name. The registry
+  // declares what each metric supports, and asking for anything else is a
+  // client mistake worth saying out loud rather than an empty series.
+  | 'UNKNOWN_METRIC'
+  | 'UNSUPPORTED_GRAIN'
+  | 'UNSUPPORTED_DIMENSION'
   // A role with members cannot be deleted — reassign them first.
   | 'ROLE_HAS_MEMBERS'
   // An admin's own number is changed from their own device (change-mobile),
@@ -101,6 +124,15 @@ export type ApiErrorCode =
   // Users: the account has money, orders, listings, agreements or KYC behind
   // it; it is closed through the closure case, never deleted.
   | 'USER_HAS_HISTORY'
+  // Account lifecycle (2 Oct 2026): a closed account is never reactivated,
+  // reinstated, signed in to or asked for KYC; a party suspended from new
+  // work is not asked for KYC until it is reinstated.
+  | 'ACCOUNT_CLOSED'
+  | 'ACCOUNT_SUSPENDED'
+  // Account lifecycle: an HR record with KYC or activity behind it is
+  // deactivated, never removed; a decided KYC case is kept, never deleted.
+  | 'EMPLOYEE_HAS_HISTORY'
+  | 'KYC_DECIDED'
   // Closure (Lot A, Q21): money is still in flight or work is still running,
   // so the account cannot be closed yet. `details.blockers` names each one with
   // its count, which is the list the console draws.
@@ -153,6 +185,19 @@ export type ApiErrorCode =
   // MANUAL (ops switched it off). A 503 with `details.retryAfter`; the app
   // offers the manual upload branch instead.
   | 'KYC_PROVIDER_UNAVAILABLE'
+  // KYC (Phase D, 1 Oct 2026): Digio answered a KYC request with a refusal
+  // other than an outage — a workflow template it does not know, a bad
+  // credential (502, `details { status, code }` — Digio's own code, never the
+  // body). An outage (timeout, 5xx, 429) stays 503 KYC_PROVIDER_UNAVAILABLE
+  // with `details.reason: 'PROVIDER_ERROR'`.
+  | 'KYC_PROVIDER_REFUSED'
+  // KYC (Phase D): the Digio start needs the party's legal form and none is
+  // known — 409, `details { party, options: [{ value, label }] }`; the client
+  // asks and sends again with `entityType`. Nothing was stamped or sent.
+  | 'ENTITY_TYPE_REQUIRED'
+  // KYC (Phase D): an edit would change a verified party's legal form other
+  // than an individual registering a business (409).
+  | 'KYC_LOCKED'
   // KYC (Lot D, Q131): a manual-path review cannot verify a party who has not
   // recorded the liveness video. The desk asks for it rather than deciding.
   | 'LIVENESS_REQUIRED'
@@ -236,6 +281,25 @@ export type ApiErrorCode =
   // be moved off it (409); only a super admin grants that role (403).
   | 'LAST_SUPER_ADMIN'
   | 'SUPER_ADMIN_ONLY'
+  /** RP-1: an ADMIN with no console role on an admin route. */
+  | 'ROLE_REQUIRED'
+  // BD-1: a publisher's blocked dates.
+  | 'DATES_REVERSED'
+  | 'DATES_PAST'
+  | 'DATES_TOO_LONG'
+  | 'DATES_BLOCKED'
+  | 'DATES_BOOKED'
+  // PC-1: promo codes on a campaign.
+  | 'PROMO_NOT_FOUND'
+  | 'PROMO_NOT_APPLICABLE'
+  // FB-1: a Facebook account that shares no email.
+  | 'FACEBOOK_EMAIL_REQUIRED'
+  // A door whose provider is not set up yet (503).
+  | 'SERVICE_UNAVAILABLE'
+  // RF-1: the checkout is under the threshold, or the policy is off.
+  | 'RESERVATION_NOT_OFFERED'
+  // RF-1: the hour to pay the fee has passed.
+  | 'RESERVATION_FEE_LAPSED'
   // The authenticator app (Lot K2): a second enrolment while one stands
   // (409, disable first); a code path that needs an enrolment the account
   // does not have (409); a session that must set the app up before it may do
@@ -249,7 +313,49 @@ export type ApiErrorCode =
   // M-B: an ADMIN at a one-factor door — the email OTP login, the publisher
   // app's OTP, a mobile OTP nothing can second — is sent to the console login
   // (403); the tokens come only from /auth/2fa/verify.
-  | 'ADMIN_SIGN_IN_REQUIRED';
+  | 'ADMIN_SIGN_IN_REQUIRED'
+  // LM-1 (promotions): an ad slot or a sponsored placement already at its
+  // limit on some of the chosen days (409, the full days in `details`), and
+  // an ad submitted before its artwork was uploaded (409).
+  | 'SLOT_FULL'
+  | 'PLACEMENT_FULL'
+  | 'ARTWORK_REQUIRED'
+  // LM-1 (media, 28 Sep 2026): an advertiser's ad artwork cannot be archived
+  // while a booking that shows it is still open (409, `details.bookings`).
+  | 'AD_ARTWORK_IN_USE'
+  // FM-1 (forms): a field whose id or label asks for Aadhaar. Aadhaar is
+  // never a field kind, never stored, never a label — refused before any
+  // other check, so the builder shows the one sentence (400).
+  | 'FORBIDDEN_FIELD'
+  // Cashfree Phase 1 (1 Oct 2026). A production server with no
+  // INTEGRATIONS_ENCRYPTION_KEY was asked to store a credential (503 — it
+  // will not write one in the clear).
+  | 'ENCRYPTION_KEY_MISSING'
+  // Payout methods: a penny drop on a UPI method while no UPI check is
+  // chosen (`verificationRouting.upiCheck: 'NONE'`). 409 — it used to mark
+  // the method verified without checking anything.
+  | 'UPI_CHECK_NOT_CONFIGURED'
+  // The Cashfree verification session (Digio's backup): the session is over
+  // — verified, failed or expired (409); the step asked for is not one this
+  // session has, or an earlier step is still open (409); the selfie arrived
+  // after the DigiLocker consent ran out, so DigiLocker is asked again (409);
+  // the desk asked for the backup while it is switched off or has no keys (409).
+  | 'VERIFICATION_SESSION_CLOSED'
+  | 'VERIFICATION_STEP_NOT_OPEN'
+  | 'DIGILOCKER_CONSENT_REQUIRED'
+  | 'BACKUP_NOT_AVAILABLE'
+  // HC-1 (1 Oct 2026): "Sync now" on the Holidays page while the holiday
+  // calendar is switched off (409), while a sync is already running (409),
+  // and when the calendar cannot be fetched or read — nothing was written (502).
+  | 'HOLIDAY_CALENDAR_OFF'
+  | 'HOLIDAY_SYNC_RUNNING'
+  | 'HOLIDAY_CALENDAR_UNAVAILABLE'
+  // Order fraud screening (2 Oct 2026): a held order's dispatching or
+  // money-moving step (409 — release or clear it first; a party meets the
+  // neutral "being reviewed" line); and cancel-as-fraud on an order whose
+  // advertisement is already up (409 — that is a dispute's to unwind).
+  | 'ORDER_ON_HOLD'
+  | 'ORDER_LIVE';
 
 export class ApiError extends Error {
   public readonly statusCode: number;

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { dateOfBirthSchema, genderSchema, upperEnum } from '../../../shared/validation';
+import { PIN_CODE_MESSAGE, PIN_CODE_PATTERN, dateOfBirthSchema, genderSchema, upperEnum } from '../../../shared/validation';
 import { PUBLISHER_TYPES } from '../publishers.schema';
 
 /**
@@ -20,6 +20,8 @@ export const IMPORT_COLUMNS = [
   'address',
   'city',
   'state',
+  // Onboarding addresses (1 Oct 2026): the address's PIN code.
+  'postalCode',
   'contactName',
   'contactMobile',
   'contactEmail',
@@ -54,6 +56,7 @@ export const importRowSchema = z.object({
   address: optionalText(500),
   city: optionalText(80),
   state: optionalText(80),
+  postalCode: z.preprocess(blankToUndefined, z.string().trim().regex(PIN_CODE_PATTERN, PIN_CODE_MESSAGE).optional()),
   contactName: optionalText(160),
   contactMobile: z.preprocess(blankToUndefined, z.string().trim().min(10).max(20).optional()),
   contactEmail: z.preprocess(blankToUndefined, z.string().trim().email().optional()),

@@ -84,6 +84,11 @@ describe('profile and documents', () => {
     expect(repository.update).toHaveBeenCalledWith('pub_1', { gstin: '29ABCDE1234F1Z5', contactName: 'Asha Rao' });
   });
 
+  it('onboarding addresses (1 Oct 2026): writes the PIN code beside the address and its pin', async () => {
+    await updateMyProfile('usr_1', { address: '12 MG Road', postalCode: '560001', latitude: 12.97, longitude: 77.59 });
+    expect(repository.update).toHaveBeenCalledWith('pub_1', { address: '12 MG Road', postalCode: '560001', latitude: 12.97, longitude: 77.59 });
+  });
+
   it('submits the documents against that row', async () => {
     const kyc = await submitMyKyc('usr_1', { govIdType: 'AADHAAR', govIdFrontUrl: 'https://x/a.jpg', panNumber: 'ABCDE1234F' });
     // Lot N: the publisher's own hand is stamped on the row.

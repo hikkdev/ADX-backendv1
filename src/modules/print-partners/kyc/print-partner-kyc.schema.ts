@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { DEFAULT_LIST_PAGE_SIZE, MAX_LIST_PAGE_SIZE } from '../../../shared/pagination';
 import { upperEnum } from '../../../shared/validation';
-import { kycQueueStateSchema } from '../../../shared/kyc-state';
+import { kycEntityTypeSchema, kycQueueStateSchema } from '../../../shared/kyc-state';
 
 /**
  * The print partner's KYC — Lot N (owner, 14 Sep 2026): the wire shapes.
@@ -93,5 +93,7 @@ export type ReviewPrintPartnerKycInput = z.infer<typeof reviewPrintPartnerKycSch
 export const requestPrintPartnerKycSchema = z.object({
   channel: upperEnum(['DIGIO', 'MANUAL'] as const).default('DIGIO'),
   note: z.string().trim().min(1).max(500).optional(),
+  /** Phase D (1 Oct 2026): the legal form Digio's workflow needs — asked when the partner has none (409 ENTITY_TYPE_REQUIRED). */
+  entityType: kycEntityTypeSchema.optional(),
 });
 export type RequestPrintPartnerKycInput = z.infer<typeof requestPrintPartnerKycSchema>;

@@ -35,7 +35,7 @@ vi.mock('../../advertisers', () => ({
   captureCampaignHold: vi.fn(),
   releaseCampaignHold: vi.fn(),
 }));
-vi.mock('../../orders', () => ({ placeOrder: vi.fn(async () => ({ id: 'ord_1' })), notifyAdmins: vi.fn() }));
+vi.mock('../../orders', () => ({ placeOrder: vi.fn(async () => ({ id: 'ord_1' })), notifyAdmins: vi.fn(), announceOrdersPaid: vi.fn() }));
 vi.mock('../tracking.service', () => ({ issueTrackingCodes: vi.fn(async () => []) }));
 vi.mock('../../agreements', () => ({
   transactionAcceptance: vi.fn(async (kind: string) => ({ kind, accepted: true, templateVersion: 1, currentVersion: 1, current: true })),

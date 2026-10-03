@@ -2,7 +2,8 @@ import { money, type Money } from '../../shared/money';
 import { toListPage, type ListPage } from '../../shared/pagination';
 import { prismaOrdersRepository as repository } from './prisma-orders.repository';
 import { printJobPort, type OrderPrintJob, type PickupPoint } from './print-job.port';
-import type { MyOrderRow, OpenOrderScope } from './orders.repository';
+import type { MyOrderRow, OpenOrderScope, OrderPlacerRow } from './orders.repository';
+import { reviewNoticeFor, withoutCompletionCode, withoutRisk } from './orders.redact';
 import type { AdminOrdersQuery, CalendarQuery, MyOrdersQuery } from './orders.schema';
 
 /**
@@ -36,7 +37,9 @@ async function withQuote(items: MyOrderRow[]) {
   return items.map((row) => {
     const pickup = pickups.get(row.id);
     const printJob: MyOrderPrintJob | null = pickup ? { pickup: { name: pickup.name, address: pickup.address } } : null;
-    return { ...row, quotedFee: row.quotedFee === null ? null : money(row.quotedFee), printJob };
+    // Order fraud screening: the hold becomes the neutral line and leaves the row.
+    const reviewNotice = reviewNoticeFor({ heldAt: (row as { heldAt?: Date | null }).heldAt ?? null });
+    return { ...withoutRisk(withoutCompletionCode(row)), quotedFee: row.quotedFee === null ? null : money(row.quotedFee), printJob, reviewNotice };
   });
 }
 
@@ -117,7 +120,51 @@ export async function getAgentOrderIdsAwaitingWork(agentProfileId: string) {
  */
 export async function getAllOrders(query: AdminOrdersQuery) {
   const { items, total, counts } = await repository.findAll(query);
-  return toListPage(items, total, counts, query);
+  const rows = items.map(({ advertiser, ...row }) => ({ ...row, placedBy: placedByFrom(advertiser) }));
+  return toListPage(rows, total, counts, query);
+}
+
+/**
+ * PB-1 (the owner, 2 Oct 2026): "who placed the order, or what business".
+ * `userId` is the login (`Order.advertiserId`); `name` is the person — first
+ * and last name, else the display name; `business` is the advertiser profile
+ * that login holds, null when it holds none. Admin reads only: the persona
+ * reads never carry it.
+ */
+export type PlacedBy = {
+  userId: string;
+  name: string | null;
+  displayId: string | null;
+  business: { id: string; name: string; displayId: string | null } | null;
+};
+
+/** The placing login as `PlacedBy`; null only when the user row is not there to read. */
+export function placedByFrom(user: OrderPlacerRow | null | undefined): PlacedBy | null {
+  if (!user) return null;
+  const parts = [user.firstName, user.lastName].map((part) => part?.trim()).filter((part): part is string => !!part);
+  const name = parts.length ? parts.join(' ') : user.name?.trim() || null;
+  const profile = user.advertiserProfile;
+  return {
+    userId: user.id,
+    name,
+    displayId: user.displayId,
+    business: profile ? { id: profile.id, name: profile.name, displayId: profile.displayId } : null,
+  };
+}
+
+/**
+ * 2 Oct 2026: the completion code support reads back on the admin detail.
+ * The global omit keeps it off the detail aggregate (and every other order
+ * read), so it is fetched on its own, for ADX only. Null when none is live.
+ */
+export async function getOrderCompletionCode(orderId: string): Promise<string | null> {
+  const row = await repository.findWithCompletionCode(orderId);
+  return row?.completionOtpPlain ?? null;
+}
+
+/** PB-1: the admin detail's "Placed by" — read on its own so the shared detail aggregate does not widen. */
+export async function getOrderPlacedBy(advertiserUserId: string): Promise<PlacedBy | null> {
+  return placedByFrom(await repository.findPlacer(advertiserUserId));
 }
 
 /** Lot G (Q114): one row of the booking calendar. */

@@ -111,7 +111,7 @@ const template = (over: Record<string, unknown> = {}) => ({
 
 const recipient = (over: Record<string, unknown> = {}) => ({
   id: 'usr-1',
-  email: 'asha.rao@adx.co',
+  email: 'asha.rao@adx.in',
   mobile: '+919845012210',
   emailUnsubscribedAt: null,
   isActive: true,
@@ -125,8 +125,8 @@ const delivery = (over: Record<string, unknown> = {}) => ({
   notificationId: null,
   templateKey: 'announcement',
   channel: 'EMAIL',
-  recipientMasked: 'a***@adx.co',
-  recipientHash: hashRecipient('EMAIL', 'asha.rao@adx.co'),
+  recipientMasked: 'a***@adx.in',
+  recipientHash: hashRecipient('EMAIL', 'asha.rao@adx.in'),
   variables: { title: 'Hello', body: 'World' },
   status: 'QUEUED',
   attempts: 0,
@@ -170,7 +170,7 @@ beforeEach(() => {
   integrations.getEffectiveEmailConfig.mockResolvedValue({ primary: 'SMTP', host: 'smtp.local' });
   integrations.getEffectiveResendConfig.mockResolvedValue({ apiKey: 'rs_key' });
   // AE-B: the one door's answer, as SMTP gives it.
-  email.sendEmail.mockResolvedValue({ provider: 'SMTP', configured: true, messageId: '<abc@smtp.local>', response: '250 2.0.0 OK queued as ABC for <asha.rao@adx.co>', previewUrl: null });
+  email.sendEmail.mockResolvedValue({ provider: 'SMTP', configured: true, messageId: '<abc@smtp.local>', response: '250 2.0.0 OK queued as ABC for <asha.rao@adx.in>', previewUrl: null });
   sms.sendSms.mockResolvedValue({ skipped: false, rail: 'msg91', providerMessageId: 'req-1', responseText: '{"type":"success","message":"req-1"}' });
 });
 
@@ -236,7 +236,7 @@ describe('notify under the comms rules (Q117)', () => {
       expect((call[0] as Record<string, unknown>)['lastError']).toBeUndefined();
     }
     // The address is still stashed for the sender's morning.
-    expect(redis.redis.set).toHaveBeenCalledWith('comms:addr:dlv-1', 'asha.rao@adx.co', 'EX', 48 * 3600);
+    expect(redis.redis.set).toHaveBeenCalledWith('comms:addr:dlv-1', 'asha.rao@adx.in', 'EX', 48 * 3600);
     expect(email.sendEmail).not.toHaveBeenCalled();
   });
 
@@ -331,7 +331,7 @@ describe('the sender under the deferral', () => {
 
 describe('attempt rows (Q121)', () => {
   it('writes one row per successful email try with the provider, its message id and the response, addresses masked', async () => {
-    redis.redis.get.mockResolvedValue('asha.rao@adx.co');
+    redis.redis.get.mockResolvedValue('asha.rao@adx.in');
     const after = await attemptDelivery('dlv-1');
     expect(after).toMatchObject({ status: 'SENT', provider: 'smtp', providerMessageId: '<abc@smtp.local>', attempts: 1 });
     expect(comms.recordAttempt).toHaveBeenCalledTimes(1);
@@ -341,13 +341,13 @@ describe('attempt rows (Q121)', () => {
       provider: 'smtp',
       providerMessageId: '<abc@smtp.local>',
       ok: true,
-      responseText: '250 2.0.0 OK queued as ABC for <a***@adx.co>',
+      responseText: '250 2.0.0 OK queued as ABC for <a***@adx.in>',
       error: null,
     });
   });
 
   it('AE-B: an Ethereal send carries the preview URL in the response text so the Delivery log shows it', async () => {
-    redis.redis.get.mockResolvedValue('asha.rao@adx.co');
+    redis.redis.get.mockResolvedValue('asha.rao@adx.in');
     email.sendEmail.mockResolvedValue({
       provider: 'ETHEREAL',
       configured: true,
@@ -383,11 +383,11 @@ describe('attempt rows (Q121)', () => {
     await attemptDelivery('dlv-1');
     expect(comms.recordAttempt).toHaveBeenLastCalledWith(expect.objectContaining({ attempt: 1, ok: false, error: 'TEMPLATE_MISSING' }));
 
-    comms.findRecipient.mockResolvedValueOnce(recipient({ email: 'someone.else@adx.co' }));
+    comms.findRecipient.mockResolvedValueOnce(recipient({ email: 'someone.else@adx.in' }));
     await attemptDelivery('dlv-1');
     expect(comms.recordAttempt).toHaveBeenLastCalledWith(expect.objectContaining({ ok: false, error: 'RECIPIENT_UNAVAILABLE' }));
 
-    redis.redis.get.mockResolvedValue('asha.rao@adx.co');
+    redis.redis.get.mockResolvedValue('asha.rao@adx.in');
     email.sendEmail.mockResolvedValue({ provider: 'SMTP', configured: false, messageId: null, response: null, previewUrl: null });
     const after = await attemptDelivery('dlv-1');
     expect(after).toMatchObject({ status: 'SKIPPED', lastError: 'EMAIL_UNCONFIGURED' });
@@ -395,7 +395,7 @@ describe('attempt rows (Q121)', () => {
   });
 
   it('never lets a failed attempt row change the delivery outcome', async () => {
-    redis.redis.get.mockResolvedValue('asha.rao@adx.co');
+    redis.redis.get.mockResolvedValue('asha.rao@adx.in');
     comms.recordAttempt.mockRejectedValue(new Error('unique violation'));
     const after = await attemptDelivery('dlv-1');
     expect(after).toMatchObject({ status: 'SENT' });
@@ -416,17 +416,17 @@ describe('attempt rows (Q121)', () => {
 
 describe('the test send (Q117)', () => {
   it('renders sample variables and sends to the operator’s own email and mobile, attempted in the request', async () => {
-    comms.findRecipient.mockResolvedValue(recipient({ id: 'adm-1', email: 'ops@adx.co', mobile: '+919900011122' }));
+    comms.findRecipient.mockResolvedValue(recipient({ id: 'adm-1', email: 'ops@adx.in', mobile: '+919900011122' }));
     comms.findDelivery.mockImplementation(async (id: string) =>
       delivery({
         id,
         userId: 'adm-1',
         channel: id === 'dlv-2' ? 'SMS' : 'EMAIL',
-        recipientHash: id === 'dlv-2' ? hashRecipient('SMS', '+919900011122') : hashRecipient('EMAIL', 'ops@adx.co'),
+        recipientHash: id === 'dlv-2' ? hashRecipient('SMS', '+919900011122') : hashRecipient('EMAIL', 'ops@adx.in'),
         variables: sampleVariablesFor(['title', 'body']),
       }),
     );
-    redis.redis.get.mockImplementation(async (key: string) => (key.endsWith('dlv-2') ? '+919900011122' : 'ops@adx.co'));
+    redis.redis.get.mockImplementation(async (key: string) => (key.endsWith('dlv-2') ? '+919900011122' : 'ops@adx.in'));
 
     const result = await sendTestTemplate('announcement', 'adm-1');
     expect(result.templateKey).toBe('announcement');
@@ -436,7 +436,7 @@ describe('the test send (Q117)', () => {
       { channel: 'SMS', deliveryId: 'dlv-2', status: 'SENT' },
     ]);
     expect(comms.findRecipient).toHaveBeenCalledWith('adm-1');
-    expect(email.sendEmail).toHaveBeenCalledWith('ops@adx.co', 'Test announcement', '<h2>Test announcement</h2><p>This is a test of the announcement template.</p>');
+    expect(email.sendEmail).toHaveBeenCalledWith('ops@adx.in', 'Test announcement', '<h2>Test announcement</h2><p>This is a test of the announcement template.</p>');
     expect(sms.sendSms).toHaveBeenCalledWith(expect.objectContaining({ to: '+919900011122', kind: 'ANNOUNCEMENT_CRITICAL' }));
     // Not governed by the cap or the quiet hours, whatever the template says.
     expect(comms.countDeliveriesInWindow).not.toHaveBeenCalled();
@@ -445,7 +445,7 @@ describe('the test send (Q117)', () => {
 
   it('narrows to the channels asked for, tests a DRAFT, and refuses when the operator has no address', async () => {
     comms.findTemplateByKey.mockResolvedValue(template({ status: 'DRAFT' }));
-    redis.redis.get.mockResolvedValue('asha.rao@adx.co');
+    redis.redis.get.mockResolvedValue('asha.rao@adx.in');
     const result = await sendTestTemplate('announcement', 'usr-1', ['EMAIL']);
     expect(result.deliveries).toEqual([{ channel: 'EMAIL', deliveryId: 'dlv-1', status: 'SENT' }]);
     expect(sms.sendSms).not.toHaveBeenCalled();
@@ -464,11 +464,11 @@ describe('the test send (Q117)', () => {
 /* ── the transactional flag ──────────────────────────────────────── */
 
 describe('the transactional flag', () => {
-  it('seeds the announcement, the statement, the three hunting-map pushes and the five sequence copies as non-transactional and everything else as transactional', () => {
+  it('seeds the announcement, the statement, the three hunting-map pushes, the five sequence copies and the weekly summary as non-transactional and everything else as transactional', () => {
     const nonTransactional = DEFAULT_TEMPLATES.filter((seed) => seed.transactional === false).map((seed) => seed.key);
     // LH5: the map's three pushes are offers and nudges, not service notices — quiet hours and the weekly cap hold.
     // LH6: the sequence step copies are outreach; `lead-outreach` itself is transactional because the hub rules before the dispatcher.
-    expect(nonTransactional.sort()).toEqual(['announcement', 'lead-claim-lapsing', 'lead-link-opened', 'lead-nearby-hot', 'lead-seq-advertiser-intro', 'lead-seq-advertiser-nudge', 'lead-seq-last-call', 'lead-seq-publisher-intro', 'lead-seq-publisher-nudge', 'statement-ready']);
+    expect(nonTransactional.sort()).toEqual(['announcement', 'lead-claim-lapsing', 'lead-link-opened', 'lead-nearby-hot', 'lead-seq-advertiser-intro', 'lead-seq-advertiser-nudge', 'lead-seq-last-call', 'lead-seq-publisher-intro', 'lead-seq-publisher-nudge', 'statement-ready', 'weekly-campaign-summary']);
     expect(DEFAULT_TEMPLATES.find((seed) => seed.key === 'lead-outreach')?.transactional).not.toBe(false);
     for (const key of ['login-otp', 'two-factor-sms', 'two-factor-email', 'package-link', 'kyc-decision', 'payout-paid']) {
       expect(DEFAULT_TEMPLATES.find((seed) => seed.key === key)?.transactional).not.toBe(false);
@@ -488,6 +488,7 @@ describe('the transactional flag', () => {
       { key: 'lead-seq-advertiser-intro', transactional: false },
       { key: 'lead-seq-advertiser-nudge', transactional: false },
       { key: 'lead-seq-last-call', transactional: false },
+      { key: 'weekly-campaign-summary', transactional: false },
     ]);
   });
 });

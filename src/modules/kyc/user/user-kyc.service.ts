@@ -164,7 +164,11 @@ export async function deleteMyUserKyc(userId: string) {
 }
 
 export async function deleteUserKycById(id: string) {
-  await getUserKycById(id);
+  const kyc = await getUserKycById(id);
+  // Account lifecycle (2 Oct 2026): a decided case is the record of a decision — kept, never deleted.
+  if (kyc.status === 'VERIFIED' || kyc.status === 'REJECTED') {
+    throw new ApiError(409, 'KYC_DECIDED', 'This KYC case has been decided, so it is kept on the record and cannot be deleted.', { status: kyc.status });
+  }
   await repository.removeById(id);
 }
 

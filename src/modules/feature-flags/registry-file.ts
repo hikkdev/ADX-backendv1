@@ -7,9 +7,9 @@ import { logger } from '../../shared/logging';
  * `docs/feature-registry.json` — Lot G (answer 144).
  *
  * Written by `npm run features:sync` from the backend declarations and the
- * three package manifests (console, user app, agent app), committed, and
- * read here for the surfaces the backend cannot see at runtime: a console
- * screen or an app feature folder is a feature too, and it gets a row and a
+ * four package manifests (console, user app, agent app, website), committed,
+ * and read here for the surfaces the backend cannot see at runtime: a console
+ * screen, an app feature folder or a website page is a feature too, and it gets a row and a
  * kill switch the same way a route does.
  *
  * Resolved relative to this file, not the working directory, so it is found

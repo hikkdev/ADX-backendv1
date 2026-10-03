@@ -38,6 +38,7 @@ vi.mock('../../listings', () => listings);
 import { ApiError, errorHandler } from '../../../shared/errors';
 import { tokenFor } from '../../../shared/testing';
 import { partyImportsRouter } from '../party-imports.routes';
+import { zipFiles } from '../../../shared/zip';
 
 function app() {
   const instance = express();
@@ -185,8 +186,11 @@ describe('Lot U: /party-imports/listings, /party-imports/rate-card', () => {
     expect(listingService.commitListingImport).toHaveBeenCalledWith('imp_l', { userId: 'usr_admin', isAdmin: true }, 'usr_admin', expect.anything());
 
     // A publisher's own account is not a role the router lets through.
+    // BL-1: a publisher passes the door; the act rule lets them read their own account only.
     const publisher = tokenFor(['PUBLISHER'], 'usr_pub');
-    expect((await request(app()).get('/api/v1/party-imports/listings?publisherId=pub_1').set('Authorization', `Bearer ${publisher}`)).status).toBe(403);
+    listings.assertCanCreateForPublisher.mockRejectedValueOnce(new ApiError(403, 'FORBIDDEN', 'This is not your publisher.'));
+    expect((await request(app()).get('/api/v1/party-imports/listings?publisherId=pub_other').set('Authorization', `Bearer ${publisher}`)).status).toBe(403);
+    expect((await request(app()).get('/api/v1/party-imports/listings?publisherId=pub_1').set('Authorization', `Bearer ${publisher}`)).status).toBe(200);
   });
 
   it('GET /:id, report.csv and revoke read the import under the act rule for an agent', async () => {
@@ -233,5 +237,64 @@ describe('Lot U: /party-imports/formats', () => {
     expect((await request(app()).get('/api/v1/party-imports/formats/spaceships').set('Authorization', `Bearer ${admin}`)).status).toBe(404);
     // `formats` is not a party either: the guide answers before `/:party` could.
     expect(service.listImports).not.toHaveBeenCalledWith('formats', expect.anything());
+  });
+});
+
+/*
+ * 26 Sep 2026: the publisher's bulk listing upload takes an .xlsx beside a
+ * CSV — the first sheet parsed to the same rows (a blank line skipped, its
+ * number not reused); a file that only claims to be a workbook is 400; the
+ * advertiser/agent/print-partner imports keep the CSV door.
+ */
+describe('POST /party-imports/listings — an .xlsx', () => {
+  const sheet = (rowsXml: string) =>
+    zipFiles([
+      { name: 'xl/workbook.xml', data: '<workbook><sheets><sheet name="Spots" r:id="rId1"/></sheets></workbook>' },
+      { name: 'xl/_rels/workbook.xml.rels', data: '<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>' },
+      { name: 'xl/worksheets/sheet1.xml', data: `<worksheet><sheetData>${rowsXml}</sheetData></worksheet>` },
+    ]);
+  const cell = (ref: string, text: string) => `<c r="${ref}" t="inlineStr"><is><t>${text}</t></is></c>`;
+  const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+  it('parses the first sheet into the rows a CSV would give', async () => {
+    const file = sheet(
+      `<row r="1">${cell('A1', 'title')}${cell('B1', 'category')}${cell('C1', 'address')}${cell('D1', 'ratePerDay')}</row>` +
+        `<row r="2">${cell('A2', 'FC Road Hoarding')}${cell('B2', 'OUTDOOR')}${cell('C2', '44, FC Road')}<c r="D2"><v>1200</v></c></row>` +
+        `<row r="4">${cell('A4', 'JM Road Wall')}${cell('B4', 'OUTDOOR')}${cell('C4', 'JM Road')}<c r="D4"><v>800.5</v></c></row>`,
+    );
+    const res = await request(app())
+      .post('/api/v1/party-imports/listings?publisherId=pub_1')
+      .set('Authorization', `Bearer ${tokenFor(['PUBLISHER'], 'usr_pub')}`)
+      .attach('file', file, { filename: 'spots.xlsx', contentType: XLSX });
+    expect(res.status).toBe(201);
+    expect(listingService.validateListingImport).toHaveBeenCalledWith(
+      'pub_1',
+      {
+        fileName: 'spots.xlsx',
+        note: undefined,
+        rows: [
+          { rowNumber: 2, data: { title: 'FC Road Hoarding', category: 'OUTDOOR', address: '44, FC Road', ratePerDay: '1200' } },
+          { rowNumber: 4, data: { title: 'JM Road Wall', category: 'OUTDOOR', address: 'JM Road', ratePerDay: '800.5' } },
+        ],
+      },
+      { userId: 'usr_pub', isAdmin: false },
+      expect.anything(),
+    );
+  });
+
+  it('refuses a broken workbook and a sheet with only a header', async () => {
+    const broken = Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.from('not really a zip')]);
+    const bad = await request(app()).post('/api/v1/party-imports/listings?publisherId=pub_1').set('Authorization', `Bearer ${admin}`).attach('file', broken, { filename: 'spots.xlsx', contentType: XLSX });
+    expect(bad.status).toBe(400);
+    expect(bad.body.error.message).toContain('.xlsx');
+    const empty = await request(app()).post('/api/v1/party-imports/listings?publisherId=pub_1').set('Authorization', `Bearer ${admin}`).attach('file', sheet(`<row r="1">${cell('A1', 'title')}</row>`), { filename: 'spots.xlsx', contentType: XLSX });
+    expect(empty.status).toBe(400);
+    expect(listingService.validateListingImport).not.toHaveBeenCalled();
+  });
+
+  it('a party import keeps the CSV door', async () => {
+    const res = await request(app()).post('/api/v1/party-imports/agents').set('Authorization', `Bearer ${admin}`).attach('file', Buffer.from('x'), { filename: 'agents.xlsx', contentType: XLSX });
+    expect(res.status).toBe(400);
+    expect(service.validateImport).not.toHaveBeenCalled();
   });
 });

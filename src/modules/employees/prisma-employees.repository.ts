@@ -163,4 +163,16 @@ export const prismaEmployeeRepository: EmployeeRepository = {
   remove(userId: string) {
     return prisma.employee.delete({ where: { userId } });
   },
+
+  async findHistory(employeeId: string, userId: string) {
+    const [kycRecords, interviews, managedAgents, departmentsHeaded, actions] = await Promise.all([
+      prisma.employeeKyc.count({ where: { employeeId } }),
+      prisma.agentInterview.count({ where: { interviewerId: employeeId } }),
+      prisma.agentProfile.count({ where: { reportingManagerId: employeeId } }),
+      prisma.department.count({ where: { headId: employeeId } }),
+      // Actions taken on records other than the person's own account.
+      prisma.activityLog.count({ where: { userId, targetId: { not: null }, NOT: { targetId: userId } } }),
+    ]);
+    return { kycRecords, interviews, managedAgents, departmentsHeaded, actions };
+  },
 };

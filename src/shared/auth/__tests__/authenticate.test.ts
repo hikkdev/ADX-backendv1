@@ -6,14 +6,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 /**
  * authenticate() beyond the signature: the revocation marker, the read-only
  * guard on an impersonation token, the refusal of a 2FA challenge token, and
- * requirePermission with the launch rule for tokens minted without perms.
+ * requirePermission and requireRole under RP-1: a token minted without
+ * perms holds nothing, and an ADMIN holding none is refused ROLE_REQUIRED.
  */
 const redis = vi.hoisted(() => ({ get: vi.fn(), set: vi.fn() }));
 vi.mock('../../cache/redis', () => ({ redis }));
 
 import { env } from '../../../config/env';
 import { errorHandler } from '../../errors';
-import { ENROLMENT_ONLY_PATHS, authenticate, hasPermission, requirePermission, requireRole } from '../authenticate';
+import { ENROLMENT_ONLY_PATHS, authenticate, authenticateOptional, hasPermission, requirePermission, requireRole } from '../authenticate';
 import { signAccessToken, signImpersonationToken } from '../jwt';
 import { clearRevocationMemo, markSessionsRevoked } from '../revocation';
 
@@ -33,6 +34,16 @@ function appWith() {
     res.json({ ok: true });
   });
   app.get('/admin', requireRole('ADMIN'), (_req, res) => {
+    res.json({ ok: true });
+  });
+  app.get('/either', requireRole('ADMIN', 'PUBLISHER'), (_req, res) => {
+    res.json({ ok: true });
+  });
+  /* RP-2: a shared route with a permission behind its role guard, and a strict one with no role guard. */
+  app.post('/shared', requireRole('ADMIN', 'PUBLISHER'), requirePermission('supply.edit'), (_req, res) => {
+    res.json({ ok: true });
+  });
+  app.post('/strict', requirePermission('supply.edit'), (_req, res) => {
     res.json({ ok: true });
   });
   app.use(errorHandler);
@@ -136,10 +147,11 @@ describe('requirePermission', () => {
     expect(res.body).toMatchObject({ error: { code: 'FORBIDDEN', details: { missing: ['kyc.edit'] } } });
   });
 
-  it('applies the launch rule to a token minted without perms: an ADMIN holds everything, nobody else holds anything', async () => {
+  it('RP-1: a token minted without perms holds nothing — an ADMIN included', async () => {
     const app = appWith();
-    expect((await request(app).get('/finance').set(bearer(signAccessToken('usr_1', ['ADMIN'])))).status).toBe(200);
+    expect((await request(app).get('/finance').set(bearer(signAccessToken('usr_1', ['ADMIN'])))).status).toBe(403);
     expect((await request(app).get('/finance').set(bearer(signAccessToken('usr_1', ['PUBLISHER'])))).status).toBe(403);
+    expect(hasPermission({ roles: ['ADMIN'] }, 'finance.view')).toBe(false);
     expect(hasPermission({ roles: ['ADMIN'], perms: [] }, 'finance.view')).toBe(false);
     expect(hasPermission(undefined, 'finance.view')).toBe(false);
   });
@@ -150,6 +162,71 @@ describe('requirePermission', () => {
 });
 
 /* Lot K2: the must-enrol claim. */
+describe('authenticateOptional (W1)', () => {
+  function optionalApp() {
+    const app = express();
+    app.get('/public', authenticateOptional, (req, res) => {
+      res.json({ sub: req.user?.sub ?? null });
+    });
+    app.use(errorHandler);
+    return app;
+  }
+
+  it('lets a request with no header through as nobody', async () => {
+    const res = await request(optionalApp()).get('/public');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ sub: null });
+  });
+
+  it('reads a good token as the person, and refuses a bad one exactly as authenticate does', async () => {
+    const app = optionalApp();
+    const good = await request(app).get('/public').set(bearer(signAccessToken('usr_1', ['ADVERTISER'])));
+    expect(good.body).toEqual({ sub: 'usr_1' });
+    const bad = await request(app).get('/public').set({ Authorization: 'Bearer not-a-token' });
+    expect(bad.status).toBe(401);
+  });
+});
+
+describe('requireRole under RP-1', () => {
+  it('refuses an ADMIN with no console role by name, and lets one with a role through', async () => {
+    const app = appWith();
+    const res = await request(app).get('/admin').set(bearer(signAccessToken('usr_1', ['ADMIN'])));
+    expect(res.status).toBe(403);
+    expect(res.body).toMatchObject({ error: { code: 'ROLE_REQUIRED' } });
+    const held = signAccessToken('usr_1', ['ADMIN'], undefined, { perms: ['finance.view'] });
+    expect((await request(app).get('/admin').set(bearer(held))).status).toBe(200);
+  });
+
+  it('still refuses the wrong role as FORBIDDEN, and passes an account through a party role the route accepts', async () => {
+    const app = appWith();
+    const publisher = await request(app).get('/admin').set(bearer(signAccessToken('usr_1', ['PUBLISHER'])));
+    expect(publisher.status).toBe(403);
+    expect(publisher.body).toMatchObject({ error: { code: 'FORBIDDEN' } });
+    expect((await request(app).get('/either').set(bearer(signAccessToken('usr_1', ['ADMIN', 'PUBLISHER'])))).status).toBe(200);
+    expect((await request(app).get('/either').set(bearer(signAccessToken('usr_1', ['ADMIN'])))).status).toBe(403);
+  });
+});
+
+describe('requirePermission behind a shared role guard (RP-2)', () => {
+  it('judges an admin by their list and lets a party the role guard admitted pass as the party', async () => {
+    const app = appWith();
+    expect((await request(app).post('/shared').set(bearer(signAccessToken('pub_1', ['PUBLISHER'])))).status).toBe(200);
+    const narrow = signAccessToken('adm_1', ['ADMIN'], undefined, { perms: ['supply.view'] });
+    const refused = await request(app).post('/shared').set(bearer(narrow));
+    expect(refused.status).toBe(403);
+    expect(refused.body).toMatchObject({ error: { code: 'FORBIDDEN', details: { missing: ['supply.edit'] } } });
+    const held = signAccessToken('adm_1', ['ADMIN'], undefined, { perms: ['supply.view', 'supply.edit'] });
+    expect((await request(app).post('/shared').set(bearer(held))).status).toBe(200);
+  });
+
+  it('is strict with no role guard in front: a party token holds no permission', async () => {
+    const app = appWith();
+    expect((await request(app).post('/strict').set(bearer(signAccessToken('pub_1', ['PUBLISHER'])))).status).toBe(403);
+    const held = signAccessToken('adm_1', ['ADMIN'], undefined, { perms: ['supply.edit'] });
+    expect((await request(app).post('/strict').set(bearer(held))).status).toBe(200);
+  });
+});
+
 describe('a token carrying mustEnrolAuthenticator', () => {
   function enrolmentApp() {
     const app = express();

@@ -1,10 +1,12 @@
 import type { SlotHoldOptions, SlotWindow } from '../listings';
-import type { CheckIn, ListingCategory, Order, OrderAgentAssignment, OrderStatus, Prisma } from '../../shared/database';
-import type { AdminOrdersQuery, CalendarQuery, MyOrdersQuery } from './orders.schema';
+import type { CheckIn, ListingCategory, Order, OrderAgentAssignment, OrderRead, OrderRiskBand, OrderRiskReview, OrderStatus, Prisma } from '../../shared/database';
+import type { AdminOrdersQuery, CalendarQuery, MyOrdersQuery, RiskReviewQuery } from './orders.schema';
 
 export type NewOrder = {
   advertiserId: string;
   listingId: string;
+  /** BK-1: BKG-DDMM-YYNN, minted by placement. */
+  displayId?: string;
   campaignName?: string;
   designUrl?: string;
   budget?: number;
@@ -26,7 +28,7 @@ export type PlacementInput = NewOrder & { forCampaignId?: string; quantity?: num
 export type OpenOrderScope = { publisherId: string } | { advertiserUserId: string } | { agentId: string };
 
 /** Order joined to its listing and that listing's publisher. */
-export type OrderWithPublisher = Order & {
+export type OrderWithPublisher = OrderRead & {
   listing: {
     id: string;
     title: string;
@@ -73,13 +75,27 @@ export type CalendarListing = {
   }[];
 };
 
+/**
+ * PB-1 (2 Oct 2026): the login that placed an order, as the admin board reads
+ * it — the person's names and ADX id, and the advertiser profile (the
+ * business) that login holds, null when it holds none.
+ */
+export type OrderPlacerRow = {
+  id: string;
+  name: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  displayId: string | null;
+  advertiserProfile: { id: string; name: string; displayId: string | null } | null;
+};
+
 /** One page of the DR 10 order board: the rows, the total, and the chip counts. */
-export type AdminOrdersPage = { items: Order[]; total: number; counts: Record<string, number> };
+export type AdminOrdersPage = { items: (OrderRead & { advertiser?: OrderPlacerRow | null })[]; total: number; counts: Record<string, number> };
 /**
  * A row of a persona's own list, with the accepted offer's quote on it
  * (Lot B, Q102) — null until an agent has accepted.
  */
-export type MyOrderRow = Order & { quotedFee: Prisma.Decimal | null };
+export type MyOrderRow = OrderRead & { quotedFee: Prisma.Decimal | null };
 /** One page of a persona's own orders — same shape, three different joins. */
 export type MyOrdersPage = { items: MyOrderRow[]; total: number; counts: Record<string, number> };
 
@@ -119,12 +135,70 @@ export interface PlacementLock {
   /** The slots held on the locked listing over the window, quantities summed, read inside the transaction. */
   slotsHeld(window: SlotWindow, options?: SlotHoldOptions): Promise<number>;
   /** The insert, inside the same transaction; `accepted` as `create` takes it. */
-  create(data: NewOrder, accepted?: AutoAccept): Promise<Order>;
+  create(data: NewOrder, accepted?: AutoAccept): Promise<OrderRead>;
 }
+
+/**
+ * Order fraud screening (2 Oct 2026): the order as the screening and the
+ * review desk read it — the facts the order signals need and every risk
+ * and hold column. ADMIN and the screening only; never a party's answer.
+ */
+export type OrderRiskState = {
+  id: string;
+  displayId: string | null;
+  status: OrderStatus;
+  /** The placing login (`Order.advertiserId` is a User id). */
+  advertiserId: string;
+  listingId: string;
+  agentId: string | null;
+  budget: number | null;
+  startDate: Date | null;
+  endDate: Date | null;
+  createdAt: Date;
+  riskScore: Prisma.Decimal | null;
+  riskSignals: Prisma.JsonValue | null;
+  riskBand: OrderRiskBand | null;
+  riskScoredAt: Date | null;
+  riskReviewStatus: OrderRiskReview | null;
+  riskReviewedById: string | null;
+  riskReviewedAt: Date | null;
+  riskReviewNote: string | null;
+  riskClearedSignalKeys: string[];
+  heldAt: Date | null;
+  heldById: string | null;
+  holdReason: string | null;
+  fraudCaseId: string | null;
+  /** The campaign spot the order was raised from; null for a direct booking. */
+  campaignSpot: { campaignId: string } | null;
+};
+
+/** What the screening and the desk write on an order — the risk and hold columns only. */
+export type OrderRiskPatch = Partial<{
+  riskScore: string | null;
+  riskSignals: Prisma.InputJsonValue | null;
+  riskBand: OrderRiskBand | null;
+  riskScoredAt: Date | null;
+  riskReviewStatus: OrderRiskReview | null;
+  riskReviewedById: string | null;
+  riskReviewedAt: Date | null;
+  riskReviewNote: string | null;
+  riskClearedSignalKeys: string[];
+  heldAt: Date | null;
+  heldById: string | null;
+  holdReason: string | null;
+  fraudCaseId: string | null;
+}>;
+
+/** One row of the fraud review queue: the console board's row (with the placing login) plus every risk column. */
+export type RiskReviewRow = OrderRead & {
+  advertiser?: OrderPlacerRow | null;
+} & Pick<OrderRiskState, 'riskScore' | 'riskSignals' | 'riskBand' | 'riskScoredAt' | 'riskReviewStatus' | 'riskReviewedById' | 'riskReviewedAt' | 'riskReviewNote' | 'riskClearedSignalKeys' | 'heldAt' | 'heldById' | 'holdReason' | 'fraudCaseId'>;
+
+export type RiskReviewPage = { items: RiskReviewRow[]; total: number; counts: Record<string, number> };
 
 export interface OrdersRepository {
   /** With `accepted`, the row is born PENDING_PRINT rather than PENDING_PUBLISHER. */
-  create(data: NewOrder, accepted?: AutoAccept): Promise<Order>;
+  create(data: NewOrder, accepted?: AutoAccept): Promise<OrderRead>;
   /**
    * G10 (the Lot G verifier's first major on slots): runs `run` inside one
    * transaction whose first statement is a per-listing advisory lock —
@@ -133,7 +207,7 @@ export interface OrdersRepository {
    * and the second counts the first's row. A throw inside rolls it back.
    */
   placeUnderListingLock<T>(listingId: string, run: (locked: PlacementLock) => Promise<T>): Promise<T>;
-  findById(orderId: string): Promise<Order | null>;
+  findById(orderId: string): Promise<OrderRead | null>;
   /** Just the fields other modules need to reason about an order. */
   findSummary(
     orderId: string,
@@ -141,7 +215,13 @@ export interface OrdersRepository {
   findWithPublisher(orderId: string): Promise<OrderWithPublisher | null>;
   /** The full aggregate the order detail endpoint returns. */
   findDetail(orderId: string): Promise<unknown | null>;
-  update(orderId: string, data: Record<string, unknown>): Promise<Order>;
+  /**
+   * 2 Oct 2026: the order WITH its completion code — the hash and the plain
+   * code the global omit keeps off every other read. For the code check and
+   * for support's read-back on the admin detail; never answered raw.
+   */
+  findWithCompletionCode(orderId: string): Promise<(OrderRead & Pick<Order, 'completionOtp' | 'completionOtpPlain'>) | null>;
+  update(orderId: string, data: Record<string, unknown>): Promise<OrderRead>;
 
   /* ── Evidence ──────────────────────────────────────────────────
    *
@@ -166,7 +246,7 @@ export interface OrdersRepository {
     }[]
   >;
 
-  findCompletedExpiredForListing(listingId: string): Promise<Order | null>;
+  findCompletedExpiredForListing(listingId: string): Promise<OrderRead | null>;
   /* ── Lot G (Q114): the booking calendar, listings first ─────────────
    * A page of ACTIVE listings in the filter, each with the orders that hold
    * a slot on it over the window — so a spot with nothing booked is a row. */
@@ -205,6 +285,8 @@ export interface OrdersRepository {
     statuses: string[],
   ): Promise<{ id: string }[]>;
   findAll(query: AdminOrdersQuery): Promise<AdminOrdersPage>;
+  /** PB-1: who placed an order — the admin detail's "Placed by", read beside the aggregate so no persona read gains it. */
+  findPlacer(userId: string): Promise<OrderPlacerRow | null>;
   findAgentLocation(
     orderId: string,
   ): Promise<{ agentLatitude: number | null; agentLongitude: number | null; agentLocationUpdatedAt: Date | null; listing: { latitude: number | null; longitude: number | null } } | null>;
@@ -279,4 +361,24 @@ export interface OrdersRepository {
   findCheckIn(orderId: string): Promise<CheckIn | null>;
   /** K-B1: `{ id, label, displayId }` per id in one query — the QR desk names the code's subject with it. */
   findLabelsByIds(ids: string[]): Promise<{ id: string; label: string; displayId: string | null }[]>;
+
+  /* ── Order fraud screening (2 Oct 2026) ─────────────────────────── */
+  /** The order with its risk and hold columns; null when there is no such order. */
+  findRiskState(orderId: string): Promise<OrderRiskState | null>;
+  /** Just whether (and since when) an order is held — what every hold gate asks. Null when there is no such order. */
+  findHold(orderId: string): Promise<{ heldAt: Date | null } | null>;
+  /** Writes risk and hold columns; answers the state after. */
+  updateRisk(orderId: string, patch: OrderRiskPatch): Promise<OrderRiskState>;
+  /**
+   * Holds the order only if it is not held and still open (not COMPLETED or
+   * CANCELLED) — one conditional write, so two holds racing do not both
+   * land. True when this call held it.
+   */
+  holdIfOpen(orderId: string, hold: { heldAt: Date; heldById: string | null; holdReason: string }): Promise<boolean>;
+  /** Lifts a hold only if there is one. True when this call lifted it. */
+  releaseIfHeld(orderId: string): Promise<boolean>;
+  /** The fraud review queue, one page, with a count per review status. */
+  findRiskReviewPage(query: RiskReviewQuery): Promise<RiskReviewPage>;
+  /** Open orders (not COMPLETED or CANCELLED), by id after `afterId` — what the nightly re-screen walks. */
+  findOpenOrderIds(afterId: string | null, limit: number): Promise<string[]>;
 }

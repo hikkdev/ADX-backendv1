@@ -315,3 +315,12 @@ geocoding through Nominatim with OSM selected, and the bucket holding the
 second row of a batch.
 `__tests__/directions.test.ts` — the directions route, its query shape and the
 once-per-pair cache.
+
+## 26 Sep 2026 — the picker and the resolver answer visitors
+
+`GET /app/geo/cities` and `GET /app/geo/resolve` take `authenticateOptional`
+and `publicReadLimiter` and sit above the router-wide `authenticate`: the
+website's city suggestions and "coming soon" stage pill are shown signed out.
+Public data only (name, state, stage, switches); a token that is sent is still
+verified; `POST /app/geo/waitlist` stays signed in. Pinned in
+`__tests__/rollout.routes.test.ts`.

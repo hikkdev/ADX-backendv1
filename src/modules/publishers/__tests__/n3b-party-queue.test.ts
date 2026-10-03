@@ -28,8 +28,11 @@ vi.mock('../../../shared/database', async (importOriginal) => {
 
 import { prismaPublishersRepository as repository } from '../prisma-publishers.repository';
 import { kycQueueQuerySchema } from '../publishers.schema';
+import { workingPublisherWhere } from '../../../shared/party-status';
 
 const BASE = { OR: [{ kycStatus: { not: 'VERIFIED' } }, { kyc: { isNot: null } }] };
+// Account lifecycle (2 Oct 2026): working accounts only, unless the desk asks for the inactive.
+const WORKING = workingPublisherWhere();
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -50,7 +53,7 @@ describe('the queue is every publisher', () => {
     await repository.findKycQueue({});
     expect(prisma.publisher.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { AND: [BASE] },
+        where: { AND: [BASE, WORKING] },
         include: expect.objectContaining({ kyc: true }),
         orderBy: [{ kyc: { submittedAt: { sort: 'asc', nulls: 'last' } } }, { createdAt: 'asc' }],
       }),
@@ -61,12 +64,13 @@ describe('the queue is every publisher', () => {
     await repository.findKycQueue({ state: 'AWAITING_DOCUMENTS' });
     expect(prisma.publisher.findMany.mock.calls[0]![0].where.AND).toEqual([
       BASE,
+      WORKING,
       { OR: [{ kyc: null, kycStatus: { not: 'VERIFIED' } }, { kyc: { is: { status: 'PENDING', submittedAt: null, requestedAt: null } } }] },
     ]);
     await repository.findKycQueue({ status: 'PENDING' });
-    expect(prisma.publisher.findMany.mock.calls[1]![0].where.AND).toEqual([BASE, { kyc: { is: { status: 'PENDING', submittedAt: { not: null } } } }]);
+    expect(prisma.publisher.findMany.mock.calls[1]![0].where.AND).toEqual([BASE, WORKING, { kyc: { is: { status: 'PENDING', submittedAt: { not: null } } } }]);
     await repository.findKycQueue({ requested: true, sort: 'newest' });
-    expect(prisma.publisher.findMany.mock.calls[2]![0].where.AND).toEqual([BASE, { kyc: { is: { status: 'PENDING', submittedAt: null, requestedAt: { not: null } } } }]);
+    expect(prisma.publisher.findMany.mock.calls[2]![0].where.AND).toEqual([BASE, WORKING, { kyc: { is: { status: 'PENDING', submittedAt: null, requestedAt: { not: null } } } }]);
     expect(prisma.publisher.findMany.mock.calls[2]![0].orderBy).toEqual([{ kyc: { requestedAt: { sort: 'desc', nulls: 'last' } } }, { createdAt: 'desc' }]);
   });
 
@@ -74,6 +78,7 @@ describe('the queue is every publisher', () => {
     await repository.findKycQueue({ assignedToId: null, method: 'DIGIO', escalated: false, unassigned: true, q: 'Sharma' });
     expect(prisma.publisher.findMany.mock.calls[0]![0].where.AND).toEqual([
       BASE,
+      WORKING,
       { kyc: { is: { assignedToId: null, method: 'DIGIO', escalatedAt: null } } },
       { agentId: null },
       {
@@ -87,6 +92,6 @@ describe('the queue is every publisher', () => {
       },
     ]);
     await repository.countKycQueue({ state: 'REQUESTED' });
-    expect(prisma.publisher.count).toHaveBeenCalledWith({ where: { AND: [BASE, { kyc: { is: { status: 'PENDING', submittedAt: null, requestedAt: { not: null } } } }] } });
+    expect(prisma.publisher.count).toHaveBeenCalledWith({ where: { AND: [BASE, WORKING, { kyc: { is: { status: 'PENDING', submittedAt: null, requestedAt: { not: null } } } }] } });
   });
 });

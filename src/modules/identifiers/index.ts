@@ -7,7 +7,15 @@
  */
 export { identifierRouter } from './identifiers.routes';
 export { allocateIdentifier, previewIdentifier, getFormat } from './identifiers.service';
-export { backfillPublisherIdentifiers, backfillUserIdentifiers } from './identifiers.backfill';
+export {
+  backfillOrderIdentifiers,
+  backfillPartyIdentifiers,
+  backfillPublisherIdentifiers,
+  backfillUserIdentifiers,
+  IDENTIFIED_PARTIES,
+} from './identifiers.backfill';
+export type { PartyBackfillReport } from './identifiers.backfill';
+export type { IdentifiedParty } from './identifiers.repository';
 
 // Lot G (answer 144): the module's feature declarations, loaded with the module so the registry sees them at boot.
 import './features';

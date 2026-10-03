@@ -103,10 +103,13 @@ export type PaidPackageFact = {
   agentId: string | null;
   agentName: string | null;
 };
-export type AccrualDayFact = { forDate: Date; gross: Prisma.Decimal; net: Prisma.Decimal };
+/** AN-1: all four money columns, so effective commission and tax withheld come off the same walk. */
+export type AccrualDayFact = { forDate: Date; gross: Prisma.Decimal; net: Prisma.Decimal; commission: Prisma.Decimal; taxWithheld: Prisma.Decimal };
 export type AccrualSpotFact = { campaignSpotId: string; gross: Prisma.Decimal; net: Prisma.Decimal };
 export type IncentiveFact = { verifiedAt: Date; amount: Prisma.Decimal; agentId: string; agentName: string | null; agentCity: string | null; agentCityId: string | null };
 export type OnboardingFact = { at: Date; city: string | null; cityId: string | null };
+/** AN-3: one `platform:revenue` movement, with the instant it happened. */
+export type RevenueFact = { occurredAt: Date; amount: Prisma.Decimal };
 export type ListingCapacityFact = { id: string; slotsTotal: number; publishedAt: Date | null };
 export type BookedSpotFact = { listingId: string; startDate: Date; endDate: Date; quantity: number };
 
@@ -137,6 +140,14 @@ export interface AnalyticsRepository {
   activeListingsCapacity(): Promise<ListingCapacityFact[]>;
   /** BOOKED, LIVE or COMPLETED spots on ACTIVE listings whose flight overlaps the window. */
   bookedSpots(window: Window): Promise<BookedSpotFact[]>;
+  /**
+   * AN-3: every movement on `platform:revenue` in the window, with its day.
+   *
+   * The windowed `platformRevenue` above answers one number for one month,
+   * which cannot be charted. This is the same legs, reversals included,
+   * carrying `occurredAt` so the take rate can be a line.
+   */
+  platformRevenueByDay(window: Window): Promise<RevenueFact[]>;
 }
 
 /** Q112: the counts the dashboard's rules read. Each is one `count`, and the rule lives in the service. */

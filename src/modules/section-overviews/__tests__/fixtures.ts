@@ -43,7 +43,8 @@ export const publishersSeed = (): Seed => ({
   ],
   publisherPayout: [blr('2026-09-08T12:00', { amount: '2000.00' }), blr('2026-08-26T12:00', { amount: '2500.00' })],
   kyc: { AWAITING_DOCUMENTS: 4, REQUESTED: 1, PENDING: 2, NEEDS_INFO: 1, REJECTED: 0, VERIFIED: 7 },
-  states: { publishersWithLiveListing: 6, publishersSuspended: 1, publishersClosed: 2 },
+  onboarding: [blr('2026-09-01T00:15'), blr('2026-09-04T10:00'), mum('2026-09-06T10:00'), blr('2026-08-31T23:30')],
+  states: { publishersWithLiveListing: 6, publishersSuspended: 1, publishersClosed: 2, onboardingsSelfServe: 4 },
   groups: { city: [{ key: 'Bengaluru', count: 6 }, { key: 'Mumbai', count: 3 }], agent: [{ key: 'agt_1', count: 5 }, { key: 'agt_2', count: 2 }] },
 });
 
@@ -57,6 +58,8 @@ export const advertisersSeed = (): Seed => ({
     blr('2026-08-31T23:30', { key: 'adv_c', amount: '9000.00' }),
   ],
   advertiserTopUp: [blr('2026-09-03T10:00', { amount: '5000.00' }), mum('2026-08-25T10:00', { amount: '8000.00' })],
+  onboarding: [blr('2026-09-02T11:00'), blr('2026-09-05T10:00'), mum('2026-09-06T10:00'), mum('2026-08-30T10:00')],
+  states: { onboardingsSelfServe: 2 },
   kyc: { AWAITING_DOCUMENTS: 2, REQUESTED: 0, PENDING: 3, NEEDS_INFO: 0, REJECTED: 1, VERIFIED: 5 },
   groups: {
     city: [{ key: 'Bengaluru', count: 5 }, { key: 'Mumbai', count: 4 }],
@@ -117,6 +120,42 @@ export const leadsSeed = (): Seed => ({
   leadRecycle: [blr('2026-09-04T10:00', { key: 'led_r' }), blr('2026-09-06T10:00', { key: 'led_d' }), blr('2026-08-24T10:00', { key: 'led_x' })],
   states: { leadsOpen: 12 },
   groups: { city: [{ key: 'Bengaluru', count: 9 }, { key: 'Mumbai', count: 3 }], temperature: [{ key: 'HOT', count: 3 }, { key: 'WARM', count: 5 }, { key: 'COLD', count: 4 }] },
+});
+
+/** The Listings overview: the party-creation pattern as listings, two published in the window and one before, bookings and accrual gross either side of the seam. */
+export const listingsSeed = (): Seed => ({
+  listing: partyCreations(),
+  listingPublished: [blr('2026-09-02T11:00'), mum('2026-09-09T15:00'), blr('2026-08-31T23:30')],
+  listingBooking: [blr('2026-09-01T00:15'), blr('2026-09-04T10:00'), mum('2026-09-07T10:00'), blr('2026-08-29T10:00')],
+  listingEarning: [blr('2026-09-04T00:00', { amount: '1500.00' }), mum('2026-09-06T00:00', { amount: '1000.00' }), blr('2026-08-28T00:00', { amount: '2000.00' })],
+  states: { listingsSuspended: 2, listingClaimsOpen: 3, listingRenewals: { due: 4, lapsed: 1 }, listingVerifications: { due: 5, lapsed: 2 } },
+  groups: {
+    city: [{ key: 'Bengaluru', count: 6 }, { key: 'Mumbai', count: 3 }],
+    listingStatus: [{ key: 'ACTIVE', count: 5 }, { key: 'DRAFT', count: 1 }, { key: 'PENDING_REVIEW', count: 2 }, { key: 'SUSPENDED', count: 1 }],
+    publisher: [{ key: 'pub_a', count: 4 }, { key: 'pub_b', count: 2 }],
+  },
+});
+
+export const campaignsSeed = (): Seed => ({
+  // Paid: three in the window (one on the seam, two for adv_a), one before it (on the seam).
+  campaignPaid: [
+    blr('2026-09-01T00:15', { key: 'adv_a', amount: '50000.00' }),
+    blr('2026-09-04T10:00', { key: 'adv_a', amount: '25000.00' }),
+    mum('2026-09-07T10:00', { key: 'adv_b', amount: '40000.00' }),
+    blr('2026-08-31T23:30', { key: 'adv_b', amount: '30000.00' }),
+  ],
+  campaignCompleted: [blr('2026-09-05T10:00'), mum('2026-08-25T10:00'), mum('2026-08-26T10:00')],
+  campaignCancelled: [mum('2026-09-08T10:00')],
+  campaignScan: [blr('2026-09-02T10:00'), blr('2026-09-02T11:00'), mum('2026-09-03T10:00'), blr('2026-08-30T10:00')],
+  campaignView: [blr('2026-09-02T10:01'), blr('2026-09-02T11:01')],
+  campaignCta: [blr('2026-09-02T10:02')],
+  campaignEnquiry: [blr('2026-09-02T10:03'), mum('2026-08-29T10:03')],
+  states: { campaignsLaunching: 4, campaignsEnding: 2 },
+  groups: {
+    city: [{ key: 'Bengaluru', count: 6 }, { key: 'Mumbai', count: 3 }],
+    campaignStatus: [{ key: 'LIVE', count: 5 }, { key: 'DRAFT', count: 3 }, { key: 'SCHEDULED', count: 2 }, { key: 'PENDING_PAYMENT', count: 4 }],
+    campaignGoal: [{ key: 'BRAND_AWARENESS', count: 6 }, { key: 'LOCAL_FOOTFALL', count: 2 }],
+  },
 });
 
 export const printPartnersSeed = (): Seed => ({

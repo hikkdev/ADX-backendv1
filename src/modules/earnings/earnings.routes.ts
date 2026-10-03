@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { asyncHandler } from '../../shared/http';
-import { authenticate, requireRole } from '../../shared/auth';
+import { authenticate, requireRole, requirePermission } from '../../shared/auth';
 import { getBalanceHandler, getTransactionsHandler } from './earnings.controller';
 
 export const earningsRouter = Router();
@@ -11,5 +11,5 @@ earningsRouter.use(authenticate);
 // is router-wide rather than per route.
 earningsRouter.use(requireRole('AGENT_PUBLISHER', 'AGENT_ADVERTISER', 'ADMIN'));
 
-earningsRouter.get('/balance', asyncHandler(getBalanceHandler));
-earningsRouter.get('/transactions', asyncHandler(getTransactionsHandler));
+earningsRouter.get('/balance', requirePermission('finance.view'), asyncHandler(getBalanceHandler));
+earningsRouter.get('/transactions', requirePermission('finance.view'), asyncHandler(getTransactionsHandler));

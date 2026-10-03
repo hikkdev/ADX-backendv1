@@ -338,6 +338,22 @@ export async function releaseLead(leadId: string, userId: string, reason?: strin
   return toLeadCard(fresh as unknown as LeadRow, null);
 }
 
+/**
+ * Account lifecycle (2 Oct 2026): an agent suspended from the work in hand
+ * (STOP_OPEN_WORK) hands back every open lead they hold — assigned or
+ * claimed — to the pool, each with a note on its thread saying why, so the
+ * router and the map offer them to a working agent. Returns the lead ids.
+ */
+export async function releaseLeadsHeldBy(agentId: string, reason: string, now = new Date()): Promise<string[]> {
+  const held = await repository.findOpenHeldBy(agentId);
+  for (const lead of held) {
+    await repository.closeOpenClaims(lead.id, now, reason);
+    await repository.update(lead.id, { assignedAgentId: null, claimedByAgentId: null, claimExpiresAt: null });
+    await repository.logActivity({ leadId: lead.id, actorUserId: null, kind: 'NOTE', note: `Released: ${reason}` });
+  }
+  return held.map((lead) => lead.id);
+}
+
 /** The hourly sweep: an unworked claim past its hold goes back to the pool; an hour before, the agent is warned. */
 export async function sweepClaims(now = new Date()): Promise<{ lapsed: number; warned: number }> {
   const due = await repository.claimsExpiredBefore(now, 500);

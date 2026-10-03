@@ -1,5 +1,8 @@
 import { ApiError } from '../../shared/errors';
 import { digioAvailability } from '../../shared/integrations';
+import { kycAvailabilityWithBackup } from '../../shared/verification';
+import { entityTypeFacts } from '../../shared/kyc-state';
+import type { KycEntityType } from '../../shared/database';
 import { logger } from '../../shared/logging';
 import { publisherKycReviewStateFor } from '../publishers';
 import { advertiserKycReviewStateFor, livenessStateFor } from '../kyc';
@@ -22,6 +25,11 @@ const ADVERTISER_ACCOUNT_TYPE: Record<string, AccountType> = {
   NGO: 'ORGANISATION',
 };
 
+/** Phase D: what the manifest reads of the party row — the legacy `type` and the stored legal form. */
+type PartyLegalForm = { type: string; entityType?: KycEntityType | null };
+/** Phase D (1 Oct 2026): the effective legal form (null when the KYC start will ask) and whether it was chosen. */
+type EntityTypeRead = { entityType: KycEntityType | null; entityTypeStored: boolean };
+
 /**
  * GET /users/me/onboarding-manifest — the ladder for the caller's own side.
  *
@@ -43,22 +51,23 @@ const ADVERTISER_ACCOUNT_TYPE: Record<string, AccountType> = {
  * given. An explicit `?version=` (a phone from before the column) still
  * wins. With no key, or a key that fails the validator, it is the code ladder.
  */
-export async function onboardingManifest(userId: string, party?: Party, version?: number): Promise<OnboardingManifest> {
+export async function onboardingManifest(userId: string, party?: Party, version?: number): Promise<OnboardingManifest & EntityTypeRead> {
   const user = await repository.findProfile(userId);
   if (!user) throw new ApiError(404, 'NOT_FOUND', 'User not found');
-  const publisher = user.publisherProfile as { type: string } | null;
-  const advertiser = user.advertiserProfile as { type: string } | null;
+  const publisher = user.publisherProfile as PartyLegalForm | null;
+  const advertiser = user.advertiserProfile as PartyLegalForm | null;
 
   const side = party ?? (publisher ? 'PUBLISHER' : advertiser ? 'ADVERTISER' : null);
   if (side === 'PUBLISHER' && publisher) {
     const { context, pinnedVersion } = await contextFor('PUBLISHER', userId);
     const template = await templateAt(version ?? pinnedVersion);
-    return buildOnboardingManifest('PUBLISHER', PUBLISHER_ACCOUNT_TYPE[publisher.type] ?? 'INDIVIDUAL', context, template);
+    // Phase D: beside the ladder, the legal form the KYC start will ask for when it is null.
+    return { ...buildOnboardingManifest('PUBLISHER', PUBLISHER_ACCOUNT_TYPE[publisher.type] ?? 'INDIVIDUAL', context, template), ...entityTypeFacts('PUBLISHER', publisher) };
   }
   if (side === 'ADVERTISER' && advertiser) {
     const { context, pinnedVersion } = await contextFor('ADVERTISER', userId);
     const template = await templateAt(version ?? pinnedVersion);
-    return buildOnboardingManifest('ADVERTISER', ADVERTISER_ACCOUNT_TYPE[advertiser.type] ?? 'INDIVIDUAL', context, template);
+    return { ...buildOnboardingManifest('ADVERTISER', ADVERTISER_ACCOUNT_TYPE[advertiser.type] ?? 'INDIVIDUAL', context, template), ...entityTypeFacts('ADVERTISER', advertiser) };
   }
   throw new ApiError(409, 'CONFLICT', 'Choose which kind of account this is first.');
 }
@@ -89,7 +98,7 @@ async function contextFor(party: Party, userId: string): Promise<{ context: Mani
   const [review, liveness, digio] = await Promise.all([
     party === 'PUBLISHER' ? publisherKycReviewStateFor(userId) : advertiserKycReviewStateFor(userId),
     livenessStateFor(userId),
-    digioAvailability(),
+    digioAvailability().then(kycAvailabilityWithBackup),
   ]);
   const pinned = review?.manifestVersion;
   return {

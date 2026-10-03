@@ -108,3 +108,39 @@ describe('POST /packages/quote — the term', () => {
     expect(nobody.body.data.term).toBeNull();
   });
 });
+
+/**
+ * 26 Sep 2026: `GET /packages/catalogue` carried a bare
+ * `requirePermission('marketplace.view')`, which is strict without a role
+ * guard in front — every advertiser and agent got 403. The party roles are
+ * now admitted by `requireRole`; an ADMIN still needs the permission.
+ */
+describe('GET /packages/catalogue — who may read it', () => {
+  beforeEach(() => { service.listCatalogue.mockResolvedValue({ plans: [], addOns: [] }); });
+
+  it('an advertiser reads the catalogue', async () => {
+    const res = await request(app()).get('/api/v1/packages/catalogue').set('Authorization', `Bearer ${advertiser}`);
+    expect(res.status).toBe(200);
+    expect(service.listCatalogue).toHaveBeenCalledWith({ includeInactive: false });
+  });
+
+  it('an advertiser-side agent reads the catalogue', async () => {
+    const res = await request(app()).get('/api/v1/packages/catalogue').set('Authorization', `Bearer ${agent}`);
+    expect(res.status).toBe(200);
+  });
+
+  it('an admin with the permission reads it; an admin without it is refused', async () => {
+    const ok = await request(app()).get('/api/v1/packages/catalogue?includeInactive=true').set('Authorization', `Bearer ${admin}`);
+    expect(ok.status).toBe(200);
+    expect(service.listCatalogue).toHaveBeenCalledWith({ includeInactive: true });
+    const { signAccessToken, PERMISSIONS } = await import('../../../shared/auth');
+    const bare = signAccessToken('usr_admin2', ['ADMIN'], undefined, { perms: PERMISSIONS.filter((p) => p !== 'marketplace.view') });
+    const refused = await request(app()).get('/api/v1/packages/catalogue').set('Authorization', `Bearer ${bare}`);
+    expect(refused.status).toBe(403);
+  });
+
+  it('a publisher is refused', async () => {
+    const res = await request(app()).get('/api/v1/packages/catalogue').set('Authorization', `Bearer ${tokenFor(['PUBLISHER'], 'usr_pub')}`);
+    expect(res.status).toBe(403);
+  });
+});

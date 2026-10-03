@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { listQuerySchema } from '../../shared/pagination';
+import { DEFAULT_LIST_PAGE_SIZE, MAX_LIST_PAGE_SIZE, listQuerySchema } from '../../shared/pagination';
 
 /**
  * What the seventeen screens are allowed to send.
@@ -57,6 +57,8 @@ const briefConfig = z.object({
   objective: z.string().min(2).max(200),
   keyMessage: z.string().min(2).max(500),
   style: z.enum(['BOLD_AND_ENERGETIC', 'CLEAN_AND_MINIMAL', 'WARM_AND_FRIENDLY']),
+  /** WG-1 (DR 12 board 05): the design notes the frame draws under the brief. */
+  notes: z.string().trim().max(1000).optional(),
 });
 
 /*
@@ -175,6 +177,22 @@ export const patchCampaignSchema = z
 
     fulfilment: z.enum(['ADX_PRINTS', 'ADVERTISER_SHIPS']).nullable(),
 
+    /** WG-1 (DR 12 board 05): the advertiser's placement wishes, stored as stated; null clears. */
+    placementPreferences: z
+      .object({
+        avoidAlcohol: z.boolean().optional(),
+        avoidPolitical: z.boolean().optional(),
+        avoidCompetitors: z.boolean().optional(),
+        note: z.string().trim().max(500).optional(),
+      })
+      .nullable(),
+    /** WG-1: the brand signs off the artwork before launch. */
+    brandApprovalRequired: z.boolean(),
+    /** WG-1 (DR 12 board 04 · 05): the campaign contact the production step draws. */
+    contactName: z.string().trim().max(120).nullable(),
+    contactEmail: z.string().trim().email().nullable(),
+    contactPhone: z.string().trim().max(20).nullable(),
+
     /** Admin- or agent-applied, and only ever downward. */
     discount: moneyString.nullable(),
 
@@ -210,6 +228,8 @@ export const cartSchema = z.object({
         listingId: z.string().min(1),
         quantity: z.number().int().min(1).max(20).optional(),
         matchScore: z.number().int().min(0).max(100).nullable().optional(),
+        /** PS-1: this spot's print choice; absent or null means the campaign's. */
+        fulfilment: z.enum(['ADX_PRINTS', 'ADVERTISER_SHIPS']).nullable().optional(),
       })
     )
     .max(50),
@@ -303,8 +323,18 @@ export const reviewQueueQuerySchema = listQuerySchema(CREATIVE_STATUSES, ['OLDES
     .enum(['true', 'false'])
     .optional()
     .transform((value) => (value === undefined ? undefined : value === 'true')),
+  /** VA-4: only artworks with (true) or without (false) a vision reading. */
+  analysed: z
+    .enum(['true', 'false'])
+    .optional()
+    .transform((value) => (value === undefined ? undefined : value === 'true')),
 });
 export type ReviewQueueQuery = z.infer<typeof reviewQueueQuerySchema>;
+
+/** VA-4: `POST /campaigns/creatives/analyse` — named artworks, or (no body) everything pending with no reading yet. */
+export const analyseCreativesSchema = z.object({
+  creativeIds: z.array(z.string().min(1)).min(1).max(50).optional(),
+});
 
 /* ── Lot D (Q7/Q139): landing-page interactions ────────────────────── */
 
@@ -395,6 +425,14 @@ export const cancelSchema = z.object({
   reason: z.string().min(3).max(500),
 });
 
+/** DQ-1: the desk's price for designing the artwork. */
+export const designQuoteSchema = z.object({
+  amount: z.string().trim().regex(/^\d+(\.\d{1,2})?$/, 'A rupee amount with up to two decimal places'),
+  note: z.string().trim().max(500).nullable().optional(),
+});
+/** DQ-1: the advertiser's answer. */
+export const designQuoteResponseSchema = z.object({ decision: z.enum(['ACCEPTED', 'DECLINED']) });
+
 export const redemptionSchema = z.object({
   count: z.number().int().min(1).max(100_000),
 });
@@ -411,6 +449,28 @@ export const authorizeSchema = z.object({
 });
 
 /* ── Reading ───────────────────────────────────────────────────────── */
+
+/**
+ * 2 Oct 2026 (Campaigns lot): what a paid-or-about-to-be-paid campaign is
+ * waiting on before it can go live, in the order the console lists them.
+ * `launch-gates.ts` derives them from the real gates; the README says which.
+ */
+export const WAITING_REASONS = ['RESERVATION_FEE', 'PAYMENT', 'DESIGN_QUOTE', 'KYC', 'ARTWORK', 'PUBLISHER', 'AGENT'] as const;
+export type WaitingReason = (typeof WAITING_REASONS)[number];
+
+export const CAMPAIGN_GOALS = ['BRAND_AWARENESS', 'DIGITAL_LIFT', 'LOCAL_FOOTFALL'] as const;
+
+const isoDaySchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/, 'must be YYYY-MM-DD');
+
+/** A comma list (how a multi-select serialises) parsed against the vocabulary — a typo is a 400, not a silent no-op. */
+function commaList<S extends readonly [string, ...string[]]>(values: S) {
+  return z
+    .string()
+    .optional()
+    .transform((value) => (value ? value.split(',').map((part) => part.trim()).filter(Boolean) : undefined))
+    .pipe(z.array(z.enum(values)).optional());
+}
+
 
 /** Every state a campaign can be in — named so the chip row can count each. */
 export const CAMPAIGN_STATUSES = [
@@ -461,8 +521,35 @@ export const listCampaignsQuerySchema = listQuerySchema(CAMPAIGN_STATUSES, [
    * book. The service drops it rather than trusting it.
    */
   advertiserId: z.string().trim().min(1).max(64).optional(),
+  /**
+   * 2 Oct 2026 (Campaigns lot): the console's filter bar. `city` is a city
+   * slug or name, resolved to its key (`targetMarketCityId`, the typed
+   * `targetMarket` as the fallback); `from`/`to` keep the campaigns whose
+   * flight overlaps those days (UTC days, the way the flight is stored);
+   * `goal` a comma list; `waitingOn` a comma list of launch gates — ADMIN
+   * only, like `advertiserId`.
+   */
+  city: z.string().trim().min(1).max(80).optional(),
+  from: isoDaySchema.optional(),
+  to: isoDaySchema.optional(),
+  goal: commaList(CAMPAIGN_GOALS),
+  waitingOn: commaList(WAITING_REASONS),
 });
 export type ListCampaignsQuery = z.infer<typeof listCampaignsQuerySchema>;
+
+/**
+ * 2 Oct 2026 (Campaigns lot): `GET /campaigns/launch-queue` — paid (or
+ * reservation-fee-paid) campaigns that cannot go live yet. `reason` narrows
+ * to the campaigns waiting on any of those gates; `city` as on the list.
+ */
+export const launchQueueQuerySchema = z.object({
+  reason: commaList(WAITING_REASONS),
+  q: z.string().trim().min(1).max(120).optional(),
+  city: z.string().trim().min(1).max(80).optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(MAX_LIST_PAGE_SIZE).default(DEFAULT_LIST_PAGE_SIZE),
+});
+export type LaunchQueueQuery = z.infer<typeof launchQueueQuerySchema>;
 
 export const analyticsQuerySchema = z.object({
   search: z.string().max(120).optional(),

@@ -1,3 +1,5 @@
+import type { Request } from 'express';
+import { logActivity } from '../../shared/audit';
 import { ApiError } from '../../shared/errors';
 import { allocateIdentifier } from '../identifiers';
 import { prismaDraftsRepository as repository } from './prisma-drafts.repository';
@@ -62,6 +64,40 @@ export type DeskDraftRow = {
   idleDays: number;
   publisher: DeskDraft['publisher'];
 };
+
+/** 2 Oct 2026: one draft as the desk opens it — the row, and the wizard's answers as the phone saved them. */
+export type DeskDraftDetail = DeskDraftRow & { answers: unknown };
+
+async function deskDraftOrNotFound(id: string): Promise<DeskDraft> {
+  const draft = await repository.findForDesk(id);
+  if (!draft) throw new ApiError(404, 'NOT_FOUND', 'That draft is gone — finished into a listing, or thrown away');
+  return draft;
+}
+
+/** `GET /listings/drafts/desk/:draftId` — the Listings table's "Open draft". */
+export async function deskDraft(id: string, now = new Date()): Promise<DeskDraftDetail> {
+  const { publisherId: _publisherId, ...draft } = await deskDraftOrNotFound(id);
+  return { ...draft, idleDays: idleDaysOf(draft.updatedAt, now) };
+}
+
+/**
+ * `DELETE /listings/drafts/desk/:draftId` — the desk throws a publisher's
+ * draft away (a test entry, a duplicate, a spot the publisher said on the
+ * phone they will not list). A delete power (`marketplace.delete`), not the
+ * edit tier. Audited with the reference and whose it was,
+ * since the draft itself is gone afterwards.
+ */
+export async function deskRemoveDraft(id: string, actorUserId: string, req?: Request): Promise<void> {
+  const draft = await deskDraftOrNotFound(id);
+  await repository.remove(id);
+  await logActivity(actorUserId, 'LISTING_DRAFT_DELETED', {
+    req,
+    targetType: 'ListingDraft',
+    targetId: id,
+    module: 'listings',
+    metadata: { displayId: draft.displayId, publisherId: draft.publisherId, title: draft.title },
+  });
+}
 
 export async function deskDrafts(query: DeskDraftsQuery, now = new Date()) {
   const idleBefore = query.idleDays !== undefined ? new Date(now.getTime() - query.idleDays * 86_400_000) : null;

@@ -82,7 +82,7 @@ describe('sendEmailCodeToAddressForUser', () => {
     expect(notifications.notify).toHaveBeenCalledWith(
       'LOGIN_OTP_EMAIL',
       'usr_1',
-      { code: expect.stringMatching(/^\d{6}$/), minutes: 10 },
+      { code: expect.stringMatching(/^[A-HJ-NP-Z]{8}$/), minutes: 10 },
       { type: 'SYSTEM', recipient: { email: 'asha@work.co' }, immediate: true },
     );
     expect(result).toMatchObject({ expiresInSeconds: 600, resendAfterSeconds: 60, sendsRemaining: 2 });
@@ -143,7 +143,7 @@ describe('the reads and the sweep', () => {
 
   it('hasProvenEmail asks with the normalised address', async () => {
     repository.hasVerifiedEmail.mockResolvedValue(true);
-    await expect(hasProvenEmail('usr_1', ' Asha@ADX.co')).resolves.toBe(true);
-    expect(repository.hasVerifiedEmail).toHaveBeenCalledWith('usr_1', 'asha@adx.co');
+    await expect(hasProvenEmail('usr_1', ' Asha@ADX.in')).resolves.toBe(true);
+    expect(repository.hasVerifiedEmail).toHaveBeenCalledWith('usr_1', 'asha@adx.in');
   });
 });

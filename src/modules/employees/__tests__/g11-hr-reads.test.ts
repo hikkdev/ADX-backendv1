@@ -27,11 +27,11 @@ beforeEach(() => {
 describe('listDepartmentMembers — joinedAt', () => {
   it('carries the row createdAt as joinedAt on every member', async () => {
     repository.findByDepartment.mockResolvedValue([
-      { id: 'emp_1', userId: 'usr_1', displayId: 'EMP-1', designation: 'Coordinator', region: 'Bengaluru', workMode: 'HYBRID', employmentType: 'FULL_TIME', isActive: true, createdAt: since, user: { name: 'Asha', email: 'asha@adx.co' } },
+      { id: 'emp_1', userId: 'usr_1', displayId: 'EMP-1', designation: 'Coordinator', region: 'Bengaluru', workMode: 'HYBRID', employmentType: 'FULL_TIME', isActive: true, createdAt: since, user: { name: 'Asha', email: 'asha@adx.in' } },
     ]);
     const members = await listDepartmentMembers('dep_ops');
     expect(members).toEqual([
-      { id: 'emp_1', userId: 'usr_1', displayId: 'EMP-1', name: 'Asha', email: 'asha@adx.co', designation: 'Coordinator', region: 'Bengaluru', workMode: 'HYBRID', employmentType: 'FULL_TIME', active: true, joinedAt: since },
+      { id: 'emp_1', userId: 'usr_1', displayId: 'EMP-1', name: 'Asha', email: 'asha@adx.in', designation: 'Coordinator', region: 'Bengaluru', workMode: 'HYBRID', employmentType: 'FULL_TIME', active: true, joinedAt: since },
     ]);
   });
 });

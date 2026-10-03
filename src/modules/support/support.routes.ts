@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { asyncHandler } from '../../shared/http';
-import { authenticate, requireRole } from '../../shared/auth';
+import { authenticate, requireRole, requirePermission } from '../../shared/auth';
 import { requireFeature } from '../feature-flags';
 import {
   getTicketsHandler, getTicketHandler, createTicketHandler,
@@ -47,7 +47,7 @@ supportRouter.get(
 supportRouter.get(
   '/live/inbox/events',
   authenticateStream,
-  requireRole('ADMIN'),
+  requireRole('ADMIN'), requirePermission('support.view'),
   requireFeature('support.live-chat'),
   asyncHandler(inboxEventsHandler),
 );
@@ -65,40 +65,40 @@ supportRouter.post('/live/start', requireFeature('support.live-chat'), asyncHand
 
 /* The desk's presence: online, the 30 s heartbeat that keeps the 90 s key
  * alive, and who is on. */
-supportRouter.put('/presence', requireRole('ADMIN'), requireFeature('support.live-chat'), asyncHandler(setPresenceHandler));
-supportRouter.post('/presence/heartbeat', requireRole('ADMIN'), requireFeature('support.live-chat'), asyncHandler(presenceHeartbeatHandler));
-supportRouter.get('/presence', requireRole('ADMIN'), requireFeature('support.live-chat'), asyncHandler(presenceHandler));
+supportRouter.put('/presence', requireRole('ADMIN'), requirePermission('support.view'), requireFeature('support.live-chat'), asyncHandler(setPresenceHandler));
+supportRouter.post('/presence/heartbeat', requireRole('ADMIN'), requirePermission('support.view'), requireFeature('support.live-chat'), asyncHandler(presenceHeartbeatHandler));
+supportRouter.get('/presence', requireRole('ADMIN'), requirePermission('support.view'), requireFeature('support.live-chat'), asyncHandler(presenceHandler));
 
 /* The live inbox and its stream token, above /tickets/:ticketId so no path
  * is read as a ticket id. */
-supportRouter.get('/live/inbox', requireRole('ADMIN'), requireFeature('support.live-chat'), asyncHandler(liveInboxHandler));
-supportRouter.post('/live/inbox/stream-token', requireRole('ADMIN'), requireFeature('support.live-chat'), asyncHandler(inboxStreamTokenHandler));
+supportRouter.get('/live/inbox', requireRole('ADMIN'), requirePermission('support.view'), requireFeature('support.live-chat'), asyncHandler(liveInboxHandler));
+supportRouter.post('/live/inbox/stream-token', requireRole('ADMIN'), requirePermission('support.view'), requireFeature('support.live-chat'), asyncHandler(inboxStreamTokenHandler));
 
 /* The desk's canned replies. */
-supportRouter.get('/canned', requireRole('ADMIN'), requireFeature('support.live-chat'), asyncHandler(listCannedHandler));
-supportRouter.post('/canned', requireRole('ADMIN'), requireFeature('support.live-chat'), asyncHandler(createCannedHandler));
-supportRouter.patch('/canned/:cannedId', requireRole('ADMIN'), requireFeature('support.live-chat'), asyncHandler(patchCannedHandler));
-supportRouter.delete('/canned/:cannedId', requireRole('ADMIN'), requireFeature('support.live-chat'), asyncHandler(deleteCannedHandler));
+supportRouter.get('/canned', requireRole('ADMIN'), requirePermission('support.view'), requireFeature('support.live-chat'), asyncHandler(listCannedHandler));
+supportRouter.post('/canned', requireRole('ADMIN'), requirePermission('support.edit'), requireFeature('support.live-chat'), asyncHandler(createCannedHandler));
+supportRouter.patch('/canned/:cannedId', requireRole('ADMIN'), requirePermission('support.edit'), requireFeature('support.live-chat'), asyncHandler(patchCannedHandler));
+supportRouter.delete('/canned/:cannedId', requireRole('ADMIN'), requirePermission('support.delete'), requireFeature('support.live-chat'), asyncHandler(deleteCannedHandler));
 
 /* The ops queue, registered above /tickets/:ticketId so "queue" is never read
  * as a ticket id. */
-supportRouter.get('/tickets/queue', requireRole('ADMIN'), asyncHandler(opsTicketsHandler));
+supportRouter.get('/tickets/queue', requireRole('ADMIN'), requirePermission('support.view'), asyncHandler(opsTicketsHandler));
 
 supportRouter.get('/tickets', asyncHandler(getTicketsHandler));
 supportRouter.post('/tickets', asyncHandler(createTicketHandler));
 supportRouter.get('/tickets/:ticketId', asyncHandler(getTicketHandler));
 /* E7-3: the requester rail — who raised it, their record, wallet, orders, trail. ADMIN. */
-supportRouter.get('/tickets/:ticketId/requester', requireRole('ADMIN'), asyncHandler(ticketRequesterHandler));
+supportRouter.get('/tickets/:ticketId/requester', requireRole('ADMIN'), requirePermission('support.view'), asyncHandler(ticketRequesterHandler));
 supportRouter.post('/tickets/:ticketId/reply', asyncHandler(addReplyHandler));
 /* Lot I: the stream's token, the typing indicator and the seen mark. */
 supportRouter.post('/tickets/:ticketId/stream-token', requireFeature('support.live-chat'), asyncHandler(streamTokenHandler));
 supportRouter.post('/tickets/:ticketId/typing', requireFeature('support.live-chat'), asyncHandler(typingHandler));
 supportRouter.post('/tickets/:ticketId/seen', requireFeature('support.live-chat'), asyncHandler(seenHandler));
-supportRouter.post('/tickets/:ticketId/reassign', requireRole('ADMIN'), requireFeature('support.live-chat'), asyncHandler(reassignHandler));
-supportRouter.post('/tickets/:ticketId/convert', requireRole('ADMIN'), requireFeature('support.live-chat'), asyncHandler(convertHandler));
+supportRouter.post('/tickets/:ticketId/reassign', requireRole('ADMIN'), requirePermission('support.edit'), requireFeature('support.live-chat'), asyncHandler(reassignHandler));
+supportRouter.post('/tickets/:ticketId/convert', requireRole('ADMIN'), requirePermission('support.edit'), requireFeature('support.live-chat'), asyncHandler(convertHandler));
 supportRouter.patch('/tickets/:ticketId/status', asyncHandler(updateTicketStatusHandler));
 /* Lot D (Q53/Q91): the desk's own patch — WAITING, priority, ops owner, team. */
-supportRouter.patch('/tickets/:ticketId', requireRole('ADMIN'), asyncHandler(patchTicketHandler));
+supportRouter.patch('/tickets/:ticketId', requireRole('ADMIN'), requirePermission('support.edit'), asyncHandler(patchTicketHandler));
 /* ADX decides who handles a request. That decision is what later authorises
  * delegated access to the publisher's account, so it is ADMIN-only. */
-supportRouter.post('/tickets/:ticketId/assign', requireRole('ADMIN'), asyncHandler(assignTicketHandler));
+supportRouter.post('/tickets/:ticketId/assign', requireRole('ADMIN'), requirePermission('support.edit'), asyncHandler(assignTicketHandler));

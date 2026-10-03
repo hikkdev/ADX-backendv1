@@ -39,6 +39,12 @@ export { findPublisherLabels } from './publishers.service';
 export type { PartyLabelRow as PublisherLabelRow } from './publishers.repository';
 /** Used by bootstrap: other parties that verify through Digio register here for the one webhook. */
 export { onUnmatchedDigioWebhook } from './kyc/digio.service';
+/**
+ * Cashfree Phase 1, used by bootstrap: the hosted-decision road — a Cashfree
+ * session's outcome is applied to the party's record the way Digio's
+ * callback is — and the publisher's case for the desk's "Resend on backup".
+ */
+export { handleDigioWebhook as applyHostedKycDecision, publisherBackupCase } from './kyc/digio.service';
 
 /**
  * Supplies the QR module's PublisherOnboardingPort.

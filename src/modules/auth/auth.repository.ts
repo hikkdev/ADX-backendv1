@@ -1,4 +1,4 @@
-import type { Role, User } from '../../shared/database';
+import type { Role, User, UserRead } from '../../shared/database';
 
 /**
  * The User reads and writes authentication needs.
@@ -26,8 +26,8 @@ export type LoginUser = User & {
   advertiserProfile: unknown;
 };
 
-/** Publisher login joins a narrower set — no agentProfile, no KYC. */
-export type PublisherLoginUser = User & {
+/** Publisher login joins a narrower set — no agentProfile, no KYC, and no credential columns. */
+export type PublisherLoginUser = UserRead & {
   roles: { role: Role }[];
   publisherProfile: unknown;
 };
@@ -40,7 +40,7 @@ export interface AuthRepository {
    *
    * Returns a list rather than a row on purpose. Nothing in this codebase
    * normalises email case on write and the unique index is case-sensitive, so
-   * `ada@adx.co` and `Ada@adx.co` can both exist. Google's address is
+   * `ada@adx.in` and `Ada@adx.in` can both exist. Google's address is
    * canonically lower-case, so an exact match would silently fail to find the
    * second — but picking one arbitrarily out of two would be an account
    * confusion bug. The caller sees the ambiguity and refuses it.
@@ -50,10 +50,12 @@ export interface AuthRepository {
    */
   findLoginUsersByEmailInsensitive(email: string): Promise<LoginUser[]>;
   /** Lean lookup for forgot-password, which only needs the id. */
-  findByEmail(email: string): Promise<User | null>;
+  findByEmail(email: string): Promise<UserRead | null>;
+  /** With the credential columns: refresh re-decides the must-enrol claim from them. */
   findUserWithRoles(userId: string): Promise<(User & { roles: { role: Role }[] }) | null>;
   findPublisherLoginUserById(userId: string): Promise<PublisherLoginUser | null>;
-  findByMobileWithRoles(mobile: string): Promise<(User & { roles: { role: Role }[] }) | null>;
+  findByMobileWithRoles(mobile: string): Promise<(UserRead & { roles: { role: Role }[] }) | null>;
+  /** With the credential columns: the password change checks the current one. */
   findById(userId: string): Promise<User | null>;
   /** Stamps the moment a session was established. */
   recordLogin(userId: string): Promise<unknown>;

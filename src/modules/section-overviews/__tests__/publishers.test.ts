@@ -13,7 +13,7 @@ const state = vi.hoisted(() => ({
   cache: { readThrough: vi.fn(), invalidate: vi.fn() },
   supply: { supplyFunnel: vi.fn() },
   publishers: { findPublisherLabels: vi.fn() },
-  agents: { findAgentLabels: vi.fn() },
+  agents: { agentCostOverWindow: vi.fn(), findAgentLabels: vi.fn() },
 }));
 
 vi.mock('../prisma-section-overviews.repository', () => ({
@@ -34,6 +34,7 @@ vi.mock('../../agents', () => state.agents);
 vi.mock('../../advertisers', () => ({}));
 vi.mock('../../employees', () => ({}));
 vi.mock('../../print-partners', () => ({}));
+vi.mock('../../campaigns', () => ({ WAITING_REASONS: [], launchQueueSummary: async () => ({ total: 0, byReason: {} }) }));
 
 import { SECTION_OVERVIEW_CACHE_SECONDS, sectionOverview, sectionOverviewCacheKey, type PublishersOverview } from '../section-overviews.service';
 
@@ -53,8 +54,23 @@ const read = (query: { from?: string; to?: string; city?: string } = QUERY, seed
   return sectionOverview('publishers', query, NOW) as Promise<PublishersOverview>;
 };
 
+/* CP-2: the agents module owns the salary and incentive rows and exports the
+   cost as an aggregate; here it is a fixed answer, so the division the
+   service does is what gets pinned. */
+const COST = {
+  side: 'ALL',
+  salary: '40000.00',
+  rewards: '2000.00',
+  commission: '6000.00',
+  basis: '42000.00',
+  allIn: '48000.00',
+  agentsOnTerms: 4,
+  byCity: [{ key: 'city_bengaluru', cityId: 'city_bengaluru', slug: 'bengaluru', name: 'Bengaluru', typed: [], salary: '30000.00', rewards: '1500.00', commission: '4500.00', basis: '31500.00', allIn: '36000.00' }],
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
+  state.agents.agentCostOverWindow.mockResolvedValue(COST);
   state.cache.readThrough.mockImplementation(async (_key: string, _ttl: number, load: () => Promise<unknown>) => load());
   state.supply.supplyFunnel.mockResolvedValue(FUNNEL);
   state.publishers.findPublisherLabels.mockImplementation(labelsOf);
@@ -146,12 +162,34 @@ describe('the breakdowns', () => {
     const { breakdowns } = await read();
     expect(breakdowns.byCity).toMatchObject({ total: 2, page: 1, pageSize: 100, counts: {} });
     // Lot X-B: keyed by the slug, labelled from the catalogue, the key beside it.
-    expect(breakdowns.byCity.items[0]).toEqual({ key: 'bengaluru', label: 'Bengaluru', href: '/publishers?city=bengaluru', cityId: 'city_bengaluru', typed: [], count: 6, listings: 12, gmv: '2000.25' });
+    // CP-2: Bengaluru's basis is 31,500 over the 2 onboardings the seed puts there.
+    expect(breakdowns.byCity.items[0]).toEqual({ key: 'bengaluru', label: 'Bengaluru', href: '/publishers?city=bengaluru', cityId: 'city_bengaluru', typed: [], count: 6, listings: 12, gmv: '2000.25', cost: '15750.00', onboardings: 2 });
     expect(breakdowns.byCategory.items[0]).toMatchObject({ key: 'OUTDOOR', label: 'Outdoor', publishers: 3, listings: 5 });
     expect(breakdowns.bySubscriptionTier.items.map((row) => row.key)).toEqual(['PLUS', 'STANDARD']);
     expect(breakdowns.byAgent.items[0]).toEqual({ key: 'agt_1', count: 5, label: 'Name agt_1', displayId: 'D-agt_1', href: '/agents/agt_1' });
   });
 });
+
+  /**
+   * CP-2: what a publisher onboarded cost.
+   *
+   * The money is the agents module's (fixed above); the denominator is this
+   * module's own count of the publishers an agent brought in the window —
+   * three of them, the fourth being on the far side of the seam. The four
+   * that walked in through the app are reported beside it and never divide
+   * into it: they cost no agent anything.
+   */
+  it('divides the agent money by the publishers an agent actually brought, and keeps the self-serve half out of it', async () => {
+    const { cost } = await read();
+    expect(cost.side).toBe('PUBLISHER');
+    expect(cost.onboardings).toEqual({ byAgent: 3, selfServe: 4 });
+    expect(cost.perOnboarding).toBe('14000.00');
+    // The commission sits outside the basis; all-in adds it back over the same denominator.
+    expect(cost.basis).toBe('42000.00');
+    expect(cost.commission).toBe('6000.00');
+    expect(cost.allInPerOnboarding).toBe('16000.00');
+    expect(cost.agentsOnTerms).toBe(4);
+  });
 
 describe('the city filter', () => {
   it('narrows every window figure to the publisher\'s city, case-insensitively', async () => {
@@ -186,7 +224,8 @@ describe('the city filter', () => {
   it('draws the rows typed under towns with no key as one "Other (typed)" bucket, the strings listed under it, with no link', async () => {
     const result = await read(QUERY, { ...publishersSeed(), typedCities: { strings: ['Blore', 'Rameswaram'], count: 2 } });
     const other = result.breakdowns.byCity.items.find((row) => row.key === 'other')!;
-    expect(other).toEqual({ key: 'other', label: 'Other (typed)', href: null, cityId: null, typed: ['Blore', 'Rameswaram'], count: 2, listings: 4, gmv: '0.00' });
+    // CP-2: no agent salary is recorded against a typed town, so it costs nothing and has nothing to divide.
+    expect(other).toEqual({ key: 'other', label: 'Other (typed)', href: null, cityId: null, typed: ['Blore', 'Rameswaram'], count: 2, listings: 4, gmv: '0.00', cost: null, onboardings: 0 });
     expect(result.breakdowns.byCity.items.map((row) => row.key)).toEqual(['bengaluru', 'mumbai', 'other']);
   });
 });

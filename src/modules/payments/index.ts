@@ -23,6 +23,14 @@ export function registerPaymentsModule(): void {
   registerOriginalMethodRefundPort({ refundable: (advertiserId, amount) => refundableToOriginalMethod(advertiserId, amount) });
 }
 
+/**
+ * LM-1: `promotions` supplies the two placement targets — an ad's and a
+ * boost's guard, price and settlement — through bootstrap, so the two
+ * modules never import each other.
+ */
+export { registerPromotionPaymentsPort } from './promotion-payments.port';
+export type { PromotionPaymentsPort, PromotionPayer, PromotionPaymentTarget } from './promotion-payments.port';
+
 /** For the console and tests: which gateways are on, and a payment's view. */
 export { listGateways, getPayment, toPaymentView } from './payments.service';
 export type { PaymentActor, PaymentSummary, PaymentIntent, GatewayStatus } from './payments.service';

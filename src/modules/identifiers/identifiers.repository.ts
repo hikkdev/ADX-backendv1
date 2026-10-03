@@ -17,6 +17,15 @@ export type IdentifierFormatPatch = Partial<{
   isActive: boolean;
 }>;
 
+/**
+ * The series a party backfill fills: the four party tables and the person.
+ * PARTNER is the print partner's series (PRT-…), AGENT the agent profile's.
+ */
+export type IdentifiedParty = Extract<PartyType, 'PUBLISHER' | 'ADVERTISER' | 'PARTNER' | 'AGENT' | 'USER'>;
+
+/** How many rows of one series still lack an identifier, and the span of their `createdAt`. */
+export type MissingIdentifierSummary = { count: number; oldest: Date | null; newest: Date | null };
+
 export interface IdentifiersRepository {
   findFormat(party: PartyType): Promise<IdentifierFormat | null>;
   listFormats(): Promise<IdentifierFormat[]>;
@@ -38,4 +47,16 @@ export interface IdentifiersRepository {
   /** QR-4: accounts still without an ADX-… id, oldest first. */
   usersMissingIdentifier(limit: number): Promise<{ id: string; createdAt: Date }[]>;
   setUserIdentifier(userId: string, displayId: string): Promise<void>;
+  /** BK-1: bookings placed before the series existed. */
+  ordersMissingIdentifier(limit: number): Promise<{ id: string; createdAt: Date }[]>;
+  setOrderIdentifier(orderId: string, displayId: string): Promise<void>;
+  /** The other three party tables, the same pair as the publisher's. */
+  advertisersMissingIdentifier(limit: number): Promise<{ id: string; createdAt: Date }[]>;
+  setAdvertiserIdentifier(advertiserId: string, displayId: string): Promise<void>;
+  printPartnersMissingIdentifier(limit: number): Promise<{ id: string; createdAt: Date }[]>;
+  setPrintPartnerIdentifier(printPartnerId: string, displayId: string): Promise<void>;
+  agentsMissingIdentifier(limit: number): Promise<{ id: string; createdAt: Date }[]>;
+  setAgentIdentifier(agentProfileId: string, displayId: string): Promise<void>;
+  /** Counts only — what a `--check` run reports, and what a write run has left. */
+  missingIdentifierSummary(party: IdentifiedParty): Promise<MissingIdentifierSummary>;
 }

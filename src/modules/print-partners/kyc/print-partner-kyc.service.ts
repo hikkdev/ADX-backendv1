@@ -1,8 +1,10 @@
+import { accountClosedAt, assertOpenForKyc } from '../../../shared/party-status';
 import type { Request } from 'express';
 import { ApiError } from '../../../shared/errors';
 import { auditDiff, logActivity } from '../../../shared/audit';
 import type { KycStatus } from '../../../shared/database';
 import { slaAge, slaCutoff } from '../../../shared/time';
+import { digioAvailability } from '../../../shared/integrations';
 import { kycStateCounts, kycSummaryOf, type KycSummary } from '../../../shared/kyc-state';
 import { getPlatformSettings } from '../../app-config';
 import {
@@ -31,7 +33,9 @@ import type { PartnerRow } from '../print-partners.repository';
 import { prismaPrintPartnerKycRepository as repository } from './prisma-print-partner-kyc.repository';
 import type { PrintPartnerKycFilter, PrintPartnerKycRow, PrintPartnerKycSort, PrintPartnerKycWithPartner } from './print-partner-kyc.repository';
 import { PRINT_PARTNER_KYC_DOCUMENT_FIELDS, type RequestPrintPartnerKycInput, type ReviewPrintPartnerKycInput, type SubmitPrintPartnerKycInput } from './print-partner-kyc.schema';
-import { initiatePrintPartnerDigioKyc } from './print-partner-digio.service';
+import { initiatePrintPartnerDigioKyc, noteEntityTypeForManualRequest } from './print-partner-digio.service';
+import { isUpgradeRequest } from '../../../shared/kyc-state';
+import { cashfreeIdentityProven, kycAvailabilityWithBackup } from '../../../shared/verification';
 import { requestServiceAgreement } from '../service-agreement';
 
 /**
@@ -146,11 +150,15 @@ export function assertNotVerified(status: KycStatus | string | null | undefined)
 
 /** `GET /print-partners/me/kyc` — the record with the flagged tiles and the liveness state; 404 before a first submission or request. */
 export async function getMyPrintPartnerKyc(partner: PartnerRow) {
-  const row = await repository.findByPartnerId(partner.id);
-  if (!row) throw new ApiError(404, 'NOT_FOUND', 'No KYC record yet');
+  // 26 Sep 2026: whether the Digio door is open, the way the onboarding
+  // manifest tells the other parties — `{ available, provider, retryAfter }`.
+  // Carried on the 404 too (`details.digio`), so a shop with no record yet
+  // knows which door to offer first.
+  const [row, digio] = await Promise.all([repository.findByPartnerId(partner.id), digioAvailability().then(kycAvailabilityWithBackup)]);
+  if (!row) throw new ApiError(404, 'NOT_FOUND', 'No KYC record yet', { digio });
   const [flagged, liveness, labels] = await Promise.all([flaggedDocuments('PRINT_PARTNER', row.id), livenessStateFor(partner.userId), kycUserLabels([row.requestedById])]);
   const { printPartner: _partner, ...record } = row;
-  return { ...record, flagged, liveness, requestedBy: kycLabelFor(labels, row.requestedById) };
+  return { ...record, flagged, liveness, requestedBy: kycLabelFor(labels, row.requestedById), digio };
 }
 
 /**
@@ -313,11 +321,21 @@ export const PRINT_PARTNER_KYC_DEEP_LINK = 'adx://partner/kyc';
  */
 export async function requestPrintPartnerKyc(id: string, input: RequestPrintPartnerKycInput, byUserId: string, req?: Request, now = new Date()) {
   const { partner, kyc } = await resolvePartner(id);
-  if (kyc?.status === 'VERIFIED') {
+  // Account lifecycle (2 Oct 2026): a closed account is never asked for KYC.
+  assertOpenForKyc({ closedAt: await accountClosedAt(partner.userId) });
+  // Phase D: the upgrade — a verified individual verifying again as a business — is the one Digio request a verified partner may have.
+  const upgrade = input.channel === 'DIGIO' && isUpgradeRequest('PRINT_PARTNER', partner, input.entityType);
+  if (kyc?.status === 'VERIFIED' && !upgrade) {
     throw new ApiError(409, 'KYC_ALREADY_VERIFIED', 'This partner is already verified; there is nothing to request');
   }
+  // Phase D: Digio goes first — a 409 ENTITY_TYPE_REQUIRED, or Digio refusing,
+  // leaves the row unstamped (the stamp used to land before the call, so a
+  // failed request still read as requested). A manual request stores the
+  // legal form when one is given.
+  const start = { onBehalf: true, byUserId, entityType: input.entityType, req };
+  const session = input.channel === 'DIGIO' ? await initiatePrintPartnerDigioKyc(partner, start, now) : null;
+  if (input.channel !== 'DIGIO') await noteEntityTypeForManualRequest(partner, start);
   const stamped = await repository.markRequested(partner.id, { requestedAt: now, requestedById: byUserId, requestedChannel: input.channel });
-  const session = input.channel === 'DIGIO' ? await initiatePrintPartnerDigioKyc(partner, { onBehalf: true }, now) : null;
 
   await logActivity(byUserId, 'PRINT_PARTNER_KYC_REQUESTED', {
     req,
@@ -367,7 +385,8 @@ export async function requestPrintPartnerKyc(id: string, input: RequestPrintPart
  */
 export async function reviewPrintPartnerKyc(id: string, input: ReviewPrintPartnerKycInput, reviewer: { userId: string; req?: Request }, now = new Date()) {
   const row = await requireCase(id);
-  if (input.status === 'VERIFIED' && row.method !== 'DIGIO' && !(await hasSubmittedLiveness(row.printPartner.userId))) {
+  // Cashfree Phase 1: a Cashfree session whose liveness and face match passed proved the person the way Digio does.
+  if (input.status === 'VERIFIED' && row.method !== 'DIGIO' && !(await hasSubmittedLiveness(row.printPartner.userId)) && !(await cashfreeIdentityProven('PRINT_PARTNER_KYC', row.printPartnerId))) {
     throw new ApiError(409, 'LIVENESS_REQUIRED', 'Ask the partner to record the short liveness video — or attest their presence at the desk — before verifying');
   }
   const reviewed = await repository.review(row.id, input.status, input.rejectionReason ?? null, { reviewedById: reviewer.userId, reviewNote: input.reviewNote ?? null }, now);

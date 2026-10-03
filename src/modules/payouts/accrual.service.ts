@@ -161,6 +161,15 @@ export async function runDailyAccrual(now = new Date()): Promise<AccrualRun> {
       skipped += 1;
       continue;
     }
+    // Order fraud screening (2 Oct 2026): a held order earns nothing while it
+    // is held — re-checked here as the suspension is. Unlike STOP_ACCRUAL the
+    // days are not lost: a hold is reversible, and once it is released the
+    // next run accrues every elapsed day this one skipped. The wallet is
+    // never frozen for it — only this order's step waits.
+    if (spot.order?.heldAt) {
+      skipped += 1;
+      continue;
+    }
 
     const days = elapsedDays(start, end, now);
     if (days.length === 0) continue;

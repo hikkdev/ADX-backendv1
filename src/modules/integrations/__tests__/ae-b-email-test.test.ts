@@ -61,8 +61,8 @@ const RESEND_KEY = 're_live_SECRET_4321';
 const ETHEREAL_PASS = 'ethereal-throwaway-PASS';
 
 const row = (email: Record<string, unknown> = {}, resend: Record<string, unknown> = {}) => ({
-  email: { host: 'smtp.gmail.com', port: 587, user: 'ops@adx.co', password: SMTP_PASSWORD, from: 'ADX <ops@adx.co>', primary: 'SMTP', mode: 'SMTP', ...email },
-  resend: { apiKey: RESEND_KEY, fromEmail: 'ADX <hello@adx.co>', ...resend },
+  email: { host: 'smtp.gmail.com', port: 587, user: 'ops@adx.in', password: SMTP_PASSWORD, from: 'ADX <ops@adx.in>', primary: 'SMTP', mode: 'SMTP', ...email },
+  resend: { apiKey: RESEND_KEY, fromEmail: 'ADX <hello@adx.in>', ...resend },
 });
 
 let sendMailMock: ReturnType<typeof vi.fn>;
@@ -103,9 +103,9 @@ afterEach(() => {
 
 describe('POST /integrations/email/test', () => {
   it('is ADMIN + settings.edit: a publisher and a view-only admin are refused, nothing is sent', async () => {
-    expect((await testCall({ to: 'ops@adx.co' }, publisher)).status).toBe(403);
-    expect((await testCall({ to: 'ops@adx.co' }, viewer)).status).toBe(403);
-    expect((await testCall({ to: 'ops@adx.co' }, publisher)).status).toBe(403);
+    expect((await testCall({ to: 'ops@adx.in' }, publisher)).status).toBe(403);
+    expect((await testCall({ to: 'ops@adx.in' }, viewer)).status).toBe(403);
+    expect((await testCall({ to: 'ops@adx.in' }, publisher)).status).toBe(403);
     expect(nodemailer.createTransport).not.toHaveBeenCalled();
     expect(audit.logActivity).not.toHaveBeenCalled();
   });
@@ -113,14 +113,14 @@ describe('POST /integrations/email/test', () => {
   it('refuses a body without an email address, 400, before anything is sent', async () => {
     expect((await testCall({})).status).toBe(400);
     expect((await testCall({ to: 'not-an-address' })).status).toBe(400);
-    expect((await testCall({ to: 'ops@adx.co', subject: 'x' })).status).toBe(400);
+    expect((await testCall({ to: 'ops@adx.in', subject: 'x' })).status).toBe(400);
     expect(nodemailer.createTransport).not.toHaveBeenCalled();
     expect(audit.logActivity).not.toHaveBeenCalled();
   });
 
   it('SMTP with no host: 200, ok false with the sentence, audited without a secret', async () => {
     config.getIntegrationsConfig.mockResolvedValue(row({ host: undefined }));
-    const res = await testCall({ to: 'ops@adx.co' });
+    const res = await testCall({ to: 'ops@adx.in' });
     expect(res.status).toBe(200);
     expect(res.body.data).toEqual({
       provider: 'SMTP',
@@ -141,7 +141,7 @@ describe('POST /integrations/email/test', () => {
 
   it('Ethereal: 200 ok with the preview URL, the inbox created once and cached, the password nowhere', async () => {
     config.getIntegrationsConfig.mockResolvedValue(row({ host: undefined, mode: 'ETHEREAL' }));
-    const res = await testCall({ to: 'ops@adx.co' });
+    const res = await testCall({ to: 'ops@adx.in' });
     expect(res.status).toBe(200);
     expect(res.body.data).toMatchObject({
       provider: 'ETHEREAL',
@@ -154,7 +154,7 @@ describe('POST /integrations/email/test', () => {
     expect(res.body.data.message).toMatch(/Ethereal/);
     expect(nodemailer.createTestAccount).toHaveBeenCalledTimes(1);
     expect(redis.set).toHaveBeenCalledWith('email:ethereal:account', expect.any(String), 'EX', 24 * 3600);
-    expect(sendMailMock).toHaveBeenCalledWith(expect.objectContaining({ to: 'ops@adx.co', subject: 'ADX test message' }));
+    expect(sendMailMock).toHaveBeenCalledWith(expect.objectContaining({ to: 'ops@adx.in', subject: 'ADX test message' }));
     expect(res.text).not.toContain(ETHEREAL_PASS);
     expect(tested()![2].metadata).toEqual({
       section: 'email',
@@ -166,7 +166,7 @@ describe('POST /integrations/email/test', () => {
 
   it('an SMTP login refusal is 200 ok:false with the vendor sentence, the password masked', async () => {
     sendMailMock.mockRejectedValue(new Error(`Invalid login: 535-5.7.8 Username and Password not accepted. (${SMTP_PASSWORD})`));
-    const res = await testCall({ to: 'ops@adx.co' });
+    const res = await testCall({ to: 'ops@adx.in' });
     expect(res.status).toBe(200);
     expect(res.body.data).toMatchObject({ provider: 'SMTP', configured: true, ok: false, messageId: null, previewUrl: null });
     expect(res.body.data.message).toContain('Username and Password not accepted');
@@ -183,7 +183,7 @@ describe('POST /integrations/email/test', () => {
       text: async () => JSON.stringify({ statusCode: 401, name: 'validation_error', message: 'API key is invalid' }),
     }));
     vi.stubGlobal('fetch', fetchMock);
-    const res = await testCall({ to: 'ops@adx.co' });
+    const res = await testCall({ to: 'ops@adx.in' });
     expect(res.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(res.body.data).toMatchObject({ provider: 'RESEND', configured: true, ok: false });
@@ -196,7 +196,7 @@ describe('POST /integrations/email/test', () => {
   it('a door that does not answer in 15 s is 200 with the timeout sentence', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     sendMailMock.mockImplementation(() => new Promise(() => undefined));
-    const pending = testCall({ to: 'ops@adx.co' });
+    const pending = testCall({ to: 'ops@adx.in' });
     await vi.advanceTimersByTimeAsync(15_001);
     const res = await pending;
     expect(res.status).toBe(200);

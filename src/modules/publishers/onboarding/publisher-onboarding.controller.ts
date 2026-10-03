@@ -3,6 +3,7 @@ import { ApiError } from '../../../shared/errors';
 import { env } from '../../../config/env';
 import { qrErrorToApi } from '../../qr';
 import { registerPublisherSchema, submitKycSchema, updateMyProfileSchema } from '../publishers.schema';
+import { parseKycStartBody } from '../kyc/digio.controller';
 import {
   cancelMyOnboarding,
   cancelOnboarding,
@@ -128,8 +129,10 @@ export async function decideMyOnboardingScanHandler(req: Request, res: Response)
 
 /* ── U7 / U9: Digio in the publisher's own hands, and their access log ──────── */
 
+// POST /publishers/me/kyc/digio/initiate — body `{ entityType?, supports? }` (Phase D; Cashfree Phase 1)
 export async function initiateMyDigioKycHandler(req: Request, res: Response): Promise<void> {
-  res.status(201).json({ success: true, data: await initiateMyDigioKyc(req.user!.sub) });
+  const { entityType, supports } = parseKycStartBody(req.body);
+  res.status(201).json({ success: true, data: await initiateMyDigioKyc(req.user!.sub, { entityType, supports, req }) });
 }
 
 export async function getMyDigioKycStatusHandler(req: Request, res: Response): Promise<void> {

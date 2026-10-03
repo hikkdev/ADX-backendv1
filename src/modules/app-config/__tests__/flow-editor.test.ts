@@ -271,6 +271,19 @@ describe('PATCH /config/flows/:key', () => {
     expect((await request(app()).patch('/api/v1/config/flows/listing').set('Authorization', `Bearer ${publisher}`).send(listing())).status).toBe(403);
     expect((await request(app()).patch('/api/v1/config/flows/Not%20A%20Key').set('Authorization', `Bearer ${admin}`).send(listing())).status).toBe(400);
   });
+
+  it('FL-1: refuses a well-formed key the code does not define — a flow exists when the code defines it', async () => {
+    const res = await request(app()).patch('/api/v1/config/flows/campaign').set('Authorization', `Bearer ${admin}`).send(listing());
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatchObject({
+      code: 'UNKNOWN_FLOW',
+      message: 'A flow exists when the code defines it — add it to KNOWN_FLOWS first',
+      details: { key: 'campaign', known: ['listing', 'onboarding', 'agent-job', 'employee-intake', 'lead-landing'] },
+    });
+    expect(repository.save).not.toHaveBeenCalled();
+    expect(repository.saveByKey).not.toHaveBeenCalled();
+    expect(audit.logActivity).not.toHaveBeenCalled();
+  });
 });
 
 describe('a party mid-ladder', () => {

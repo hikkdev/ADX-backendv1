@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { asyncHandler } from '../../shared/http';
-import { authenticate, requireRole } from '../../shared/auth';
+import { authenticate, requireRole, requirePermission } from '../../shared/auth';
 import {
   issueGrantHandler,
   myGrantsHandler,
@@ -31,11 +31,11 @@ accessGrantRouter.post('/:grantId/revoke', asyncHandler(revokeGrantHandler));
 accessGrantRouter.get('/mine', requireRole('AGENT_PUBLISHER'), asyncHandler(myGrantsHandler));
 
 /** Everything still open, so nobody has to ask who currently has access. */
-accessGrantRouter.get('/open', requireRole('ADMIN'), asyncHandler(openGrantsHandler));
+accessGrantRouter.get('/open', requireRole('ADMIN'), requirePermission('marketplace.view'), asyncHandler(openGrantsHandler));
 
 /** A publisher's own history. Ownership checked in the service. */
 accessGrantRouter.get('/publisher/:publisherId', asyncHandler(publisherGrantsHandler));
 
 /** D6: ops oversight — an agent's grants, and a party's whole record. */
-accessGrantRouter.get('/agent/:agentId', requireRole('ADMIN'), asyncHandler(agentGrantsHandler));
-accessGrantRouter.get('/log/:partyType/:partyId', requireRole('ADMIN'), asyncHandler(partyLogHandler));
+accessGrantRouter.get('/agent/:agentId', requireRole('ADMIN'), requirePermission('marketplace.view'), asyncHandler(agentGrantsHandler));
+accessGrantRouter.get('/log/:partyType/:partyId', requireRole('ADMIN'), requirePermission('marketplace.view'), asyncHandler(partyLogHandler));

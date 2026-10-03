@@ -10,8 +10,8 @@ import { crc32, deflateRawSync, inflateRawSync } from 'node:zlib';
  * (method 8) with the UTF-8 name flag set; no ZIP64, so the archive and any
  * entry must stay under 4 GB — a person's records are kilobytes.
  *
- * `readZip` is the inverse, for the test and for nothing else in
- * production: it walks the central directory and inflates each entry.
+ * `readZip` is the inverse: it walks the central directory and inflates
+ * each entry. 26 Sep 2026: `shared/xlsx` reads an uploaded workbook with it.
  */
 
 export interface ZipEntry {

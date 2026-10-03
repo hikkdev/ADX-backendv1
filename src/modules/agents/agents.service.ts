@@ -1,3 +1,4 @@
+import { accountStateOf } from '../../shared/party-status';
 import type { Request } from 'express';
 import { ApiError } from '../../shared/errors';
 import { logActivity } from '../../shared/audit';
@@ -5,7 +6,7 @@ import { getConfigObject, saveConfigObject } from '../app-config';
 import { ROUTING_CONFIG_KEY, meetsGrade, requiredGradeForBand, routingSettingsFrom, type AgentGradeCode, type DispatchAsk, type RoutingSettings } from '../../shared/dispatch';
 import type { AgentProfile } from '../../shared/database';
 import { prismaAgentsRepository as repository } from './prisma-agents.repository';
-import type { AgentFilter, AgentProfilePatch, AgentRole, AgentZone, NewAgent } from './agents.repository';
+import type { AgentFilter, AgentProfilePatch, AgentRole, AgentZone, AssignablePlace, NewAgent } from './agents.repository';
 import type { AgentPreferencesInput, CreateAgentInput, UpdateAgentInput } from './agents.schema';
 import { allocateIdentifier } from '../identifiers';
 import { kycSummaryOf } from '../../shared/kyc-state';
@@ -14,13 +15,35 @@ import { assertCityAllows, cityKeyFor, withCityKey } from '../pricing';
 import { agentMayWork } from './application/application.rules';
 import { assertEngagementSigned, engagementSide, engagementSigning } from './engagement-signing';
 
+/**
+ * 29 Sep 2026: the side an agent works, off the account's roles — the rule
+ * `application.service.sideOf` applies (an AGENT_PUBLISHER role, or no
+ * AGENT_ADVERTISER one, is the publisher side), kept here so the roster
+ * read does not pull the application ladder in.
+ */
+export function agentSideOf(roles: readonly string[]): 'PUBLISHER' | 'ADVERTISER' {
+  return roles.includes('AGENT_PUBLISHER') || !roles.includes('AGENT_ADVERTISER') ? 'PUBLISHER' : 'ADVERTISER';
+}
+
 export async function listAgents(filter: AgentFilter, limit: number, offset: number) {
   // Lot X-B: `?city=` is a slug (or a name, for the console's older links) — matched by key, the spelling as the fallback.
   const keyed = filter.city ? { ...filter, cityId: (await cityKeyFor(filter.city))?.cityId ?? null } : filter;
-  const { items, total } = await repository.findPage(keyed, limit, offset);
+  const { items, total, statusCounts } = await repository.findPage(keyed, limit, offset);
   // Note the meta shape here is { total, limit, offset } — not the
   // { page, pageSize, total, totalPages } used by the paginated admin listings.
-  return { items, meta: { total, limit, offset } };
+  // 29 Sep 2026 (the party rosters, made uniform): each row says where the
+  // agent stands on KYC — the state the queue row and the agent page print —
+  // and which side they work, the roster's KYC status and Type. The roles
+  // were read only to say that, so they do not ride the row out.
+  // Account lifecycle (2 Oct 2026): and where the account stands, with the counts per state on `meta`.
+  const rows = items.map(({ kyc, user: { roles, ...user }, ...row }) => ({
+    ...row,
+    user,
+    side: agentSideOf(roles.map((entry) => entry.role)),
+    kyc: kycSummaryOf(kyc),
+    accountState: accountStateOf({ ...row, user }),
+  }));
+  return { items: rows, meta: { total, limit, offset, statusCounts } };
 }
 
 /**
@@ -63,6 +86,9 @@ export async function createAgent(input: CreateAgentInput) {
     ...(input.city ? { city: input.city } : {}),
     ...(input.state ? { state: input.state } : {}),
     displayId,
+    // 28 Sep 2026: a new account gets the person's own ADX-… id here, as every
+    // other door gives one; an existing account already has its own.
+    ...(existing ? {} : { userDisplayId: await allocateIdentifier('USER') }),
     // AG-1: the desk that met the person makes a working agent; the desk starting an application for them makes an applicant.
     stage: input.asApplication ? 'PROFILE' : 'ACTIVE',
   });
@@ -162,6 +188,16 @@ export async function agentExists(agentId: string): Promise<boolean> {
 
 export async function findAssignableAgent(excludeIds: string[], ask: DispatchAsk = {}) {
   return repository.findAssignable(excludeIds, ask);
+}
+
+/**
+ * 3 Oct 2026 (the verification queue's "Send an agent"): the sweep's pick —
+ * a working publisher-side agent under their cap, in offer-priority order —
+ * from one city's agents only. Null when the city has nobody free.
+ */
+export async function findAssignableAgentInCity(place: AssignablePlace, ask: DispatchAsk = {}, now: Date = new Date()) {
+  if (!place.cityId && !place.city) return null;
+  return repository.findAssignable([], ask, now, place);
 }
 
 /* ── AG-5: routing by grade ─────────────────────────────────────────────── */
@@ -312,7 +348,17 @@ export async function listActiveAgentsForDirectory(q?: string, opts: { includeIn
  * they are offered work at all. A key left out is left alone.
  */
 export async function updateAgent(id: string, patch: UpdateAgentInput) {
-  if (!(await repository.findById(id))) throw new ApiError(404, 'NOT_FOUND', 'Agent not found');
+  const current = await repository.findById(id);
+  if (!current) throw new ApiError(404, 'NOT_FOUND', 'Agent not found');
+  // Account lifecycle (2 Oct 2026): suspension is one act with one record — the
+  // status field moves an agent between working and on leave, never into or
+  // out of a suspension, which goes through Suspend / Reinstate.
+  if (patch.status === 'SUSPENDED') {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'Use Suspend to suspend an agent, so the reason and what stops are recorded. The status here only moves an agent between working and on leave.');
+  }
+  if (patch.status !== undefined && (current.status === 'SUSPENDED' || current.suspensionScopes?.includes('BLOCK_NEW'))) {
+    throw new ApiError(400, 'VALIDATION_ERROR', 'This agent is suspended. Use Reinstate to lift the suspension; the status cannot be changed until then.');
+  }
   // Lot X-B: a patched city carries its key; a patch of other fields leaves the key alone.
   await repository.update(id, await withCityKey(patch as AgentProfilePatch));
   return getAgentById(id);

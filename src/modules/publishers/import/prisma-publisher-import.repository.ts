@@ -19,6 +19,7 @@ const matchSelect = {
   address: true,
   city: true,
   state: true,
+  postalCode: true,
   contactName: true,
   contactMobile: true,
   contactEmail: true,
@@ -34,9 +35,9 @@ function publisherColumns(fields: ImportPublisherFields) {
   return { ...rest, ...(type ? { type: type as PublisherType } : {}) };
 }
 
-/** QR-13: the four basics the readiness rule counts — with them in, an imported onboarding opens complete. */
+/** QR-13: the basics the readiness rule counts — with them in, an imported onboarding opens complete. AGE-1: not the date of birth. */
 function basicsIn(fields: ImportPublisherFields & { name: string }): boolean {
-  return Boolean(fields.name && fields.email && fields.address && fields.dateOfBirth);
+  return Boolean(fields.name && fields.email && fields.address);
 }
 
 /**

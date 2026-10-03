@@ -1,4 +1,5 @@
 import { prisma } from '../../shared/database';
+import { workingAgentWhere } from '../../shared/party-status';
 import type { TrailKind } from '../../shared/database';
 import type { AgentLocationsRepository, AgentSummary, NewPoint, OrderTimelineFacts, TripContext } from './agent-locations.repository';
 import type { LatLng } from './agent-locations.rules';
@@ -120,7 +121,8 @@ export const prismaAgentLocationsRepository: AgentLocationsRepository = {
 
   async activeAgents(filter) {
     const rows = await prisma.agentProfile.findMany({
-      where: { stage: 'ACTIVE', ...(filter.city ? { city: { equals: filter.city, mode: 'insensitive' } } : {}) },
+      // Account lifecycle (2 Oct 2026): working agents only — through the ladder, switched on, not suspended, signing in.
+      where: { AND: [workingAgentWhere(), ...(filter.city ? [{ city: { equals: filter.city, mode: 'insensitive' as const } }] : [])] },
       select: agentSelect,
       orderBy: { createdAt: 'asc' },
       take: 500,

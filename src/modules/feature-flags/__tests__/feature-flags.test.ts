@@ -44,7 +44,7 @@ import { errorHandler } from '../../../shared/errors';
 import { tokenFor } from '../../../shared/testing';
 import { authenticate, signAccessToken } from '../../../shared/auth';
 import { feature, resetRegistryForTests, type RegistryDocument, type RegistryEntry } from '../../../shared/features';
-import { checkRegistry, compareRegistryDocuments } from '../registry-check';
+import { MANIFEST_FILES, checkRegistry, compareRegistryDocuments, foldManifests, readManifests } from '../registry-check';
 import { appFlagsRouter, flagRouter } from '../feature-flags.routes';
 import { registerFlagUserLabelPort } from '../user-labels.port';
 import { registerFlagSubjectCityPort } from '../subject.port';
@@ -284,6 +284,20 @@ describe('the evaluation', () => {
     expect(mine['campaigns.landing-pages']).toEqual({ enabled: true, variant: 'builder' });
     expect(mine['multi-market-campaigns']).toBe(true);
     expect(mine['instant-booking']).toBe(false);
+  });
+
+  it('answers a website-only feature too — adx.in reads /app/flags like the apps — and still leaves the console-only ones out', async () => {
+    repository.listState.mockResolvedValue([
+      state({ key: 'website.studio', surfaces: ['WEBSITE'] }),
+      state({ key: 'support.live-chat', enabled: false, surfaces: ['APP_USER', 'APP_AGENT', 'CONSOLE', 'WEBSITE'] }),
+      state({ key: 'system.roles', surfaces: ['CONSOLE'] }),
+      state({ key: 'platform.health', surfaces: ['BACKEND'] }),
+    ]);
+    const mine = await evaluateAllFor('usr-1');
+    expect(mine['website.studio']).toEqual({ enabled: true, variant: null });
+    expect(mine['support.live-chat']).toEqual({ enabled: false, variant: null });
+    expect(mine['system.roles']).toBeUndefined();
+    expect(mine['platform.health']).toBeUndefined();
   });
 });
 
@@ -754,6 +768,33 @@ describe('the registry check', () => {
     const verdict = checkRegistry(null, [{ key: 'campaigns.landing-pages', surfaces: ['BACKEND'], owner: 'demand', kind: 'FEATURE', launch: 'on', description: 'd', variants: [], aliases: [], routes: [], jobs: [] }]);
     expect(verdict.current).toBe(false);
     expect(verdict.surfaces).toHaveLength(5);
+  });
+
+  it('reads the website manifest as the fourth package manifest, folded last', () => {
+    // 28 Sep 2026: adx.in ships website/features.manifest.json beside the console's and the two apps'.
+    expect(Object.keys(MANIFEST_FILES)).toEqual(['CONSOLE', 'APP_USER', 'APP_AGENT', 'WEBSITE']);
+    expect(MANIFEST_FILES.WEBSITE.replace(/\\/g, '/')).toMatch(/\/website\/features\.manifest\.json$/);
+    const read = readManifests();
+    // In the monorepo every manifest is on disk; the backend checked out alone names the missing ones instead.
+    const website = read.manifests.find((manifest) => manifest.surface === 'WEBSITE');
+    if (website) {
+      expect(read.invalid).toEqual([]);
+      expect(Object.keys(website.features)).toEqual(expect.arrayContaining(['website.landing', 'website.studio', 'support.live-chat', 'partners.print-floor']));
+    } else {
+      expect(read.missingSurfaces).toContain('WEBSITE');
+    }
+  });
+
+  it('folds each manifest onto the ones before it, so a later manifest may name a key an earlier one introduced with its paths only', () => {
+    const app = { surface: 'APP_USER' as const, features: { 'onboarding.ladder': { paths: ['onboarding'], owner: 'platform', kind: 'FEATURE' as const, launch: 'on' as const, description: 'DR 08' } } };
+    const web = { surface: 'WEBSITE' as const, features: { 'onboarding.ladder': { paths: ['app/(auth)/choose-workspace'] }, 'website.studio': { paths: ['app/studio'], owner: 'senior', kind: 'FEATURE' as const, launch: 'on' as const, description: 'Studio' } } };
+    const inOrder = foldManifests([], [app, web]);
+    expect(inOrder.invalid).toEqual([]);
+    expect(inOrder.foldable.map((manifest) => manifest.surface)).toEqual(['APP_USER', 'WEBSITE']);
+    // Alone, the website's reuse of an app-only key has nothing to fold onto: that surface is behind, named.
+    const alone = foldManifests([], [web]);
+    expect(alone.foldable).toEqual([]);
+    expect(alone.invalid).toEqual([expect.objectContaining({ surface: 'WEBSITE', error: expect.stringContaining('"onboarding.ladder" is not declared by the backend') })]);
   });
 });
 

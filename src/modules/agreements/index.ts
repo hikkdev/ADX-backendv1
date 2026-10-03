@@ -7,7 +7,7 @@
  * an advertiser's, because activation hangs off it in each of those modules.
  * Both read the live version the same way this module writes it.
  */
-export { agreementRouter } from './agreements.routes';
+export { agreementRouter, publicAgreementRouter } from './agreements.routes';
 
 /** Which party a kind binds and which kind gates each party's activation. */
 export { KIND_META, PLATFORM_KIND_FOR, templateState } from './agreements.service';

@@ -4,10 +4,47 @@ import type {
   LedgerRepository,
   NewTransaction,
   TransactionFilter,
+  TransactionMatch,
   TransactionRow,
 } from './ledger.repository';
 
 const withLegs = { legs: { include: { account: true }, orderBy: { createdAt: 'asc' } } } as const;
+
+/** The list read also carries the reversal markers, by reference, for the ledger screen and its export. */
+const withLegsAndReversal = {
+  ...withLegs,
+  reverses: { select: { reference: true } },
+  reversedBy: { select: { id: true, reference: true } },
+} as const;
+
+/** One `where` for the list, the count, the sums and the export, so the four never disagree. */
+function transactionWhere(filter: TransactionMatch): Prisma.LedgerTransactionWhereInput {
+  const and: Prisma.LedgerTransactionWhereInput[] = [];
+  if (filter.accountId) and.push({ legs: { some: { accountId: filter.accountId } } });
+  else if (filter.walletId) and.push({ legs: { some: { account: { walletId: filter.walletId } } } });
+  if (filter.from || filter.to) {
+    and.push({
+      occurredAt: {
+        ...(filter.from ? { gte: filter.from } : {}),
+        ...(filter.to ? { lte: filter.to } : {}),
+      },
+    });
+  }
+  // E6: the amount facet - a leg of exactly that value, either sign.
+  if (filter.amount) {
+    and.push({ legs: { some: { OR: [{ amount: filter.amount }, { amount: '-' + filter.amount }] } } });
+  }
+  if (filter.kind?.length) and.push({ kind: { in: filter.kind } });
+  if (filter.q) {
+    and.push({
+      OR: [
+        { reference: { contains: filter.q, mode: 'insensitive' } },
+        { note: { contains: filter.q, mode: 'insensitive' } },
+      ],
+    });
+  }
+  return and.length ? { AND: and } : {};
+}
 
 export const prismaLedgerRepository: LedgerRepository = {
   findAccountByCode(code) {
@@ -109,44 +146,33 @@ export const prismaLedgerRepository: LedgerRepository = {
   },
 
   async listTransactions(filter: TransactionFilter): Promise<TransactionRow[]> {
-    const legFilter =
-      filter.accountId || filter.walletId
-        ? {
-            legs: {
-              some: filter.accountId
-                ? { accountId: filter.accountId }
-                : { account: { walletId: filter.walletId } },
-            },
-          }
-        : {};
-
-    const occurred =
-      filter.from || filter.to
-        ? {
-            occurredAt: {
-              ...(filter.from ? { gte: filter.from } : {}),
-              ...(filter.to ? { lte: filter.to } : {}),
-            },
-          }
-        : {};
-
-    // E6: the amount facet - a leg of exactly that value, either sign.
-    const amountFilter = filter.amount
-      ? { AND: [{ legs: { some: { OR: [{ amount: filter.amount }, { amount: '-' + filter.amount }] } } }] }
-      : {};
-
     return prisma.ledgerTransaction.findMany({
-      where: {
-        ...legFilter,
-        ...occurred,
-        ...amountFilter,
-        ...(filter.kind?.length ? { kind: { in: filter.kind } } : {}),
-      },
-      include: withLegs,
+      where: transactionWhere(filter),
+      include: withLegsAndReversal,
       orderBy: [{ occurredAt: 'desc' }, { id: 'desc' }],
       take: filter.limit,
       ...(filter.cursor ? { cursor: { id: filter.cursor }, skip: 1 } : {}),
     }) as Promise<TransactionRow[]>;
+  },
+
+  countTransactions(filter) {
+    return prisma.ledgerTransaction.count({ where: transactionWhere(filter) });
+  },
+
+  async sumLegs(filter) {
+    const transaction = transactionWhere(filter);
+    const [debit, credit] = await Promise.all([
+      prisma.ledgerLeg.aggregate({ where: { amount: { lt: 0 }, transaction }, _sum: { amount: true } }),
+      prisma.ledgerLeg.aggregate({ where: { amount: { gt: 0 }, transaction }, _sum: { amount: true } }),
+    ]);
+    return {
+      debit: (debit._sum.amount ?? new Prisma.Decimal(0)).abs(),
+      credit: credit._sum.amount ?? new Prisma.Decimal(0),
+    };
+  },
+
+  countLegs(filter) {
+    return prisma.ledgerLeg.count({ where: { transaction: transactionWhere(filter) } });
   },
 
   async referenceExists(reference) {

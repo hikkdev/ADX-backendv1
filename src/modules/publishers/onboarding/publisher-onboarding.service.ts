@@ -1,16 +1,17 @@
 import { ApiError } from '../../../shared/errors';
-import { isVerifiedParty, publisherReadiness } from '../../../shared/kyc-state';
+import { entityTypeFacts, isVerifiedParty, publisherReadiness } from '../../../shared/kyc-state';
 import { dateOfBirthToDate, dateOfBirthToString } from '../../../shared/validation';
 import { money, type Money } from '../../../shared/money';
-import type { PublisherType } from '../../../shared/database';
+import type { Request } from 'express';
+import type { KycEntityType, PublisherType } from '../../../shared/database';
 import { allocateIdentifier } from '../../identifiers';
 import { askOf, decideOnboardingScan, findActiveQrFor, findPendingScan, getOrCreateIdentityQr } from '../../qr';
-import { findAgentProfile, findAgentTier, requireAgentProfile, requireWorkingAgent } from '../../agents';
+import { findAgentProfile, findAgentTier, payForNextOnboarding, requireAgentProfile, requireWorkingAgent } from '../../agents';
 import { publisherLicenceFor } from '../../agreements';
 import { closeOnboardingGrants, openOnboardingGrant, accessLogFor } from '../../access-grants';
 import { recordIncentiveOnce } from '../../payouts';
 import { withCityKey } from '../../pricing';
-import { getDigioKycStatus, initiateDigioKyc } from '../kyc/digio.service';
+import { getDigioKycStatus, startPublisherKyc } from '../kyc/digio.service';
 import { assertResubmissionCarriesDocuments, clearReviewsForResubmission, pinKycManifest, splitKycSubmission } from '../kyc/kyc-desk.service';
 import { prismaPublishersRepository as repository } from '../prisma-publishers.repository';
 import type { ClaimedPublisher, IdentitySummary } from '../../qr';
@@ -45,15 +46,26 @@ export async function registerProfile(
 
   const held = await repository.findByMobile(user.mobile);
   if (held) {
+    // The caller's own row, opened by a request that raced this one: returned, not refused.
+    if (held.userId === userId) return { publisher: held, created: false };
     if (held.userId) {
       throw new ApiError(409, 'CONFLICT', 'This number already belongs to another publisher account.');
     }
     return { publisher: await repository.attachUser(held.id, userId), created: false };
   }
 
-  // The name and email supplied here also update the user record — the
-  // publisher app collects them once, for both.
-  if (input.name) await repository.setUserProfile(userId, input.name, input.email);
+  // The email supplied here also updates the user record — the publisher app
+  // collects it once, for both. The name only when it is the person's own:
+  // an individual's, on an account that has none yet. A business or
+  // organisation name written onto the person (28 Sep 2026) was taken for a
+  // placeholder by the basics mirror (`users.mirrorBasicsToParties`) and the
+  // business was renamed after the person the moment the basics landed; and
+  // a person who already has a name keeps it.
+  const individual = (input.type ?? 'INDIVIDUAL') === 'INDIVIDUAL';
+  const personName = individual && input.name && !user.name ? input.name : undefined;
+  // An email that already is the account's (the website proves it before the side is chosen) is not written back.
+  const personEmail = input.email && input.email !== user.email ? input.email : undefined;
+  if (personName || personEmail) await repository.setUserProfile(userId, personName, personEmail);
 
   // Self-registration is the other way a publisher comes into existence, so it
   // allocates too — otherwise app signups would arrive without an identifier.
@@ -82,6 +94,9 @@ export async function getMyProfile(userId: string) {
   const dateOfBirth = dateOfBirthToString(user?.dateOfBirth);
   return {
     ...row,
+    // Phase D (1 Oct 2026): the legal form the KYC verifies — effective (null
+    // when it is still to be asked at the KYC start) and whether it was chosen.
+    ...entityTypeFacts('PUBLISHER', row),
     dateOfBirth,
     gender: user?.gender ?? null,
     // QR-7: the person's profile picture, off the User row, for the home's
@@ -236,14 +251,21 @@ async function resetOnboarding(publisherId: string): Promise<void> {
 export type OnboardingIncentive = { id: string; amount: Money } | null;
 
 /**
- * Lot B (Q101): the onboarding commission.
+ * Lot B (Q101): the onboarding commission. CP-1: only past the day's quota.
  *
  * Recorded whenever the publisher carries an agent — whoever pressed the last
  * button. Attribution is the scan the publisher approved, not the completion;
  * an owner who finished the documents alone was still brought in by somebody.
- * Once per publisher (`recordIncentiveOnce`), at the agent's tier,
- * PENDING_VERIFICATION for finance. Never blocks the completion: a rate that
- * cannot be priced is finance's problem, not the publisher's.
+ * Once per publisher (`recordIncentiveOnce`), PENDING_VERIFICATION for
+ * finance. Never blocks the completion: a rate that cannot be priced is
+ * finance's problem, not the publisher's.
+ *
+ * **CP-1 changed what it pays.** An agent on the quota model is already paid
+ * a salary that covers `dailyQuota` onboardings a day, so the ones inside
+ * that quota record nothing — the money has been paid. Past it, the
+ * commission is the planned unit cost plus the uplift, which is a fraction of
+ * the flat rate this used to pay. An agent with no pay record is not on the
+ * model and keeps the flat rate table exactly as before.
  */
 async function recordOnboardingCommission(publisher: {
   id: string;
@@ -253,13 +275,22 @@ async function recordOnboardingCommission(publisher: {
 }): Promise<OnboardingIncentive> {
   if (!publisher.agentId) return null;
   try {
+    const pay = await payForNextOnboarding(publisher.agentId);
+    // Inside the day's quota the salary already covers it: nothing to record.
+    if (pay.covered) return null;
+    if (pay.reason === 'UNPRICEABLE') return null;
     const tier = (await findAgentTier(publisher.agentId)) ?? '*';
     const incentive = await recordIncentiveOnce({
       agentId: publisher.agentId,
       event: 'PUBLISHER_ONBOARDED',
       tier,
       publisherId: publisher.id,
-      note: `Onboarded ${publisher.displayId ?? publisher.id}: ${publisher.name}`,
+      // CP-1: the amount the quota priced; absent, the flat rate table answers.
+      ...(pay.amount ? { amount: pay.amount } : {}),
+      note:
+        pay.reason === 'BEYOND_QUOTA'
+          ? `Onboarded ${publisher.displayId ?? publisher.id}: ${publisher.name} — beyond the day's quota of ${pay.quota}`
+          : `Onboarded ${publisher.displayId ?? publisher.id}: ${publisher.name}`,
       // Lot F: the agent's INCENTIVE_RECORDED notice names the account.
       notice: { partyName: publisher.name },
     });
@@ -368,9 +399,15 @@ async function mine(userId: string) {
  * as it does for the agent path, and `completeMyOnboarding` closes on the
  * strength of `submittedAt`, which the initiation stamps.
  */
-export async function initiateMyDigioKyc(userId: string) {
+export async function initiateMyDigioKyc(
+  userId: string,
+  start: { entityType?: KycEntityType | undefined; supports?: readonly string[] | undefined; req?: Request | undefined } = {},
+) {
   const publisher = await mine(userId);
-  return initiateDigioKyc(publisher.id, publisher.name, publisher.email ?? '', publisher.mobile);
+  // Phase D: `entityType` when the legal form is not known yet (409 ENTITY_TYPE_REQUIRED asks for it), or the upgrade.
+  // Cashfree Phase 1 (E-bis): the publisher's own start is the one that may be handed a Cashfree
+  // session, and only when the client said it can draw one (`supports`).
+  return startPublisherKyc(publisher, { byUserId: userId, entityType: start.entityType, req: start.req, self: true, supports: start.supports });
 }
 
 export async function myDigioKycStatus(userId: string) {
@@ -459,7 +496,7 @@ export async function completeMyOnboarding(userId: string) {
   // what completes an onboarding, on this path and at the desk alike. A
   // publisher whose documents are already in has given them along the way.
   if (!onboardingBasicsIn(publisher) && !publisher.kyc?.submittedAt) {
-    throw new ApiError(400, 'BAD_REQUEST', 'Your name, email, address and date of birth are needed first.');
+    throw new ApiError(400, 'BAD_REQUEST', 'Your name, email and address are needed first.');
   }
   const completed = await repository.completeOnboarding(publisher.id);
   await closeOnboardingGrants({ publisherId: publisher.id });
@@ -468,9 +505,9 @@ export async function completeMyOnboarding(userId: string) {
   return { ...(completed as object), incentive };
 }
 
-/** The four basics the readiness rule counts, off the row the KYC read joins. */
-function onboardingBasicsIn(publisher: { name: string | null; email: string | null; address: string | null; user?: { dateOfBirth?: Date | null } | null }): boolean {
-  return Boolean(publisher.name && publisher.email && publisher.address && publisher.user?.dateOfBirth);
+/** The basics the readiness rule counts, off the row the KYC read joins. AGE-1: the date of birth is not one of them. */
+function onboardingBasicsIn(publisher: { name: string | null; email: string | null; address: string | null }): boolean {
+  return Boolean(publisher.name && publisher.email && publisher.address);
 }
 
 /**

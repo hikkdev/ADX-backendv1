@@ -8,9 +8,11 @@ import { ApiError } from '../../shared/errors';
 import { logActivity } from '../../shared/audit';
 import { deleteStoredFile, openPrivateFile, uploadFile } from '../../shared/storage';
 import { prismaUploadsRepository as repository } from './prisma-uploads.repository';
-import { agentMayViewFile, disputePartyMayViewFile, supportPartyMayViewFile } from './file-access.port';
+import { agentMayViewFile, disputePartyMayViewFile, listingDocumentMayViewFile, supportPartyMayViewFile } from './file-access.port';
 import { KYC_PURPOSES, PURPOSE_FOLDER, isPrivatePurpose, type UploadPurpose } from './uploads.schema';
 import { normaliseAvatar, type AvatarCrop } from './avatar';
+import { canStamp, stampGeo, type GeoStamp } from './geo-stamp';
+import { SVG_MIME, assertSvgAllowed, cleanPublicImage } from './image-clean';
 
 export type IncomingFile = {
   /** Temp path multer wrote to. Always removed, success or failure. */
@@ -63,13 +65,39 @@ export async function storeUpload(
   incoming: IncomingFile,
   purpose: UploadPurpose,
   baseUrl: string,
-  options: { ownerUserId?: string | null; isAdmin?: boolean; crop?: AvatarCrop | null } = {},
+  options: { ownerUserId?: string | null; isAdmin?: boolean; crop?: AvatarCrop | null; geo?: GeoStamp | null } = {},
 ) {
-  await assertMayUploadFor({ userId, isAdmin: options.isAdmin ?? false }, options.ownerUserId);
-  // QR-7: a profile picture is normalised before it is stored — the
-  // person's square crop, 512 px, JPEG — and never kept as sent.
-  const file = purpose === 'AVATAR' ? await normaliseAvatar(incoming, options.crop ?? null) : incoming;
   const isPrivate = isPrivatePurpose(purpose);
+  let file = incoming;
+  const stamped = options.geo && canStamp(incoming.mimetype, purpose) ? options.geo : null;
+  const takenAt = stamped?.takenAt ?? new Date();
+  try {
+    await assertMayUploadFor({ userId, isAdmin: options.isAdmin ?? false }, options.ownerUserId);
+    // ST-1: an SVG is text and can carry script — brand files and the media
+    // library only, and nothing on the unsafe list (400 either way).
+    if (incoming.mimetype.toLowerCase() === SVG_MIME) await assertSvgAllowed(incoming, purpose);
+    // QR-7: a profile picture is normalised before it is stored — the
+    // person's square crop, 512 px, JPEG — and never kept as sent.
+    if (purpose === 'AVATAR') file = await normaliseAvatar(incoming, options.crop ?? null);
+    /*
+     * GC-1: a photo that asked for the GPS stamp is burned and tagged before
+     * it is stored. Opt-in per file, images only, never an avatar — and the
+     * fix is the phone's, sent beside the file, not read out of it.
+     *
+     * ST-1: every other PUBLIC image is re-encoded with no metadata before it
+     * is stored (`image-clean.ts`). A stamped photo is already that: the stamp
+     * re-encodes the picture and writes only its own GPS block, replacing
+     * whatever EXIF came in — so it is not encoded a second time. An avatar
+     * was stripped by its own normalisation; a private file is evidence and
+     * is stored as sent.
+     */
+    if (stamped) file = await stampGeo(file, { ...stamped, takenAt }, takenAt);
+    else if (!isPrivate && purpose !== 'AVATAR') file = await cleanPublicImage(file);
+  } catch (err) {
+    // Refused before anything was stored: the temp file goes with the refusal.
+    await Promise.all([...new Set([incoming.path, file.path])].map((p) => fs.promises.unlink(p).catch(() => {})));
+    throw err;
+  }
   const id = randomUUID().replace(/-/g, '');
   let url: string | null;
   let storageKey: string;
@@ -99,6 +127,7 @@ export async function storeUpload(
     visibility: isPrivate ? 'PRIVATE' : 'PUBLIC',
     ownerUserId: options.ownerUserId ?? null,
     storageKey,
+    geo: stamped ? { latitude: stamped.latitude, longitude: stamped.longitude, accuracyM: stamped.accuracy ?? null, takenAt } : null,
   });
 
   // QR-7: one avatar per person. The earlier ones go the moment the new one
@@ -192,6 +221,10 @@ const ownerOf = (file: UploadedFile) => file.ownerUserId ?? file.userId;
  * advertiser or agent the dispute is between, or their agent under a grant
  * — because evidence filed against somebody is theirs to see. Lot I: a
  * SUPPORT_ATTACHMENT is open to the requester of the ticket it sits on.
+ * ST-2: a LISTING_DOCUMENT — the venue papers and audience reports a
+ * listing is checked against — is open to the listing's publisher, the
+ * field agent sent to that listing, and the publisher's agent under a live
+ * grant, asked through the port after the owner, the desk and the grant.
  */
 async function mayView(file: UploadedFile, viewer: FileViewer): Promise<boolean> {
   if (file.visibility !== 'PRIVATE') return true;
@@ -204,6 +237,10 @@ async function mayView(file: UploadedFile, viewer: FileViewer): Promise<boolean>
   // Lot I: a support attachment is open to the thread's other side — the
   // requester, when ADX attached it (the desk was admitted above).
   if (file.purpose === 'SUPPORT_ATTACHMENT') return supportPartyMayViewFile(viewer.userId, file.id);
+  // ST-2: a venue paper or an audience report is the listing's — its
+  // publisher, the field agent sent to it, and an agent holding a live grant
+  // on the publisher; the port says which listing.
+  if (file.purpose === 'LISTING_DOCUMENT') return listingDocumentMayViewFile(viewer.userId, file.id);
   return false;
 }
 

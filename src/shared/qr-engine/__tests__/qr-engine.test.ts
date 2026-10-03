@@ -37,7 +37,7 @@ const genqrConfig = (over: Record<string, unknown> = {}) => ({
   provider: 'GENQR' as const,
   baseUrl: 'https://genqr.example',
   apiKey: KEY,
-  shortBaseUrl: 'https://go.adx.example',
+  shortBaseUrl: 'https://go.adx.in',
   style: { foregroundColor: '#213333', dotStyle: 'rounded' as const },
   ...over,
 });
@@ -83,7 +83,7 @@ describe('LOCAL', () => {
     expect(await qrEngineInForce()).toBe('LOCAL');
     expect(await dynamicCodesAvailable()).toBe(false);
 
-    const png = await renderPrinted({ content: 'https://adx.example/t/ABC23456', format: 'png', size: 200 });
+    const png = await renderPrinted({ content: 'https://adx.in/t/ABC23456', format: 'png', size: 200 });
     expect(png.engine).toBe('LOCAL');
     expect(png.styled).toBe(false);
     expect(png.contentType).toBe('image/png');
@@ -98,7 +98,7 @@ describe('LOCAL', () => {
 
   it('registering dynamic codes is 503 with no engine hosting them', async () => {
     integrations.getEffectiveQrEngineConfig.mockResolvedValue(localConfig());
-    await expect(registerDynamicCodes([{ name: 'x', target: 'https://adx.example/t/X' }])).rejects.toMatchObject({
+    await expect(registerDynamicCodes([{ name: 'x', target: 'https://adx.in/t/X' }])).rejects.toMatchObject({
       statusCode: 503,
       code: 'INTEGRATION_NOT_CONFIGURED',
     });
@@ -156,33 +156,33 @@ describe('GENQR — drawing', () => {
   it("a hosted code's image is GenQR's; on failure the STORED short URL is drawn locally, never /t/", async () => {
     integrations.getEffectiveQrEngineConfig.mockResolvedValue(genqrConfig());
     stubGenqr({ '/api/v1/qrcodes/g1/image.svg': { bytes: '<svg>g1</svg>', contentType: 'image/svg+xml' } });
-    const ok = await renderDynamic({ engineCodeId: 'g1', shortUrl: 'https://go.adx.example/r/ABC' }, 'https://adx.example/t/ABC', 'svg');
+    const ok = await renderDynamic({ engineCodeId: 'g1', shortUrl: 'https://go.adx.in/r/ABC' }, 'https://adx.in/t/ABC', 'svg');
     expect(ok.engine).toBe('GENQR');
     expect(ok.body.toString('utf8')).toBe('<svg>g1</svg>');
 
     stubGenqr({});
-    const fallback = await renderDynamic({ engineCodeId: 'g1', shortUrl: 'https://go.adx.example/r/ABC' }, 'https://adx.example/t/ABC', 'svg');
+    const fallback = await renderDynamic({ engineCodeId: 'g1', shortUrl: 'https://go.adx.in/r/ABC' }, 'https://adx.in/t/ABC', 'svg');
     expect(fallback.engine).toBe('LOCAL');
     // The SVG's path data cannot be read back for the URL, so pin the decision
     // through the local renderer by comparing with a direct local draw.
     const { renderLocal } = await import('../local');
-    const direct = await renderLocal({ content: 'https://go.adx.example/r/ABC', format: 'svg' });
+    const direct = await renderLocal({ content: 'https://go.adx.in/r/ABC', format: 'svg' });
     expect(fallback.body.equals(direct.body)).toBe(true);
-    const asT = await renderLocal({ content: 'https://adx.example/t/ABC', format: 'svg' });
+    const asT = await renderLocal({ content: 'https://adx.in/t/ABC', format: 'svg' });
     expect(fallback.body.equals(asT.body)).toBe(false);
   });
 
   it('a code never registered with the engine is drawn as /t/ locally without a call', async () => {
     integrations.getEffectiveQrEngineConfig.mockResolvedValue(genqrConfig());
     const { fetchMock } = stubGenqr({});
-    const out = await renderDynamic({ engineCodeId: null, shortUrl: null }, 'https://adx.example/t/ABC', 'png');
+    const out = await renderDynamic({ engineCodeId: null, shortUrl: null }, 'https://adx.in/t/ABC', 'png');
     expect(out.engine).toBe('LOCAL');
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
 describe('GENQR — dynamic codes', () => {
-  const row = (i: number) => ({ id: `g${i}`, shortCode: `SC${i}`, shortUrl: `https://go.adx.example/r/SC${i}`, isDynamic: true });
+  const row = (i: number) => ({ id: `g${i}`, shortCode: `SC${i}`, shortUrl: `https://go.adx.in/r/SC${i}`, isDynamic: true });
 
   it('mints one code per request, in order, as dynamic url codes with the stored style', async () => {
     integrations.getEffectiveQrEngineConfig.mockResolvedValue(genqrConfig());
@@ -193,18 +193,18 @@ describe('GENQR — dynamic codes', () => {
       },
     });
     const out = await registerDynamicCodes([
-      { name: 'CMP-1 / spot A', target: 'https://adx.example/t/AAAA2345' },
-      { name: 'CMP-1 / spot B', target: 'https://adx.example/t/BBBB2345' },
+      { name: 'CMP-1 / spot A', target: 'https://adx.in/t/AAAA2345' },
+      { name: 'CMP-1 / spot B', target: 'https://adx.in/t/BBBB2345' },
     ]);
     expect(out).toEqual([
-      { engineCodeId: 'g0', shortCode: 'SC0', shortUrl: 'https://go.adx.example/r/SC0' },
-      { engineCodeId: 'g1', shortCode: 'SC1', shortUrl: 'https://go.adx.example/r/SC1' },
+      { engineCodeId: 'g0', shortCode: 'SC0', shortUrl: 'https://go.adx.in/r/SC0' },
+      { engineCodeId: 'g1', shortCode: 'SC1', shortUrl: 'https://go.adx.in/r/SC1' },
     ]);
     const sent = JSON.parse(String(calls[0]!.init.body));
     expect(sent.items[0]).toEqual({
       name: 'CMP-1 / spot A',
       type: 'url',
-      content: 'https://adx.example/t/AAAA2345',
+      content: 'https://adx.in/t/AAAA2345',
       isDynamic: true,
       style: { foregroundColor: '#213333', dotStyle: 'rounded' },
     });
@@ -218,7 +218,7 @@ describe('GENQR — dynamic codes', () => {
         return { status: 201, json: { data: items.map((_, i) => row(i)) } };
       },
     });
-    const many = Array.from({ length: GENQR_MAX_BATCH + 7 }, (_, i) => ({ name: `n${i}`, target: `https://adx.example/t/${i}` }));
+    const many = Array.from({ length: GENQR_MAX_BATCH + 7 }, (_, i) => ({ name: `n${i}`, target: `https://adx.in/t/${i}` }));
     const out = await registerDynamicCodes(many);
     expect(out).toHaveLength(GENQR_MAX_BATCH + 7);
     expect(calls).toHaveLength(2);
@@ -231,8 +231,8 @@ describe('GENQR — dynamic codes', () => {
     stubGenqr({ '/api/v1/qrcodes/batch': { status: 201, json: { data: [row(0)] } } });
     await expect(
       registerDynamicCodes([
-        { name: 'a', target: 'https://adx.example/t/A' },
-        { name: 'b', target: 'https://adx.example/t/B' },
+        { name: 'a', target: 'https://adx.in/t/A' },
+        { name: 'b', target: 'https://adx.in/t/B' },
       ]),
     ).rejects.toMatchObject({ statusCode: 502 });
   });
@@ -240,12 +240,12 @@ describe('GENQR — dynamic codes', () => {
   it('a quota refusal is 409, a missing scope 503 with the scope named, and the key is never in the message', async () => {
     integrations.getEffectiveQrEngineConfig.mockResolvedValue(genqrConfig());
     stubGenqr({ '/api/v1/qrcodes/batch': { status: 403, json: { error: 'Quota exceeded', code: 'quota_exceeded' } } });
-    await expect(registerDynamicCodes([{ name: 'a', target: 'https://adx.example/t/A' }])).rejects.toMatchObject({ statusCode: 409 });
+    await expect(registerDynamicCodes([{ name: 'a', target: 'https://adx.in/t/A' }])).rejects.toMatchObject({ statusCode: 409 });
 
     stubGenqr({ '/api/v1/qrcodes/batch': { status: 403, json: { error: 'nope', code: 'insufficient_scope', required: 'qrcodes:write' } } });
     let caught: unknown;
     try {
-      await registerDynamicCodes([{ name: 'a', target: 'https://adx.example/t/A' }]);
+      await registerDynamicCodes([{ name: 'a', target: 'https://adx.in/t/A' }]);
     } catch (cause) {
       caught = cause;
     }
@@ -313,7 +313,7 @@ describe('the probe', () => {
     integrations.getEffectiveQrEngineConfig.mockResolvedValue(genqrConfig());
     stubGenqr({
       '/api/v1/me': {
-        json: { email: 'ops@adx.example', plan: { id: 'enterprise', name: 'Enterprise', apiAccessEnabled: true }, scope: 'qrcodes:read,qrcodes:write', redirectBase: 'https://genqr.example' },
+        json: { email: 'ops@adx.in', plan: { id: 'enterprise', name: 'Enterprise', apiAccessEnabled: true }, scope: 'qrcodes:read,qrcodes:write', redirectBase: 'https://genqr.example' },
       },
     });
     const verdict = await testQrEngine();
@@ -323,22 +323,22 @@ describe('the probe', () => {
       reachable: true,
       authorized: true,
       status: 200,
-      account: { email: 'ops@adx.example', plan: 'Enterprise', apiAccess: true, scope: 'qrcodes:read,qrcodes:write', redirectBase: 'https://genqr.example' },
+      account: { email: 'ops@adx.in', plan: 'Enterprise', apiAccess: true, scope: 'qrcodes:read,qrcodes:write', redirectBase: 'https://genqr.example' },
       scopesMissing: ['analytics:read', 'render'],
       shortBaseMatches: false,
     });
     expect(verdict.message).toContain('lacks analytics:read, render');
-    expect(verdict.message).toContain('ADX expects https://go.adx.example');
+    expect(verdict.message).toContain('ADX expects https://go.adx.in');
     expect(verdict.message).not.toContain(KEY);
   });
 
   it('a wildcard key holds every scope and a matching base is a clean verdict', async () => {
     integrations.getEffectiveQrEngineConfig.mockResolvedValue(genqrConfig());
-    stubGenqr({ '/api/v1/me': { json: { email: 'ops@adx.example', plan: { name: 'Enterprise', apiAccessEnabled: true }, scope: '*', redirectBase: 'https://go.adx.example/' } } });
+    stubGenqr({ '/api/v1/me': { json: { email: 'ops@adx.in', plan: { name: 'Enterprise', apiAccessEnabled: true }, scope: '*', redirectBase: 'https://go.adx.in/' } } });
     const verdict = await testQrEngine();
     expect(verdict.scopesMissing).toEqual([]);
     expect(verdict.shortBaseMatches).toBe(true);
-    expect(verdict.message).toBe('GenQR answered as ops@adx.example on the Enterprise plan.');
+    expect(verdict.message).toBe('GenQR answered as ops@adx.in on the Enterprise plan.');
   });
 
   it('a refused key is a verdict, not a throw', async () => {

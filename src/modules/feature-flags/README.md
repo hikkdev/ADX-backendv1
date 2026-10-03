@@ -31,16 +31,21 @@ A feature is declared where it is built.
   (a process-wide Map, no I/O); `registry.ts` here is the module's door to it.
   It sits in `shared/` so a test that mocks this module cannot erase a
   declaration.
-- **Console and apps**: `features.manifest.json` at each package root
-  (`adx-adminUI-sai`, `mobile/user-app`, `mobile/agent-app`) maps route groups
-  or feature folders to keys. A key the backend declares only needs its
+- **Console, apps and website**: `features.manifest.json` at each package
+  root (`adx-adminUI-sai`, `mobile/user-app`, `mobile/agent-app`, `website`)
+  maps route groups, feature folders or website folders to keys. A key the backend declares only needs its
   `paths` — the surface is added to the backend's declaration; a key only that
   package knows carries owner, kind, launch and description too. Each package
   runs `scripts/check-features.mjs` (`npm run check:features`, chained into
   `npm run lint`): every `src/app/(admin)/**/page.tsx`, every
-  `src/features/*` folder, maps to a key, and no declared path is stale.
+  `src/features/*` folder, every website folder under `src/app` and
+  `src/components` (and its root route files — home, 404, sitemap, robots)
+  maps to a key, and no declared path is stale. The manifests fold in the
+  order `MANIFEST_FILES` lists them, so a later one may name a key an
+  earlier one introduced with its paths only (the website names the user
+  app's `onboarding.ladder`).
 - **The document**: `npm run features:sync` folds the backend declarations and
-  the three manifests into `docs/feature-registry.json` (committed, sorted,
+  the four manifests into `docs/feature-registry.json` (committed, sorted,
   no timestamp). `npm run features:check` says whether it is behind.
 - **Boot**: `ensureFeatureRegistry()` (from `bootstrap/register-modules`, not
   awaited, skipped under `NODE_ENV=test`) folds the three Lot A rows under
@@ -102,7 +107,7 @@ under each for one release.
 | POST | `/api/v1/flags/bulk` | ADMIN | L-B: `{ keys: string[] (1-200, distinct; aliases accepted), patch: { enabled?, rolloutPercent?, variant?, rollout? } (the same patch `PATCH /:key` takes, at least one field), note (required, 4-500 chars — a bulk move without a reason is the thing an incident review cannot reconstruct) }`. Applies the patch to every key in **one transaction** through the same path a single write takes, so `lastGoodState`, the `FeatureFlagChange` row (carrying the note) and the silent FLAGS_CHANGED push happen per key exactly as `PATCH /:key` does. The whole batch is refused with nothing written on a 404 naming the unknown keys (`{ keys }`) or a 400 naming the keys whose `variants` do not include the asked variant (`{ variant, keys: [{ key, variants }] }`). Answers `{ updated: FlagView[], skipped: [{ key, reason }] }` — `skipped` holds a key already at the asked position (no change row, `lastGoodState` untouched) and the later of an alias and its key named together. Audit: one `FEATURE_FLAG_CHANGED` per key written, with the diff and `{ note, bulk: true, changeId }`, plus one `FLAGS_BULK_UPDATED` summary row carrying `{ note, patch, keys, updated, skipped }` |
 | POST | `/api/v1/flags/bulk/rollback` | ADMIN + `system.flags` | L-B: `{ keys, note }` (as above) — every key back to its `lastGoodState` through the rollback path, in one transaction, each with `rollbackOfId` and the port fired; a key that has never moved is skipped with the reason `/:key/rollback` would 409 with; unknown keys refuse the batch. Same answer shape. Audit: one `FEATURE_FLAG_ROLLED_BACK` per key restored (`{ restored, rollbackOfId, note, bulk: true }`) plus one `FLAGS_BULK_ROLLED_BACK` summary row `{ note, keys, updated, skipped }` |
 | GET | `/api/v1/flags/:key/changes` | ADMIN | that flag's history, newest first, capped at 50 |
-| GET | `/api/v1/app/flags` | authenticate | for the caller: `{ key: { enabled, variant } }` for every feature on an app surface (or an unclassified manual row), plus `{ legacyKey: boolean }` for the three aliases |
+| GET | `/api/v1/app/flags` | authenticate | for the caller: `{ key: { enabled, variant } }` for every feature on an app surface or the website (which makes the same read; a website-only key is answered to it since 28 Sep 2026), or an unclassified manual row, plus `{ legacyKey: boolean }` for the three aliases |
 
 `:key` accepts an alias, and so does every entry of a bulk `keys` list.
 `/flags/bulk` and `/flags/bulk/rollback` are mounted ahead of `/:key`, or

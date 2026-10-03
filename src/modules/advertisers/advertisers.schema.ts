@@ -1,9 +1,12 @@
+import { rosterStatusSchema } from '../../shared/party-status';
 import { z } from 'zod';
 import { ONBOARDING_SOURCES } from '../../shared/onboarding';
 import { listQuerySchema } from '../../shared/pagination';
 import { dateOfBirthSchema, genderSchema, upperEnum } from '../../shared/validation';
+import { kycEntityTypeSchema, kycQueueStateSchema } from '../../shared/kyc-state';
 
-export const advertiserTypeSchema = z.enum(['INDIVIDUAL', 'COMMERCIAL', 'NGO', 'AGENCY']);
+export const ADVERTISER_TYPES = ['INDIVIDUAL', 'COMMERCIAL', 'NGO', 'AGENCY'] as const;
+export const advertiserTypeSchema = z.enum(ADVERTISER_TYPES);
 
 /**
  * Lot G (Q119): the industry picklist — a constant list in code, served by
@@ -83,14 +86,21 @@ const registerFields = z.object({
   onBehalf: z.boolean().optional(),
   email: z.string().email().max(160).optional(),
   type: advertiserTypeSchema.optional(),
+  /** The precise legal form (1 Oct 2026): chosen at the desk beside the account type. */
+  entityType: kycEntityTypeSchema.optional(),
   companyName: z.string().min(2).max(160).optional(),
+  /** WG-1: null clears a GSTIN entered by mistake. */
   gstin: z
     .string()
     .regex(/^\d{2}[A-Z]{5}\d{4}[A-Z]\d[Z][A-Z\d]$/, 'Enter a valid 15-character GSTIN')
+    .nullable()
     .optional(),
   billingAddress: z.string().min(5).max(400).optional(),
   city: z.string().min(2).max(80).optional(),
   state: z.string().min(2).max(80).optional(),
+  /** AD-1 (DR 12 board 04): the PIN and the country on the billing address; null clears. */
+  postalCode: z.string().trim().regex(/^\d{6}$/, 'A six-digit PIN').nullable().optional(),
+  country: z.string().trim().max(60).nullable().optional(),
   /** Lot G (Q119): one of `ADVERTISER_INDUSTRIES`. */
   industry: advertiserIndustrySchema.optional(),
   ...personFields,
@@ -120,15 +130,34 @@ export function deskOnboarding(
 
 export const registerAdvertiserSchema = registerFields.superRefine(deskOnboarding);
 
-/** QR-15: the roster's cuts beside `q` — the door, and the person who opened it. */
+/**
+ * QR-15: the roster's cuts beside `q` — the door, and the person who opened it.
+ * 29 Sep 2026 (the party rosters, made uniform): the same three cuts every
+ * party desk takes — the KYC state the queue and the party page print, the
+ * type, and the city (a catalogue slug, or a name for the rows keyed to nothing).
+ */
 export const advertiserRosterQuerySchema = z.object({
   onboardedVia: upperEnum(ONBOARDING_SOURCES).optional(),
   onboardedById: z.string().trim().min(1).max(60).optional(),
+  kycState: kycQueueStateSchema,
+  type: upperEnum(ADVERTISER_TYPES).optional(),
+  city: z.string().trim().min(1).max(80).optional(),
+  /** Account lifecycle (2 Oct 2026): ACTIVE (the default), SUSPENDED, DEACTIVATED, CLOSED or ALL. */
+  status: rosterStatusSchema,
 });
 
 export const updateProfileSchema = registerFields
   .omit({ mobile: true, onBehalf: true, industry: true })
-  .extend({ industry: advertiserIndustrySchema.nullable().optional() })
+  .extend({
+    industry: advertiserIndustrySchema.nullable().optional(),
+    /**
+     * Phase D (1 Oct 2026): the legal form the KYC verifies — any of the
+     * eight; null clears it back to what `type` says. A verified advertiser
+     * may only take the upgrade (an individual's business), which sends a
+     * fresh Digio request; anything else is 409 KYC_LOCKED.
+     */
+    entityType: kycEntityTypeSchema.nullable().optional(),
+  })
   .partial()
   .refine((v) => Object.keys(v).length > 0, { message: 'Nothing to change' });
 

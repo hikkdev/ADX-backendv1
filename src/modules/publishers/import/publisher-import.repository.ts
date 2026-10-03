@@ -9,6 +9,8 @@ export type ImportPublisherFields = {
   address?: string;
   city?: string;
   state?: string;
+  /** Onboarding addresses (1 Oct 2026): the address's PIN code. */
+  postalCode?: string;
   contactName?: string;
   contactMobile?: string;
   contactEmail?: string;
@@ -35,6 +37,7 @@ export type MatchedPublisher = {
   address: string | null;
   city: string | null;
   state: string | null;
+  postalCode: string | null;
   contactName: string | null;
   contactMobile: string | null;
   contactEmail: string | null;

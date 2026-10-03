@@ -1,5 +1,5 @@
 import { prisma } from '../../../shared/database';
-import type { User, WithdrawalStatus } from '../../../shared/database';
+import type { UserRead, WithdrawalStatus } from '../../../shared/database';
 
 /**
  * The reads the mobile change needs before it moves the identity.
@@ -9,10 +9,10 @@ import type { User, WithdrawalStatus } from '../../../shared/database';
  * asking it is a read, not a decision. See the service for why it is asked.
  */
 export interface MobileChangeRepository {
-  findUser(userId: string): Promise<User | null>;
-  findUserByMobile(mobile: string): Promise<User | null>;
+  findUser(userId: string): Promise<UserRead | null>;
+  findUserByMobile(mobile: string): Promise<UserRead | null>;
   countWithdrawalsInFlight(userId: string, statuses: WithdrawalStatus[]): Promise<number>;
-  changeMobile(userId: string, mobile: string): Promise<User>;
+  changeMobile(userId: string, mobile: string): Promise<UserRead>;
 }
 
 export const prismaMobileChangeRepository: MobileChangeRepository = {

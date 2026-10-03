@@ -28,6 +28,7 @@ vi.mock('../../advertisers', () => ({}));
 vi.mock('../../publishers', () => ({}));
 vi.mock('../../agents', () => ({}));
 vi.mock('../../print-partners', () => ({}));
+vi.mock('../../campaigns', () => ({ WAITING_REASONS: [], launchQueueSummary: async () => ({ total: 0, byReason: {} }) }));
 
 import { SECTION_OVERVIEW_CACHE_SECONDS, sectionOverview, sectionOverviewCacheKey, type EmployeesOverviewSection } from '../section-overviews.service';
 

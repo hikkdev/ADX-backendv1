@@ -1,13 +1,14 @@
 import type { Request, Response } from 'express';
 import { ApiError } from '../../../shared/errors';
+import { includesInactive } from '../../../shared/party-status';
 import type { KycStatus } from '../../../shared/database';
 import {
   assignCaseSchema,
   assignedToSchema,
   documentDecisionSchema,
   escalatedFilterSchema,
+  kycEntityRequestSchema,
   kycEscalateSchema,
-  kycRequestSchema,
   pagination,
   requestedFilterSchema,
   reuploadRequestSchema,
@@ -36,8 +37,9 @@ import {
   reviewAdvertiserKyc,
   updateAdvertiserKycById,
 } from './advertiser-kyc.service';
-import { advertiserDigioStatus, initiateAdvertiserDigioKyc, restartAdvertiserDigioKyc } from './advertiser-digio.service';
+import { advertiserDigioStatus, restartAdvertiserDigioKyc, startAdvertiserKyc } from './advertiser-digio.service';
 import { getAdvertiserForUser } from '../../advertisers';
+import { kycStartBodySchema, type KycStartBody } from '../../../shared/kyc-state';
 
 export async function createAdvertiserKycHandler(req: Request, res: Response): Promise<void> {
   const parsed = createAdvertiserKycSchema.safeParse(req.body);
@@ -78,6 +80,8 @@ export async function getAllAdvertiserKycsHandler(req: Request, res: Response): 
     ...(escalated.success && escalated.data !== undefined ? { escalated: escalated.data } : {}),
     ...(requested.success && requested.data !== undefined ? { requested: requested.data } : {}),
     ...(advertiserId.success && advertiserId.data ? { advertiserId: advertiserId.data } : {}),
+    // Account lifecycle (2 Oct 2026): `?include=inactive` puts the suspended, deactivated and closed back on the queue.
+    ...(includesInactive(req.query['include']) ? { includeInactive: true } : {}),
   };
 
   // Absent means "what is late first"; `newest` is the arrival order.
@@ -145,7 +149,8 @@ export async function updateAdvertiserKycByIdHandler(req: Request, res: Response
 
 // POST /advertiser-kyc/:id/request — Lot N: the desk asks the advertiser for their KYC.
 export async function requestAdvertiserKycHandler(req: Request, res: Response): Promise<void> {
-  const parsed = kycRequestSchema.safeParse(req.body ?? {});
+  // Phase D: `{ channel?, note?, entityType? }`.
+  const parsed = kycEntityRequestSchema.safeParse(req.body ?? {});
   if (!parsed.success) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid request', parsed.error.flatten());
   res.json({ success: true, data: await requestAdvertiserKyc(req.params['id'] as string, parsed.data, req.user!.sub, req) });
 }
@@ -170,17 +175,29 @@ export async function deleteAdvertiserKycHandler(req: Request, res: Response): P
 
 /* ── U7, demand side: Digio from the advertiser's own phone ──────────── */
 
+// POST /advertiser-kyc/me/digio/initiate — body `{ entityType?, supports? }` (Phase D; Cashfree Phase 1 —
+// the advertiser's own start is the one that may be handed a Cashfree session, and only when the
+// client said it can draw one).
 export async function initiateMyAdvertiserDigioHandler(req: Request, res: Response): Promise<void> {
+  const body = parseStartBody(req.body);
   const advertiser = await getAdvertiserForUser(req.user!.sub);
   if (!advertiser) throw new ApiError(404, 'NOT_FOUND', 'Advertiser profile not found. Complete registration first.');
   // N3-B: the session is keyed by the caller's profile.
-  const session = await initiateAdvertiserDigioKyc(advertiser);
+  const session = await startAdvertiserKyc(advertiser, { byUserId: req.user!.sub, entityType: body.entityType, req, self: true, supports: body.supports });
   res.json({ success: true, data: session });
 }
 
-// POST /advertiser-kyc/:id/digio/restart — the desk asks Digio again for this row.
+// POST /advertiser-kyc/:id/digio/restart — the desk asks Digio again for this row; body `{ entityType? }` (Phase D).
 export async function restartAdvertiserDigioHandler(req: Request, res: Response): Promise<void> {
-  res.json({ success: true, data: await restartAdvertiserDigioKyc(req.params['id'] as string, req.user!.sub, req) });
+  const body = parseStartBody(req.body);
+  res.json({ success: true, data: await restartAdvertiserDigioKyc(req.params['id'] as string, req.user!.sub, req, body) });
+}
+
+/** Phase D: `{ entityType? }` on a Digio start — an unknown value is 400 before anything is looked up. */
+function parseStartBody(body: unknown): KycStartBody {
+  const parsed = kycStartBodySchema.safeParse(body ?? {});
+  if (!parsed.success) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid request', parsed.error.flatten());
+  return parsed.data;
 }
 
 export async function myAdvertiserDigioStatusHandler(req: Request, res: Response): Promise<void> {

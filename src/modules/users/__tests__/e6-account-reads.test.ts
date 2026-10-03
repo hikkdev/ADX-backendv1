@@ -55,7 +55,7 @@ const user = (over: Record<string, unknown> = {}) =>
     id: 'usr_1',
     mobile: '+919845012210',
     name: 'Asha',
-    email: 'asha@adx.co',
+    email: 'asha@adx.in',
     avatarUrl: null,
     passwordHash: 'x',
     language: 'en',
@@ -155,13 +155,13 @@ describe('POST /users/:id/reset-password', () => {
     const req = { params: { id: 'usr_1' }, user: { sub: 'adm_1' }, ip: '127.0.0.1', headers: {} } as never;
     const res = response();
     await sendResetLink(req, res as never);
-    expect(auth.sendPasswordResetLink).toHaveBeenCalledWith('usr_1', 'asha@adx.co');
+    expect(auth.sendPasswordResetLink).toHaveBeenCalledWith('usr_1', 'asha@adx.in');
     expect(audit.logActivity).toHaveBeenCalledWith(
       'usr_1',
       'PASSWORD_RESET_SENT_BY_ADMIN',
-      expect.objectContaining({ targetType: 'User', targetId: 'usr_1', metadata: { sentBy: 'adm_1', email: 'asha@adx.co' } }),
+      expect.objectContaining({ targetType: 'User', targetId: 'usr_1', metadata: { sentBy: 'adm_1', email: 'asha@adx.in' } }),
     );
-    expect(res.json).toHaveBeenCalledWith({ success: true, data: { message: 'Reset link sent', email: 'asha@adx.co' } });
+    expect(res.json).toHaveBeenCalledWith({ success: true, data: { message: 'Reset link sent', email: 'asha@adx.in' } });
   });
 
   it('409s an account with no email, and sends nothing', async () => {

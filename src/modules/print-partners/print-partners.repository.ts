@@ -1,4 +1,6 @@
+import type { KycQueueState } from '../../shared/kyc-state';
 import type {
+  OnboardingSource,
   Prisma,
   PrintJob,
   PrintJobStatus,
@@ -56,6 +58,8 @@ export const QUOTE_STATUSES = ['SUBMITTED', 'ACCEPTED', 'REJECTED', 'WITHDRAWN']
 
 export type NewPartner = {
   displayId: string;
+  /** 28 Sep 2026: the person's own ADX-… id for the account opened with the partner. */
+  userDisplayId?: string;
   /** Normalised — +91 and ten digits. Unique on User and copied onto the partner. */
   mobile: string;
   name: string;
@@ -68,6 +72,9 @@ export type NewPartner = {
   city?: string | null;
   /** Lot X-B: the `City` row `city` denotes, stamped by the service through `pricing.withCityKey`; null for a typed town. */
   cityId?: string | null;
+  /** Onboarding addresses (1 Oct 2026): the shop address's state and PIN code. */
+  state?: string | null;
+  postalCode?: string | null;
   latitude?: number | null;
   longitude?: number | null;
   capabilities?: string[];
@@ -87,6 +94,9 @@ export type PartnerPatch = Partial<{
   city: string | null;
   /** Lot X-B: rides with `city` — the service stamps it, a caller never sends it. */
   cityId: string | null;
+  /** Onboarding addresses (1 Oct 2026): the shop address's state and PIN code. */
+  state: string | null;
+  postalCode: string | null;
   latitude: number | null;
   longitude: number | null;
   capabilities: string[];
@@ -110,13 +120,44 @@ export type PartnerListFilter = {
   city?: string;
   /** Lot X-B: the key `city` resolved to — rows match on it, or on the spelling for the rows whose key is null. */
   cityId?: string | null;
-  /** Undefined lists both. */
+  /** Undefined lists both. `status` wins when both are sent. */
   active?: boolean;
+  /**
+   * Account lifecycle (2 Oct 2026): the Status every party roster takes —
+   * ACTIVE (switched on, account not closed), DEACTIVATED (off the roster,
+   * not closed), CLOSED (the account behind it is closed) or ALL. A print
+   * partner has no scoped suspension, so there is no SUSPENDED. Undefined
+   * leaves the cut to `active`.
+   */
+  status?: PrintPartnerRosterStatus;
   /** PP-1: only the shops that applied from the app and are not yet activated. */
   applied?: boolean;
+  /**
+   * 29 Sep 2026 (the party rosters, made uniform): the door the shop came
+   * through. A partner keeps no provenance stamp; the door is read off what
+   * the row does keep — SELF applied from the app (`appliedAt`), IMPORT was
+   * created by a party import (its CREATED import row), DESK is the rest.
+   * AGENT and QR are doors no shop comes through, so they match nothing.
+   */
+  onboardedVia?: OnboardingSource;
+  /** 29 Sep 2026: the KYC state the queue and the partner page print (`shared/kyc-state`). */
+  kycState?: KycQueueState;
   page: number;
   pageSize: number;
 };
+
+/** Account lifecycle (2 Oct 2026): the states a print partner can be in — the row's switch and the account's closure. */
+export const PRINT_PARTNER_ACCOUNT_STATES = ['ACTIVE', 'DEACTIVATED', 'CLOSED'] as const;
+export type PrintPartnerAccountState = (typeof PRINT_PARTNER_ACCOUNT_STATES)[number];
+/** `?status=` on `GET /print-partners`; ALL is everyone. */
+export type PrintPartnerRosterStatus = PrintPartnerAccountState | 'ALL';
+
+/**
+ * 29 Sep 2026: a roster row — the partner, its jobs counted, and when a party
+ * import created it (null when none did). 2 Oct 2026: and its account state,
+ * read with the shared `accountStateOf`.
+ */
+export type PartnerRosterRow = PartnerRow & { jobCount: number; importedAt: Date | null; accountState: PrintPartnerAccountState };
 
 /** Lot H: the partners a quote request may reach — active, taking requests. */
 export type ReachFilter = {
@@ -162,6 +203,8 @@ export type JobPatch = Partial<{
 /** Lot H: the partner's own job list — the list contract, filtered on status. */
 export type PartnerJobsFilter = {
   status?: readonly PrintJobStatus[];
+  /** 26 Sep 2026: the partner's job for one order — how an ORDER notice opens the job. */
+  orderId?: string;
   page: number;
   pageSize: number;
 };
@@ -173,6 +216,8 @@ export type PartnerJobsFilter = {
  */
 export type OrderForPrint = {
   id: string;
+  /** 26 Sep 2026: the booking id the partner is told by phone and on paper (`BKG-…`); null on an order from before the ids. */
+  displayId: string | null;
   status: string;
   campaignName: string | null;
   designUrl: string | null;
@@ -264,7 +309,10 @@ export interface PrintPartnersRepository {
   updatePartner(id: string, patch: PartnerPatch): Promise<PartnerRow>;
   /** Lot H: the sign-in switch on the account behind the partner. */
   setUserActive(userId: string, active: boolean): Promise<void>;
-  listPartners(filter: PartnerListFilter): Promise<{ items: PartnerRow[]; total: number; counts: Record<string, number> }>;
+  /** `statusCounts`: partners per account state over the cuts, with the status (and `active`) facet removed. */
+  listPartners(
+    filter: PartnerListFilter,
+  ): Promise<{ items: PartnerRosterRow[]; total: number; counts: Record<string, number>; statusCounts: Record<PrintPartnerAccountState, number> }>;
   /**
    * Lot H: the active partners that accept quote requests — in the city
    * named (Lot X-L: by its key when it resolved, the spelling for rows keyed
@@ -276,8 +324,8 @@ export interface PrintPartnersRepository {
   listPartnerFiles(userId: string, purpose: string, limit: number): Promise<PartnerFileRow[]>;
   /** G13-B: files by id — the invoices an admin uploaded on the partner's behalf, named on the audit rows. */
   findFilesByIds(ids: readonly string[]): Promise<PartnerFileRow[]>;
-  /** G13-B: when the accounts behind these partners last signed in — `User.lastLoginAt`, by user id. */
-  findLastLogins(userIds: readonly string[]): Promise<{ userId: string; lastLoginAt: Date | null }[]>;
+  /** G13-B: when the accounts behind these partners last signed in — `User.lastLoginAt`, by user id — and (28 Sep 2026) the person's own ADX-… id. */
+  findLastLogins(userIds: readonly string[]): Promise<{ userId: string; lastLoginAt: Date | null; displayId?: string | null }[]>;
   /** O-B: `{ id, label, displayId }` per id in one query — the section overview names its top partners with it. */
   findLabelsByIds(ids: readonly string[]): Promise<{ id: string; label: string; displayId: string | null }[]>;
 
@@ -297,6 +345,8 @@ export interface PrintPartnersRepository {
   findOrderForPrint(orderId: string): Promise<OrderForPrint | null>;
   /** Lot H: the same for a page of jobs, in one read. */
   findOrdersForPrint(orderIds: readonly string[]): Promise<OrderForPrint[]>;
+  /** 26 Sep 2026: the booking id (`BKG-…`) per order id, one read — for the quote requests and the earnings entries. */
+  orderDisplayIds(orderIds: readonly string[]): Promise<Map<string, string | null>>;
 
   /* ── Quote requests and quotes (Lot H) ───────────────────────── */
   createQuoteRequest(data: NewQuoteRequest): Promise<QuoteRequestWithQuotes>;

@@ -18,7 +18,9 @@ export async function getAllAgentsHandler(req: Request, res: Response): Promise<
   const parsed = listAgentsQuerySchema.safeParse(req.query);
   if (!parsed.success) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid query', parsed.error.flatten());
 
-  const { limit, offset, ...filter } = parsed.data;
+  // 29 Sep 2026: the door and the type arrive under the names every party roster sends — `onboardedVia` is the profile's `sourceKind`, `type` its side.
+  const { limit, offset, onboardedVia, type, ...rest } = parsed.data;
+  const filter = { ...rest, ...(onboardedVia ? { sourceKind: onboardedVia } : {}), ...(type ? { side: type } : {}) };
   const { items, meta } = await listAgents(filter, limit, offset);
 
   res.json({ success: true, data: items, meta });

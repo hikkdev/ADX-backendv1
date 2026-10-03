@@ -1,3 +1,4 @@
+import type { CostSide } from '../agents';
 import type { KycQueueState } from '../../shared/kyc-state';
 import type { Money } from '../../shared/money';
 
@@ -47,6 +48,43 @@ export type PublisherCategoryRow = { key: string; publishers: number; listings: 
 export type AdvertiserCityRow = CityGroup & { count: number; spend: Money };
 export type PrintPartnerJobsRow = { key: string; jobs: number; earnings: Money };
 export type DepartmentRow = { key: string; label: string; count: number; openRoles: number };
+
+/* ── CP-2: what an onboarding cost ───────────────────────────────────── */
+
+/**
+ * Which side of the market a cost read is about.
+ *
+ * `PUBLISHER` and `ADVERTISER` narrow to the agents holding that role, which
+ * is the whole point of the figure: the owner wants the two costs apart
+ * because the work is different — a field agent walking a market and a sales
+ * agent sitting in an office are not the same money per account. `ALL` is
+ * the blended read on the agents overview.
+ *
+ * An agent holding BOTH roles counts on both sides, so the two side figures
+ * never add up to the blended one. That is deliberate and the only honest
+ * choice: their salary genuinely buys both, and splitting it by guesswork
+ * would make a made-up number out of a real one.
+ */
+export type { CostSide };
+
+/** CP-2: accounts onboarded in a window, split by whether an agent did it. */
+export type OnboardingProvenance = { byAgent: number; selfServe: number; byCity: CityCount[] };
+
+/**
+ * What an onboarding cost, as far as THIS module reads it: how many there
+ * were and who brought them. The money is the agents module's own — a salary
+ * is a row and this port is aggregates only, so `agents` exports the cost it
+ * owns the way `supply` exports its funnel.
+ */
+export interface CostOverviewRepository {
+  /**
+   * Accounts that finished onboarding in the window — a publisher by
+   * `onboardingCompletedAt`, an advertiser by `activatedAt` — split by
+   * whether an agent was recorded as having done it. `byCity` is the
+   * agent-led half only, because the self-serve half costs no agent money.
+   */
+  onboardingsByProvenance(window: Window, scope: Scope, side: CostSide): Promise<OnboardingProvenance>;
+}
 
 export interface PublishersOverviewRepository {
   /** Publishers created before `at` — the population as at an instant, so a window and the one before it compare. */
@@ -231,7 +269,98 @@ export interface LeadsOverviewRepository {
   leadsConvertedAfterRecycle(window: Window, scope: Scope): Promise<number>;
 }
 
-export type SectionOverviewsRepository = PublishersOverviewRepository &
+/** The Listings overview's city row: listings in the city, the live ones, and the accrual gross on them over the window. */
+export type ListingCityRow = CityGroup & { count: number; live: number; gmv: Money };
+/** A listing category: its listings, the live ones, and their accrual gross over the window. */
+export type ListingCategoryRow = { key: string; count: number; live: number; gmv: Money };
+/** A publisher's listings, and the live ones — the top by listings. */
+export type ListingPublisherRow = { key: string; count: number; live: number };
+/** A queue's size now, and how much of it has already run out. */
+export type DueCount = { due: number; lapsed: number };
+
+/**
+ * The Listings overview's aggregates (2 Oct 2026). A listing's city is its
+ * own (`Listing.cityId`, the spelling as the fallback); a booking is a spot
+ * on a campaign paid in the window, neither cancelled — the same count the
+ * admin overview's breakdown reads by listing — and the GMV is the accrual
+ * gross over the window's days, the column the publishers overview calls
+ * GMV. The three queues are the console tabs' own reads, counted: the
+ * renewals queue's sixty days, the verification queue's widest risk window,
+ * the claims still pending.
+ */
+export interface ListingsOverviewRepository {
+  /** Listings created before `at` — every status, unclaimed ones too. */
+  listingsAsAt(at: Date, scope: Scope): Promise<number>;
+  listingsCreated(window: Window, scope: Scope): Promise<number>;
+  listingsCreatedByDay(window: Window, scope: Scope): Promise<DayCount[]>;
+  /** Listings by `publishedAt` — the day ADX let them onto the marketplace. */
+  listingsPublishedByDay(window: Window, scope: Scope): Promise<DayCount[]>;
+  /** Listings per lifecycle status now. A state. */
+  listingsByStatus(scope: Scope): Promise<GroupCount[]>;
+  /** Listings with any suspension section in force, or at status SUSPENDED. A state. */
+  listingsSuspended(scope: Scope): Promise<number>;
+  /** CampaignSpot rows on campaigns paid in the window, neither the spot nor the campaign cancelled. */
+  listingBookings(window: Window, scope: Scope): Promise<number>;
+  /** EarningAccrual.gross for the window's days. */
+  listingGmv(window: Window, scope: Scope): Promise<Money>;
+  listingsByCity(window: Window, scope: Scope): Promise<ListingCityRow[]>;
+  listingsByCategory(window: Window, scope: Scope): Promise<ListingCategoryRow[]>;
+  /** Publishers by how many listings they hold, largest first; unclaimed listings left out. */
+  topPublishersByListings(scope: Scope, limit: number): Promise<ListingPublisherRow[]>;
+  /** Leases, licences and permits running out within `horizonDays` of `now` (`due`), and those already past (`lapsed`). */
+  listingRenewalsDue(now: Date, horizonDays: number, scope: Scope): Promise<DueCount>;
+  /** Listing claims still PENDING. */
+  listingClaimsOpen(scope: Scope): Promise<number>;
+  /** Live or suspended listings whose verification runs out within `horizonDays` (`due`), and those already lapsed. */
+  listingVerificationsDue(now: Date, horizonDays: number, scope: Scope): Promise<DueCount>;
+}
+
+/** The Campaigns overview's city row: campaigns aimed at the city (every status), the live ones, and the value paid in the window. */
+export type CampaignCityRow = CityGroup & { count: number; live: number; bookedValue: Money };
+/** A campaign goal: campaigns with it (every status) and the live ones. */
+export type CampaignGoalRow = { key: string; count: number; live: number };
+/** An advertiser's campaigns paid in the window: their value and how many. */
+export type CampaignAdvertiserValueRow = { key: string; sum: Money; count: number };
+/** Engagement recorded in a window: QR scans, landing-page views, CTA presses, enquiries (form submissions). */
+export type CampaignEngagement = { scans: number; views: number; ctaClicks: number; enquiries: number };
+
+/**
+ * The Campaigns overview's aggregates (the Campaigns lot, 2 Oct 2026). A
+ * campaign's city is the market it targets — `targetMarketCityId`, the typed
+ * `targetMarket` as the fallback (Lot X-B). **Booked value** is the `total`
+ * of the campaigns PAID in the window (`paidAt`), cancelled ones left out —
+ * the column the advertisers overview's spend reads. Engagement is the
+ * `TrackingEvent` rows ADX recorded in the window, through the campaign's
+ * codes. The launch queue is not counted here: `campaigns.launchQueueSummary`
+ * owns the gates and is carried through.
+ */
+export interface CampaignsOverviewRepository {
+  /** Campaigns per status now. A state. */
+  campaignsByStatus(scope: Scope): Promise<GroupCount[]>;
+  /** `completedAt` in the window. */
+  campaignsCompleted(window: Window, scope: Scope): Promise<number>;
+  /** `cancelledAt` in the window. */
+  campaignsCancelled(window: Window, scope: Scope): Promise<number>;
+  /** Campaigns paid in the window, cancelled ones left out. */
+  campaignsPaid(window: Window, scope: Scope): Promise<number>;
+  campaignBookedValue(window: Window, scope: Scope): Promise<Money>;
+  campaignBookedValueByDay(window: Window, scope: Scope): Promise<DaySum[]>;
+  campaignEngagement(window: Window, scope: Scope): Promise<CampaignEngagement>;
+  campaignScansByDay(window: Window, scope: Scope): Promise<DayCount[]>;
+  campaignsByCity(window: Window, scope: Scope): Promise<CampaignCityRow[]>;
+  campaignsByGoal(scope: Scope): Promise<CampaignGoalRow[]>;
+  /** Advertisers by the value of their campaigns paid in the window, largest first. */
+  topAdvertisersByBookedValue(window: Window, scope: Scope, limit: number): Promise<CampaignAdvertiserValueRow[]>;
+  /** SCHEDULED campaigns whose flight overlaps `range` (UTC days) — due to go live in it, or overdue and still waiting. */
+  campaignsLaunchingIn(range: Window, scope: Scope): Promise<number>;
+  /** LIVE campaigns whose flight ends inside `range` (UTC days). */
+  campaignsEndingIn(range: Window, scope: Scope): Promise<number>;
+}
+
+export type SectionOverviewsRepository = CostOverviewRepository &
+  CampaignsOverviewRepository &
+  ListingsOverviewRepository &
+  PublishersOverviewRepository &
   AdvertisersOverviewRepository &
   AgentsOverviewRepository &
   PrintPartnersOverviewRepository &

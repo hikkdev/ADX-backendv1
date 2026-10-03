@@ -11,7 +11,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  * code, naming the console login; and nobody else is affected.
  */
 const { otpService, repository, session, twoFactor, audit, tokens } = vi.hoisted(() => ({
-  otpService: { sendOtp: vi.fn(), verifyOtp: vi.fn(), sendEmailOtp: vi.fn(), verifyEmailOtp: vi.fn(), normalizeMobile: vi.fn((m: string) => m) },
+  otpService: { sendOtp: vi.fn(), verifyOtp: vi.fn(), sendEmailOtp: vi.fn(), verifyEmailOtp: vi.fn(), verifyEmailDoor: vi.fn(), attachSignupEmail: vi.fn(), normalizeMobile: vi.fn((m: string) => m) },
   repository: { findLoginUserById: vi.fn(), findPublisherLoginUserById: vi.fn(), recordLogin: vi.fn(), setName: vi.fn() },
   session: { startSession: vi.fn(), sessionMeta: vi.fn(() => ({ userAgent: 'vitest', ipAddress: '127.0.0.1' })) },
   twoFactor: { issueChallengeAfterMobileOtp: vi.fn() },
@@ -38,7 +38,7 @@ const account = (over: Record<string, unknown> = {}) => ({
   id: 'usr_1',
   mobile: '+919845012210',
   name: 'Asha',
-  email: 'asha@adx.co',
+  email: 'asha@adx.in',
   language: 'en',
   avatarUrl: null,
   passwordHash: 'x',
@@ -62,12 +62,13 @@ const response = () => {
   return res as never as { json: ReturnType<typeof vi.fn>; set: ReturnType<typeof vi.fn> };
 };
 
-const CHALLENGE = { challengeToken: 'challenge-token', methods: ['EMAIL'], maskedMobile: '+91 ***** 2210', maskedEmail: 'a**a@adx.co' };
+const CHALLENGE = { challengeToken: 'challenge-token', methods: ['EMAIL'], maskedMobile: '+91 ***** 2210', maskedEmail: 'a**a@adx.in' };
 
 beforeEach(() => {
   vi.clearAllMocks();
   otpService.verifyOtp.mockResolvedValue('usr_1');
   otpService.verifyEmailOtp.mockResolvedValue('usr_1');
+  otpService.verifyEmailDoor.mockResolvedValue({ kind: 'account', userId: 'usr_1' });
   repository.findLoginUserById.mockResolvedValue(account());
   repository.findPublisherLoginUserById.mockResolvedValue(account());
   repository.recordLogin.mockResolvedValue({});
@@ -90,7 +91,7 @@ describe('POST /auth/verify-otp', () => {
     repository.findLoginUserById.mockResolvedValue(admin());
     const res = response();
     await verifyOtpHandler(request({ mobile: '+919845012210', otp: '123456' }), res as never);
-    expect(twoFactor.issueChallengeAfterMobileOtp).toHaveBeenCalledWith(expect.objectContaining({ id: 'adm_1', mobile: '+919845012210', email: 'asha@adx.co' }));
+    expect(twoFactor.issueChallengeAfterMobileOtp).toHaveBeenCalledWith(expect.objectContaining({ id: 'adm_1', mobile: '+919845012210', email: 'asha@adx.in' }));
     expect(res.json).toHaveBeenCalledWith({ success: true, data: { challenge: CHALLENGE } });
     expect(JSON.stringify(res.json.mock.calls[0])).not.toContain('accessToken');
     expect(session.startSession).not.toHaveBeenCalled();
@@ -123,15 +124,15 @@ describe('POST /auth/verify-otp', () => {
 describe('POST /auth/verify-otp-email', () => {
   it('still signs a non-admin in', async () => {
     const res = response();
-    await verifyOtpEmailHandler(request({ email: 'asha@adx.co', otp: '123456' }), res as never);
+    await verifyOtpEmailHandler(request({ email: 'asha@adx.in', otp: '123456' }), res as never);
     expect(session.startSession).toHaveBeenCalledWith('usr_1', ['PUBLISHER'], expect.anything());
     expect(res.json).toHaveBeenCalledWith({ success: true, data: expect.objectContaining({ accessToken: 'access' }) });
   });
 
   it('refuses an ADMIN with 403 ADMIN_SIGN_IN_REQUIRED and no session, and records the attempt', async () => {
-    otpService.verifyEmailOtp.mockResolvedValue('adm_1');
+    otpService.verifyEmailDoor.mockResolvedValue({ kind: 'account', userId: 'adm_1' });
     repository.findLoginUserById.mockResolvedValue(admin());
-    await expect(verifyOtpEmailHandler(request({ email: 'asha@adx.co', otp: '123456' }), response() as never)).rejects.toMatchObject({
+    await expect(verifyOtpEmailHandler(request({ email: 'asha@adx.in', otp: '123456' }), response() as never)).rejects.toMatchObject({
       statusCode: 403,
       code: 'ADMIN_SIGN_IN_REQUIRED',
       message: expect.stringContaining('console'),

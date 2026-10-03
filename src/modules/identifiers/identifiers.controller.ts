@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { ApiError } from '../../shared/errors';
 import type { PartyType } from '../../shared/database';
-import { backfillPublisherIdentifiers, backfillUserIdentifiers } from './identifiers.backfill';
+import { backfillOrderIdentifiers, backfillPublisherIdentifiers, backfillUserIdentifiers } from './identifiers.backfill';
 import {
   getFormat,
   listFormats,
@@ -46,5 +46,7 @@ export async function backfillHandler(_req: Request, res: Response): Promise<voi
   // QR-4: people too — every account minted before the USER series existed.
   const publishers = await backfillPublisherIdentifiers();
   const users = await backfillUserIdentifiers();
-  res.json({ success: true, data: { ...publishers, users } });
+  // BK-1: bookings too.
+  const orders = await backfillOrderIdentifiers();
+  res.json({ success: true, data: { ...publishers, users, orders } });
 }

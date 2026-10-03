@@ -1,8 +1,9 @@
 import { z } from 'zod';
 import { ONBOARDING_SOURCES } from '../../shared/onboarding';
 import { DEFAULT_LIST_PAGE_SIZE, MAX_LIST_PAGE_SIZE } from '../../shared/pagination';
-import { dateOfBirthSchema, genderSchema, upperEnum } from '../../shared/validation';
-import { kycQueueStateSchema } from '../../shared/kyc-state';
+import { dateOfBirthSchema, genderSchema, pinCodeSchema, upperEnum } from '../../shared/validation';
+import { kycEntityTypeSchema, kycQueueStateSchema } from '../../shared/kyc-state';
+import { rosterStatusSchema } from '../../shared/party-status';
 
 /**
  * DR 06's Publisher · Listings chips (`4428:1741`): All / Available /
@@ -25,6 +26,12 @@ export const myListingsQuerySchema = z.object({
 });
 export type MyListingsQuery = z.infer<typeof myListingsQuerySchema>;
 
+/** BD-1: the availability grid's window — calendar days; the service defaults to today and the fortnight after. */
+export const availabilityQuerySchema = z.object({
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD').optional(),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD').optional(),
+});
+
 export const PUBLISHER_TYPES = ['INDIVIDUAL', 'BUSINESS', 'NGO', 'POLITICAL'] as const;
 
 /**
@@ -40,6 +47,21 @@ export const publisherRosterQuerySchema = z.object({
   /** QR-14: the door, and the person who opened it. */
   onboardedVia: upperEnum(ONBOARDING_SOURCES).optional(),
   onboardedById: z.string().trim().min(1).max(64).optional(),
+  /**
+   * 29 Sep 2026 (the party rosters, made uniform): the same three cuts on
+   * every party desk — the KYC state the queue and the party page print
+   * (`shared/kyc-state`), the party's type, and the city (a catalogue slug,
+   * or a name for the rows keyed to nothing).
+   */
+  kycState: kycQueueStateSchema,
+  type: upperEnum(PUBLISHER_TYPES).optional(),
+  city: z.string().trim().min(1).max(80).optional(),
+  /**
+   * Account lifecycle (2 Oct 2026): ACTIVE (the default), SUSPENDED,
+   * DEACTIVATED, CLOSED or ALL — the state `shared/party-status` derives;
+   * `statusCounts` beside the page counts each with this facet removed.
+   */
+  status: rosterStatusSchema,
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).default(DEFAULT_LIST_PAGE_SIZE).transform((value) => Math.min(MAX_LIST_PAGE_SIZE, value)),
 });
@@ -64,6 +86,8 @@ const optionalText = (max: number) =>
 export const publisherBareQuerySchema = z.object({
   q: optionalText(120),
   category: optionalText(40),
+  /** Account lifecycle: the bare array keeps everyone unless a status is named — its callers are pickers and old links. */
+  status: rosterStatusSchema,
 });
 export type PublisherBareQuery = z.infer<typeof publisherBareQuerySchema>;
 
@@ -93,14 +117,18 @@ const contactFields = {
   /** QR-5: the pin behind the address; both or neither. */
   latitude: z.number().min(-90).max(90).nullable().optional(),
   longitude: z.number().min(-180).max(180).nullable().optional(),
+  /** Onboarding addresses (1 Oct 2026): the address's PIN code — six digits, never required, null clears. */
+  postalCode: pinCodeSchema,
 };
 
 /**
  * QR-13: what the app's ladder requires, applied to a desk onboarding — the
  * same rules, so a publisher opened here lands on the phone with nothing
  * left to ask. Details for everyone: last name, email, address, city,
- * state, date of birth. A business: its GSTIN. Anyone but an individual: a
- * contact person with a number.
+ * state. A business: its GSTIN. Anyone but an individual: a contact person
+ * with a number. AGE-1 (29 Sep 2026): the date of birth is offered, never
+ * required, and any valid date is taken — 18 or over is asked only when an
+ * order is placed.
  */
 export function deskOnboarding(value: { firstName?: string; lastName?: string; email?: string; dateOfBirth?: string; address?: string; city?: string; state?: string; type?: string; gstin?: string; contactName?: string; contactMobile?: string; latitude?: number | null; longitude?: number | null }, ctx: z.RefinementCtx): void {
   if ((value.latitude === undefined) !== (value.longitude === undefined) || (value.latitude === null) !== (value.longitude === null)) {
@@ -112,7 +140,6 @@ export function deskOnboarding(value: { firstName?: string; lastName?: string; e
   };
   need('lastName', 'Needed: the app asks for it.');
   need('email', 'Needed: the app asks for it, and the readiness rule counts it.');
-  need('dateOfBirth', 'Needed: the app asks for it (18 or over).');
   need('address', 'Needed: the app asks for it.');
   need('city', 'Needed: the app asks for it.');
   need('state', 'Needed: the app asks for it.');
@@ -138,6 +165,8 @@ export const createPublisherSchema = z
     mobile: z.string().min(10),
     email: z.string().email().optional(),
     type: upperEnum(PUBLISHER_TYPES).optional(),
+    /** The precise legal form (1 Oct 2026): chosen at the desk beside the account type, so a school or a ministry is one from the start. */
+    entityType: kycEntityTypeSchema.optional(),
     city: z.string().optional(),
     state: z.string().optional(),
     ...personFields,
@@ -154,6 +183,13 @@ export const updatePublisherSchema = z
     name: z.string().optional(),
     email: z.string().email().optional(),
     type: upperEnum(PUBLISHER_TYPES).optional(),
+    /**
+     * Phase D (1 Oct 2026): the legal form the KYC verifies — any of the
+     * eight; null clears it. A verified publisher may only take the upgrade
+     * (an individual's business), which sends a fresh Digio request;
+     * anything else is 409 KYC_LOCKED.
+     */
+    entityType: kycEntityTypeSchema.nullable().optional(),
     city: z.string().optional(),
     state: z.string().optional(),
     ...personFields,
@@ -182,6 +218,8 @@ export const updateMyProfileSchema = z.object({
   /** QR-5: the pin behind the address; both or neither, null clears. */
   latitude: z.number().min(-90).max(90).nullable().optional(),
   longitude: z.number().min(-180).max(180).nullable().optional(),
+  /** Onboarding addresses (1 Oct 2026): the address's PIN code — six digits, null clears. */
+  postalCode: pinCodeSchema,
   /** QR-5: the person's, written to their User row. */
   dateOfBirth: dateOfBirthSchema.optional(),
   gender: genderSchema.optional(),

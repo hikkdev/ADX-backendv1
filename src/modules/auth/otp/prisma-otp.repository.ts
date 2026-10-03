@@ -28,7 +28,7 @@ export const prismaOtpRepository: OtpRepository = {
         ...(role === 'AGENT_PUBLISHER' || role === 'AGENT_ADVERTISER' ? { agentProfile: { create: {} } } : {}),
         // Q-B: the console's 2FA offers EMAIL once the mobile door has spent
         // SMS; without an address the minted admin could never finish.
-        ...(role === 'ADMIN' ? { email: `dev-admin-${last4}@adx.local` } : {}),
+        ...(role === 'ADMIN' ? { email: `dev-admin-${last4}@example.com` } : {}),
       },
     });
   },
@@ -82,6 +82,8 @@ export const prismaOtpRepository: OtpRepository = {
 
   findLatestUnverifiedByMobile(mobile: string, purpose: OtpPurpose) {
     return prisma.otp.findFirst({
+      // The code is checked against the hash — opted back in past the global omit.
+      omit: { codeHash: false },
       where: { mobile, purpose, verifiedAt: null, expiresAt: { gt: new Date() } },
       orderBy: { createdAt: 'desc' },
     });
@@ -89,12 +91,17 @@ export const prismaOtpRepository: OtpRepository = {
 
   findLatestUnverifiedByEmail(email: string, purpose: OtpPurpose = 'LOGIN') {
     return prisma.otp.findFirst({
+      omit: { codeHash: false },
       where: { email, purpose, verifiedAt: null, expiresAt: { gt: new Date() } },
       orderBy: { createdAt: 'desc' },
     });
   },
 
   async hasVerifiedEmail(userId: string, email: string) {
+    // ED-1: the stamp on the row answers first; the codes answered before
+    // the column existed still count, so nobody already proved is asked again.
+    const stamped = await prisma.user.count({ where: { id: userId, email, emailVerifiedAt: { not: null } } });
+    if (stamped > 0) return true;
     return (await prisma.otp.count({ where: { userId, email, verifiedAt: { not: null } } })) > 0;
   },
 
@@ -104,5 +111,53 @@ export const prismaOtpRepository: OtpRepository = {
 
   markVerified(otpId: string) {
     return prisma.otp.update({ where: { id: otpId }, data: { verifiedAt: new Date() } });
+  },
+
+  /* ED-1: the email door. */
+  findUserById(userId: string) {
+    return prisma.user.findUnique({ where: { id: userId } });
+  },
+
+  findEmailSignup(email: string) {
+    // The sign-up code is checked against the hash — opted back in past the global omit.
+    return prisma.emailSignup.findUnique({ omit: { codeHash: false }, where: { email } });
+  },
+
+  upsertEmailSignup({ email, codeHash, expiresAt }) {
+    return prisma.emailSignup.upsert({
+      where: { email },
+      create: { email, codeHash, expiresAt },
+      update: { codeHash, expiresAt, attempts: 0, verifiedAt: null },
+    });
+  },
+
+  incrementEmailSignupAttempts(id: string) {
+    return prisma.emailSignup.update({ where: { id }, data: { attempts: { increment: 1 } } });
+  },
+
+  markEmailSignupVerified(id: string) {
+    return prisma.emailSignup.update({ where: { id }, data: { verifiedAt: new Date() } });
+  },
+
+  deleteEmailSignup(id: string) {
+    return prisma.emailSignup.deleteMany({ where: { id } });
+  },
+
+  markEmailVerified(userId: string, email: string) {
+    return prisma.user.updateMany({
+      where: { id: userId, email, emailVerifiedAt: null },
+      data: { emailVerifiedAt: new Date() },
+    });
+  },
+
+  setPrimaryEmailVerified(userId: string, email: string) {
+    return prisma.user.update({ where: { id: userId }, data: { email, emailVerifiedAt: new Date() } });
+  },
+
+  async findEmailHolder(email: string) {
+    const primary = await prisma.user.findUnique({ where: { email }, select: { id: true } });
+    if (primary) return { which: 'PRIMARY' as const, userId: primary.id };
+    const contact = await prisma.userContact.findFirst({ where: { kind: 'EMAIL', value: email }, select: { userId: true } });
+    return contact ? { which: 'CONTACT' as const, userId: contact.userId } : null;
   },
 };

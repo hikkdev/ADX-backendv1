@@ -18,7 +18,12 @@ import type {
 
 export type AccountRow = LedgerAccount;
 export type LegRow = LedgerLeg;
-export type TransactionRow = LedgerTransaction & { legs: (LegRow & { account: AccountRow })[] };
+export type TransactionRow = LedgerTransaction & {
+  legs: (LegRow & { account: AccountRow })[];
+  /** The ledger screen's markers: what this one reverses, and what reversed it. Absent on the posting paths. */
+  reverses?: { reference: string } | null;
+  reversedBy?: { id: string; reference: string } | null;
+};
 
 export type NewLeg = {
   accountId: string;
@@ -48,9 +53,14 @@ export type TransactionFilter = {
   to?: Date;
   /** E6: a transaction with a leg of exactly this absolute amount (decimal string). */
   amount?: string;
+  /** The ledger screen's search: the transaction's reference or its note, case-insensitive contains. */
+  q?: string;
   limit: number;
   cursor?: string;
 };
+
+/** The same facets with no page — what a count, a sum or an export walks. */
+export type TransactionMatch = Omit<TransactionFilter, 'limit' | 'cursor'>;
 
 export interface LedgerRepository {
   /** Platform accounts are seeded from a fixed chart; wallets get one each. */
@@ -74,6 +84,15 @@ export interface LedgerRepository {
   findTransaction(id: string): Promise<TransactionRow | null>;
   findTransactionByKey(idempotencyKey: string): Promise<TransactionRow | null>;
   listTransactions(filter: TransactionFilter): Promise<TransactionRow[]>;
+  /** How many transactions the facets match, across every page. */
+  countTransactions(filter: TransactionMatch): Promise<number>;
+  /**
+   * The legs of every matching transaction, summed by side: `debit` the
+   * negative legs as a positive figure, `credit` the positive legs.
+   */
+  sumLegs(filter: TransactionMatch): Promise<{ debit: Prisma.Decimal; credit: Prisma.Decimal }>;
+  /** How many legs the matching transactions carry — the export's size before it is written. */
+  countLegs(filter: TransactionMatch): Promise<number>;
   referenceExists(reference: string): Promise<boolean>;
   /** The next sequence number for a year, used to mint a readable reference. */
   countForYear(year: number): Promise<number>;

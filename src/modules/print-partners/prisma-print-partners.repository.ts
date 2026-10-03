@@ -1,7 +1,10 @@
 import { Prisma, prisma } from '../../shared/database';
 import { countsFrom, listArgs } from '../../shared/pagination';
-import type { PrintPartnersRepository, QuoteRequestWithQuotes } from './print-partners.repository';
-import { PRINT_JOB_STATUSES, QUOTE_REQUEST_STATUSES } from './print-partners.repository';
+import { kycRosterStateWhere } from '../../shared/kyc-state';
+import { accountStateOf } from '../../shared/party-status';
+import { mobileSearchNeedle } from '../../shared/validation';
+import type { PrintPartnerAccountState, PrintPartnerRosterStatus, PrintPartnersRepository, QuoteRequestWithQuotes } from './print-partners.repository';
+import { PRINT_JOB_STATUSES, PRINT_PARTNER_ACCOUNT_STATES, QUOTE_REQUEST_STATUSES } from './print-partners.repository';
 
 const partnerSelect = {
   id: true,
@@ -15,6 +18,66 @@ const partnerSelect = {
 } as const;
 
 const jobInclude = { printPartner: { select: partnerSelect } } as const;
+
+/** 29 Sep 2026: the partners a party import created — the IMPORT door (the rows keep no stamp of their own). */
+async function importedPartnerIds(): Promise<string[]> {
+  const rows = await prisma.partyImportRow.findMany({
+    where: { outcome: 'CREATED', targetId: { not: null }, import: { party: 'PRINT_PARTNER' } },
+    select: { targetId: true },
+  });
+  return rows.flatMap((row) => (row.targetId ? [row.targetId] : []));
+}
+
+/** 29 Sep 2026: when a party import created each of these partners — one query for a page; absent when none did. */
+async function importedAtFor(ids: readonly string[]): Promise<Map<string, Date>> {
+  if (ids.length === 0) return new Map();
+  const rows = await prisma.partyImportRow.findMany({
+    where: { outcome: 'CREATED', targetId: { in: [...ids] }, import: { party: 'PRINT_PARTNER' } },
+    select: { targetId: true, import: { select: { committedAt: true, createdAt: true } } },
+  });
+  return new Map(rows.flatMap((row) => (row.targetId ? [[row.targetId, row.import.committedAt ?? row.import.createdAt] as const] : [])));
+}
+
+/**
+ * Account lifecycle (2 Oct 2026): the print partners' accounts that are
+ * closed, and when. `PrintPartner.userId` carries no relation to its User,
+ * so the closure is read beside the roster — the PARTNER accounts with
+ * `closedAt` — and both the where-fragments and each row's state read this
+ * one set, so a chip count and the pills on the page it filters agree.
+ */
+async function closedPartnerAccounts(): Promise<Map<string, Date>> {
+  const rows = await prisma.user.findMany({
+    where: { closedAt: { not: null }, roles: { some: { role: 'PARTNER' } } },
+    select: { id: true, closedAt: true },
+  });
+  return new Map(rows.flatMap((row) => (row.closedAt ? [[row.id, row.closedAt] as const] : [])));
+}
+
+/**
+ * The print partner's account states as where-fragments, partitioning the
+ * table exactly as `accountStateOf({ isActive, closedAt })` reads a row:
+ * CLOSED first, then the row's own switch.
+ */
+export function printPartnerStateWhere(state: PrintPartnerAccountState, closedUserIds: readonly string[]): Prisma.PrintPartnerWhereInput {
+  switch (state) {
+    case 'CLOSED':
+      return { userId: { in: [...closedUserIds] } };
+    case 'DEACTIVATED':
+      return { isActive: false, userId: { notIn: [...closedUserIds] } };
+    case 'ACTIVE':
+      return { isActive: true, userId: { notIn: [...closedUserIds] } };
+  }
+}
+
+/** The roster's status facet: `status` wins; else the older `active=` switch, exactly as it always cut; else nothing. */
+function statusFacet(
+  status: PrintPartnerRosterStatus | undefined,
+  active: boolean | undefined,
+  closedUserIds: readonly string[],
+): Prisma.PrintPartnerWhereInput[] {
+  if (status) return status === 'ALL' ? [] : [printPartnerStateWhere(status, closedUserIds)];
+  return active === undefined ? [] : [{ isActive: active }];
+}
 
 /* Lot H: what a quote carries of its partner — enough for the award's tie-break and the console row. */
 const quotePartnerSelect = {
@@ -61,6 +124,8 @@ export const prismaPrintPartnersRepository: PrintPartnersRepository = {
           address: data.address ?? null,
           city: data.city ?? null,
           cityId: data.cityId ?? null,
+          state: data.state ?? null,
+          postalCode: data.postalCode ?? null,
           latitude: data.latitude ?? null,
           longitude: data.longitude ?? null,
           capabilities: data.capabilities ?? [],
@@ -94,6 +159,7 @@ export const prismaPrintPartnersRepository: PrintPartnersRepository = {
       const user = await tx.user.create({
         data: {
           mobile: data.mobile,
+          ...(data.userDisplayId ? { displayId: data.userDisplayId } : {}),
           name: data.name,
           email: data.email ?? null,
           isActive: false,
@@ -115,6 +181,8 @@ export const prismaPrintPartnersRepository: PrintPartnersRepository = {
           address: data.address ?? null,
           city: data.city ?? null,
           cityId: data.cityId ?? null,
+          state: data.state ?? null,
+          postalCode: data.postalCode ?? null,
           latitude: data.latitude ?? null,
           longitude: data.longitude ?? null,
           capabilities: data.capabilities ?? [],
@@ -157,43 +225,80 @@ export const prismaPrintPartnersRepository: PrintPartnersRepository = {
 
   async listPartners(filter) {
     const q = filter.q?.trim();
-    const base: Prisma.PrintPartnerWhereInput = {
+    const digits = q ? mobileSearchNeedle(q) : null;
+    // 29 Sep 2026: the door — read off what a partner row keeps (see PartnerListFilter).
+    const imported = filter.onboardedVia === 'IMPORT' || filter.onboardedVia === 'DESK' ? await importedPartnerIds() : [];
+    const door: Prisma.PrintPartnerWhereInput | null =
+      filter.onboardedVia === 'SELF'
+        ? { appliedAt: { not: null } }
+        : filter.onboardedVia === 'IMPORT'
+          ? { appliedAt: null, id: { in: imported } }
+          : filter.onboardedVia === 'DESK'
+            ? { appliedAt: null, id: { notIn: imported } }
+            : filter.onboardedVia
+              ? { id: { in: [] } }
+              : null;
+    // Each cut is one AND part, so the city's `OR` and the search's `OR` no longer overwrite each other.
+    const parts: Prisma.PrintPartnerWhereInput[] = [
+      // PP-1: the applications — self-applied, not yet switched on.
+      ...(filter.applied ? [{ appliedAt: { not: null }, activatedAt: null }] : []),
       // Lot X-B: the key is the identity — by the key when the facet resolved
       // to one, the spelling catching only the rows whose key is null.
-      // PP-1: the applications — self-applied, not yet switched on.
-      ...(filter.applied ? { appliedAt: { not: null }, activatedAt: null } : {}),
       ...(filter.city
-        ? filter.cityId
-          ? { OR: [{ cityId: filter.cityId }, { cityId: null, city: { equals: filter.city, mode: 'insensitive' } }] }
-          : { cityId: null, city: { equals: filter.city, mode: 'insensitive' } }
-        : {}),
+        ? [
+            filter.cityId
+              ? { OR: [{ cityId: filter.cityId }, { cityId: null, city: { equals: filter.city, mode: 'insensitive' as const } }] }
+              : { cityId: null, city: { equals: filter.city, mode: 'insensitive' as const } },
+          ]
+        : []),
       ...(q
-        ? {
-            OR: [
-              { name: { contains: q, mode: 'insensitive' } },
-              { legalName: { contains: q, mode: 'insensitive' } },
-              { displayId: { contains: q, mode: 'insensitive' } },
-              { contactName: { contains: q, mode: 'insensitive' } },
-              { mobile: { contains: q } },
-              { city: { contains: q, mode: 'insensitive' } },
-            ],
-          }
-        : {}),
-    };
-    const where: Prisma.PrintPartnerWhereInput = {
-      ...base,
-      ...(filter.active === undefined ? {} : { isActive: filter.active }),
-    };
-    const [items, total, active, inactive] = await Promise.all([
-      prisma.printPartner.findMany({ where, orderBy: [{ isActive: 'desc' }, { name: 'asc' }], ...listArgs(filter) }),
+        ? [
+            {
+              OR: [
+                { name: { contains: q, mode: 'insensitive' as const } },
+                { legalName: { contains: q, mode: 'insensitive' as const } },
+                { displayId: { contains: q, mode: 'insensitive' as const } },
+                { contactName: { contains: q, mode: 'insensitive' as const } },
+                { email: { contains: q, mode: 'insensitive' as const } },
+                { mobile: { contains: q } },
+                ...(digits ? [{ mobile: { contains: digits } }] : []),
+                { city: { contains: q, mode: 'insensitive' as const } },
+              ],
+            },
+          ]
+        : []),
+      ...(door ? [door] : []),
+      ...(filter.kycState ? [kycRosterStateWhere(filter.kycState, true)] : []),
+    ];
+    const base: Prisma.PrintPartnerWhereInput = { AND: parts };
+    // Account lifecycle (2 Oct 2026): `?status=` beside the older `active=` — status wins when both are sent.
+    const closed = await closedPartnerAccounts();
+    const closedIds = [...closed.keys()];
+    const where: Prisma.PrintPartnerWhereInput = { AND: [base, ...statusFacet(filter.status, filter.active, closedIds)] };
+    const [rows, total, active, inactive, perState] = await Promise.all([
+      // 29 Sep 2026: the roster's activity — the jobs, counted in the same query.
+      prisma.printPartner.findMany({ where, include: { _count: { select: { jobs: true } } }, orderBy: [{ isActive: 'desc' }, { name: 'asc' }], ...listArgs(filter) }),
       prisma.printPartner.count({ where }),
       // The chip counts leave the active facet out, so the row stays a way back out.
-      prisma.printPartner.count({ where: { ...base, isActive: true } }),
-      prisma.printPartner.count({ where: { ...base, isActive: false } }),
+      prisma.printPartner.count({ where: { AND: [base, { isActive: true }] } }),
+      prisma.printPartner.count({ where: { AND: [base, { isActive: false }] } }),
+      // The status chips leave the status facet out the same way, so each stays a way back in.
+      Promise.all(
+        PRINT_PARTNER_ACCOUNT_STATES.map(async (state) => [state, await prisma.printPartner.count({ where: { AND: [base, printPartnerStateWhere(state, closedIds)] } })] as const),
+      ),
     ]);
+    const importedAt = await importedAtFor(rows.map((row) => row.id));
+    const items = rows.map(({ _count, ...row }) => ({
+      ...row,
+      jobCount: _count.jobs,
+      importedAt: importedAt.get(row.id) ?? null,
+      // A print partner has no scoped suspension: closed, else its own switch.
+      accountState: accountStateOf({ isActive: row.isActive, closedAt: closed.get(row.userId) ?? null }) as PrintPartnerAccountState,
+    }));
     return {
       items,
       total,
+      statusCounts: Object.fromEntries(perState) as Record<PrintPartnerAccountState, number>,
       counts: countsFrom(
         [
           { status: 'ACTIVE', _count: { _all: active } },
@@ -244,8 +349,8 @@ export const prismaPrintPartnersRepository: PrintPartnersRepository = {
   findLastLogins(userIds) {
     if (userIds.length === 0) return Promise.resolve([]);
     return prisma.user
-      .findMany({ where: { id: { in: [...userIds] } }, select: { id: true, lastLoginAt: true } })
-      .then((rows) => rows.map((row) => ({ userId: row.id, lastLoginAt: row.lastLoginAt })));
+      .findMany({ where: { id: { in: [...userIds] } }, select: { id: true, lastLoginAt: true, displayId: true } })
+      .then((rows) => rows.map((row) => ({ userId: row.id, lastLoginAt: row.lastLoginAt, displayId: row.displayId })));
   },
 
   /* ── Jobs ────────────────────────────────────────────────────── */
@@ -306,7 +411,7 @@ export const prismaPrintPartnersRepository: PrintPartnersRepository = {
   },
 
   async listPartnerJobs(printPartnerId, filter) {
-    const base: Prisma.PrintJobWhereInput = { printPartnerId };
+    const base: Prisma.PrintJobWhereInput = { printPartnerId, ...(filter.orderId ? { orderId: filter.orderId } : {}) };
     const where: Prisma.PrintJobWhereInput = {
       ...base,
       ...(filter.status?.length ? { status: { in: [...filter.status] } } : {}),
@@ -330,6 +435,7 @@ export const prismaPrintPartnersRepository: PrintPartnersRepository = {
       where: { id: { in: [...orderIds] } },
       select: {
         id: true,
+        displayId: true,
         status: true,
         campaignName: true,
         designUrl: true,
@@ -361,6 +467,7 @@ export const prismaPrintPartnersRepository: PrintPartnersRepository = {
         creatives.find((row) => row.spotId === order.campaignSpot?.id) ?? creatives.find((row) => row.spotId === null) ?? null;
       return {
         id: order.id,
+        displayId: order.displayId,
         status: order.status,
         campaignName: order.campaignName,
         designUrl: order.designUrl,
@@ -373,6 +480,13 @@ export const prismaPrintPartnersRepository: PrintPartnersRepository = {
           : null,
       };
     });
+  },
+
+  async orderDisplayIds(orderIds) {
+    const ids = [...new Set(orderIds)];
+    if (ids.length === 0) return new Map();
+    const rows = await prisma.order.findMany({ where: { id: { in: ids } }, select: { id: true, displayId: true } });
+    return new Map(rows.map((row) => [row.id, row.displayId]));
   },
 
   /* ── Quote requests and quotes (Lot H) ───────────────────────── */

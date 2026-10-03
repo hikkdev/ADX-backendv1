@@ -1,6 +1,8 @@
 import { Prisma, prisma } from '../../../shared/database';
 import type { AgentKyc, KycStatus } from '../../../shared/database';
 import { KYC_QUEUE_STATES, deriveKycState, kycPartyStateWhere, type KycQueueState } from '../../../shared/kyc-state';
+import { AGENT_DEAD_END_STAGES, accountStateOf, workingAgentAccountWhere, type AccountFacts } from '../../../shared/party-status';
+import { PROVIDER_FAILED_STATUS } from '../../../shared/verification';
 import type { AgentDigioFields, AgentDigioUpdate, AgentKycFilter, AgentKycQueueRow, AgentKycRepository, AgentKycRequestStamp, AgentSlice } from './agent-kyc.repository';
 import type { AgentKycDocuments } from './agent-kyc.schema';
 
@@ -9,6 +11,15 @@ const agentSelect = {
 } as const;
 
 const withAgent = { agent: agentSelect } as const;
+
+/** Account lifecycle: what the queue reads beside the slice to say the row's `accountState` — stripped before the row goes out. */
+const queueSelect = {
+  ...agentSelect.select,
+  stage: true,
+  status: true,
+  suspensionScopes: true,
+  user: { select: { name: true, mobile: true, email: true, isActive: true, closedAt: true } },
+} as const;
 
 /* ── N3-B: the queue is every AgentProfile ───────────────────────────────── */
 
@@ -31,6 +42,8 @@ function searchWhere(q: string | undefined): Prisma.AgentProfileWhereInput {
 /** Every agent (there is no mirror column on the profile), narrowed by state and the search box. */
 function partyWhere(filter: AgentKycFilter): Prisma.AgentProfileWhereInput {
   const parts: Prisma.AgentProfileWhereInput[] = [];
+  // Account lifecycle (2 Oct 2026): working accounts, past none of the ladder's dead ends — unless the desk asks for the inactive.
+  if (!filter.includeInactive) parts.push(workingAgentAccountWhere(), { stage: { notIn: [...AGENT_DEAD_END_STAGES] } });
   const state = stateOf(filter);
   if (state) parts.push(kycPartyStateWhere(state, false));
   if (filter.q) parts.push(searchWhere(filter.q));
@@ -40,15 +53,23 @@ function partyWhere(filter: AgentKycFilter): Prisma.AgentProfileWhereInput {
 /** A row with no record spreads every record column as null. */
 const EMPTY_RECORD = Object.fromEntries(Object.values(Prisma.AgentKycScalarFieldEnum).map((column) => [column, null])) as { [K in keyof AgentKyc]: null };
 
-function toQueueRow(agent: AgentSlice & { kyc: AgentKyc | null }): AgentKycQueueRow {
-  const { kyc, ...slice } = agent;
+type QueueAgent = Omit<AgentSlice, 'user'> &
+  Pick<AccountFacts, 'stage' | 'status' | 'suspensionScopes'> & {
+    user: AgentSlice['user'] & { isActive: boolean; closedAt: Date | null };
+    kyc: AgentKyc | null;
+  };
+
+function toQueueRow(agent: QueueAgent): AgentKycQueueRow {
+  const { kyc, stage, status, suspensionScopes, user, ...rest } = agent;
+  const { isActive, closedAt, ...person } = user;
   return {
     ...(kyc ?? EMPTY_RECORD),
     id: kyc?.id ?? agent.id,
     agentId: agent.id,
     kycId: kyc?.id ?? null,
     state: deriveKycState(kyc),
-    agent: slice,
+    accountState: accountStateOf({ stage, status, suspensionScopes, user: { isActive, closedAt } }),
+    agent: { ...rest, user: person },
   };
 }
 
@@ -62,7 +83,7 @@ export const prismaAgentKycRepository: AgentKycRepository = {
         // Oldest submission first: the queue is worked in the order it arrived;
         // N3-B: agents with nothing in follow, by when the agent was onboarded.
         orderBy: [{ kyc: { submittedAt: { sort: 'asc', nulls: 'last' } } }, { createdAt: 'asc' }],
-        select: { ...agentSelect.select, kyc: true },
+        select: { ...queueSelect, kyc: true },
       }),
       prisma.agentProfile.count({ where: partyWhere(where) }),
     ]);
@@ -84,7 +105,7 @@ export const prismaAgentKycRepository: AgentKycRepository = {
   findAgentContact(agentId: string) {
     return prisma.agentProfile.findUnique({
       where: { id: agentId },
-      select: { id: true, userId: true, displayId: true, user: { select: { name: true, email: true, mobile: true } } },
+      select: { id: true, userId: true, displayId: true, suspensionScopes: true, user: { select: { name: true, email: true, mobile: true, closedAt: true } } },
     });
   },
 
@@ -127,12 +148,17 @@ export const prismaAgentKycRepository: AgentKycRepository = {
     return prisma.agentKyc.upsert({ where: { agentId }, update: fields, create: { agentId, ...fields }, include: withAgent });
   },
 
+  markProviderFailed(agentId: string) {
+    return prisma.agentKyc.upsert({ where: { agentId }, update: { digioStatus: PROVIDER_FAILED_STATUS }, create: { agentId, digioStatus: PROVIDER_FAILED_STATUS } });
+  },
+
   findByDigioRequestId(kycId: string) {
     return prisma.agentKyc.findFirst({ where: { digioRequestId: kycId }, include: withAgent });
   },
 
   applyDigioWebhook(id: string, update: AgentDigioUpdate) {
-    const { digioPayload, ...rest } = update;
+    // Cashfree Phase 1: the same road carries a Cashfree session's outcome — `via` says who answered.
+    const { digioPayload, via = 'DIGIO', ...rest } = update;
     // Digio's completion is the recording — nobody at ADX held the documents;
     // an approval puts the row on the Digio path.
     return prisma.agentKyc.update({
@@ -140,9 +166,9 @@ export const prismaAgentKycRepository: AgentKycRepository = {
       data: {
         ...rest,
         digioPayload: digioPayload as Prisma.InputJsonValue,
-        recordedVia: 'DIGIO',
+        recordedVia: via,
         recordedById: null,
-        ...(update.status === 'VERIFIED' ? { method: 'DIGIO' } : {}),
+        ...(update.status === 'VERIFIED' ? { method: via } : {}),
       },
       include: withAgent,
     });

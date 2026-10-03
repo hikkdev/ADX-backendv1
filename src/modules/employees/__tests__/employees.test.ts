@@ -21,6 +21,8 @@ const { repository, users, auth, identifiers, integrations } = vi.hoisted(() => 
     create: vi.fn(),
     update: vi.fn(),
     remove: vi.fn(),
+    // Account lifecycle (2 Oct 2026): the delete guard's read — nothing behind the record unless a test says so.
+    findHistory: vi.fn(async () => ({ kycRecords: 0, interviews: 0, managedAgents: 0, departmentsHeaded: 0, actions: 0 })),
   },
   users: { userExists: vi.fn() },
   auth: { createInvite: vi.fn() },
@@ -29,6 +31,9 @@ const { repository, users, auth, identifiers, integrations } = vi.hoisted(() => 
 }));
 
 vi.mock('../prisma-employees.repository', () => ({ prismaEmployeeRepository: repository }));
+// Account lifecycle (2 Oct 2026): whether the person's account is closed — open unless a test says so.
+const { accountFacts } = vi.hoisted(() => ({ accountFacts: { findAccountFacts: vi.fn(async () => null), accountClosedAt: vi.fn(async (): Promise<Date | null> => null) } }));
+vi.mock('../../../shared/party-status/account-facts', () => accountFacts);
 vi.mock('../../users', () => users);
 vi.mock('../../auth', () => auth);
 vi.mock('../../identifiers', () => identifiers);
@@ -57,13 +62,13 @@ const record = (over: Record<string, unknown> = {}) => ({
   department: 'Ops',
   designation: 'Coordinator',
   isActive: true,
-  passportPhotoUrl: 'https://files.adx.co/passport.png',
+  passportPhotoUrl: 'https://files.adx.in/passport.png',
   ndaAgreementUrl: null,
-  salarySlipUrls: ['https://files.adx.co/slip-1.pdf'],
+  salarySlipUrls: ['https://files.adx.in/slip-1.pdf'],
   complianceFormUrls: [],
   epfFormUrls: [],
   gratuityFormUrls: [],
-  user: { id: 'usr_1', name: 'Asha', mobile: '+919845012210', email: 'asha@adx.co' },
+  user: { id: 'usr_1', name: 'Asha', mobile: '+919845012210', email: 'asha@adx.in' },
   ...over,
 });
 
@@ -105,8 +110,8 @@ describe('creating a record', () => {
 
   it('sends the console invitation through auth, carrying the role it was given', async () => {
     auth.createInvite.mockResolvedValue({ id: 'inv_1' });
-    await inviteEmployeeToConsole('asha@adx.co', { method: 'GOOGLE', roleConfigId: 'rc_1' }, 'adm_1');
-    expect(auth.createInvite).toHaveBeenCalledWith({ email: 'asha@adx.co', method: 'GOOGLE', roleConfigId: 'rc_1' }, 'adm_1');
+    await inviteEmployeeToConsole('asha@adx.in', { method: 'GOOGLE', roleConfigId: 'rc_1' }, 'adm_1');
+    expect(auth.createInvite).toHaveBeenCalledWith({ email: 'asha@adx.in', method: 'GOOGLE', roleConfigId: 'rc_1' }, 'adm_1');
   });
 });
 
@@ -119,7 +124,7 @@ describe('reading one back', () => {
 
   it('hands the URLs over to a caller who holds the permission', async () => {
     const full = await getEmployeeByUserId('usr_1', { sub: 'adm_1', roles: ['ADMIN'], perms: ['hr.documents.view'] });
-    expect(full).toMatchObject({ passportPhotoUrl: 'https://files.adx.co/passport.png' });
+    expect(full).toMatchObject({ passportPhotoUrl: 'https://files.adx.in/passport.png' });
     expect(full).not.toHaveProperty('documentsMasked');
   });
 
@@ -149,9 +154,9 @@ describe('reading one back', () => {
     expect(hrmsLinkFor('E-1', { provider: 'NONE', employeeLinkTemplate: 'https://x/{externalId}' })).toBeNull();
   });
 
-  it('applies the launch rule: an admin with no role config holds everything', async () => {
-    const full = await getEmployeeByUserId('usr_1', { sub: 'adm_1', roles: ['ADMIN'] });
-    expect(full).not.toHaveProperty('documentsMasked');
+  it('RP-1: an admin with no role config holds nothing, so the documents are masked', async () => {
+    const masked = await getEmployeeByUserId('usr_1', { sub: 'adm_1', roles: ['ADMIN'] });
+    expect(masked).toHaveProperty('documentsMasked', true);
   });
 
   it('is a 404 when there is no record', async () => {
@@ -266,5 +271,34 @@ describe('Lot G (Q122/Q140): the department record and the work fields', () => {
     repository.findDirectory.mockResolvedValue([{ userId: 'usr_1', department: 'ops (old string)', designation: 'Coordinator', isActive: true, user: { name: 'Asha' }, departmentRecord: { name: 'Operations' } }]);
     const people = await listActiveEmployeesForDirectory();
     expect(people[0]).toMatchObject({ department: 'Operations' });
+  });
+});
+
+describe('account lifecycle (2 Oct 2026): Remove HR record is for a mistake', () => {
+  it('refuses a record with KYC or desk work behind it — 409 EMPLOYEE_HAS_HISTORY with the blockers, pointing to Deactivate', async () => {
+    repository.findSummaryByUserId.mockResolvedValue(record());
+    repository.findHistory.mockResolvedValue({ kycRecords: 1, interviews: 0, managedAgents: 2, departmentsHeaded: 0, actions: 0 });
+    await expect(deleteEmployee('usr_1')).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'EMPLOYEE_HAS_HISTORY',
+      details: {
+        instead: 'DEACTIVATE',
+        blockers: [
+          { kind: 'kycRecords', label: 'KYC record', count: 1 },
+          { kind: 'managedAgents', label: 'agents managed', count: 2 },
+        ],
+      },
+    });
+    expect(repository.remove).not.toHaveBeenCalled();
+    expect(repository.findHistory).toHaveBeenCalledWith('emp_1', 'usr_1');
+  });
+});
+
+describe('account lifecycle (2 Oct 2026): a closed account’s HR record is never switched back on', () => {
+  it('refuses isActive true for a closed account — 409 ACCOUNT_CLOSED, nothing written', async () => {
+    repository.findSummaryByUserId.mockResolvedValue(record({ isActive: false }));
+    accountFacts.accountClosedAt.mockResolvedValueOnce(new Date());
+    await expect(updateEmployee('usr_1', { isActive: true })).rejects.toMatchObject({ statusCode: 409, code: 'ACCOUNT_CLOSED' });
+    expect(repository.update).not.toHaveBeenCalled();
   });
 });

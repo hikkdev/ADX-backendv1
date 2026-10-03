@@ -22,10 +22,12 @@ Mounted at `/api/v1/hr`, `authenticate` + ADMIN at the router.
 
 | Method | Path | What |
 | --- | --- | --- |
-| GET | `/holidays?year=2026` | The year's list, in date order, as `{ id, date: 'YYYY-MM-DD', name, region }` |
+| GET | `/holidays?year=2026` | The year's list, in date order, as `{ id, date: 'YYYY-MM-DD', name, region, kind, source, tentative }`; hidden calendar rows left out (HC-1) |
+| GET | `/holidays/calendar` | HC-1 (`hr.view`): `{ enabled, url, includeObservances, lastSync: { at, added, updated, adopted, skipped, error, years } \| null }` |
+| POST | `/holidays/sync` | HC-1 (`hr.edit`): `{ years?: number[] }` (default this year and next, IST) → `{ added, updated, adopted, skipped, years }`; **409** `HOLIDAY_CALENDAR_OFF` / `HOLIDAY_SYNC_RUNNING`; **502** `HOLIDAY_CALENDAR_UNAVAILABLE` (nothing written); audited |
 | POST | `/holidays` | `{ date, name, region? }` → **201**; **409** when that date already has a holiday for that region |
-| PATCH | `/holidays/:holidayId` | Any of the three; an empty patch is **400**; moving onto an existing day is **409** |
-| DELETE | `/holidays/:holidayId` | 200, or 404 |
+| PATCH | `/holidays/:holidayId` | Any of the three; an empty patch is **400**; moving onto an existing day is **409**; HC-1: a CALENDAR row turns MANUAL |
+| DELETE | `/holidays/:holidayId` | 200, or 404; HC-1: a CALENDAR row is hidden (`hiddenAt`, audited `HOLIDAY_HIDDEN`), a MANUAL one deleted |
 | GET | `/people?q&kind=STAFF\|AGENT&active=true&includeInactive=true` | The registry (below); E10-1: `includeInactive` |
 | GET | `/departments?q&status=ACTIVE\|INACTIVE&sort=name\|newest\|members&page&pageSize` | Lot G (Q122): the list contract `{ items, total, page, pageSize, counts }`, a `memberCount` and the `head` card on every row |
 | POST | `/departments` | `{ name, code?, description?, headId?, parentId?, regions?, openRoles?, isActive? }` → **201**; `code` derived from the name when omitted; a name or code already taken is **409**; a head who is not an Employee row or a parent that does not exist is **404** |
@@ -75,7 +77,26 @@ one that already exists, or created with a code derived from the name), and
 the rows carrying it are linked. Idempotent — a second boot finds nothing
 unlinked and writes nothing; a record ops renamed is never touched.
 
+## The public calendar (HC-1, 1 Oct 2026)
+
+`holiday-calendar.service.ts` reads the iCal feed Settings › Integrations ›
+Holiday calendar names (`holidayCalendar { enabled = true, url = Google's
+"Holidays in India", includeObservances = false }`) — weekly (the
+`holiday-calendar` job, Monday 03:00 IST), once at boot when next year has
+no CALENDAR rows, and on "Sync now". `holiday-calendar.parser.ts` unfolds
+and unescapes the feed: `Public holiday` → PUBLIC, `Observance` → OPTIONAL
+(only with `includeObservances`), `Date is tentative` → `tentative`. The
+rules: a row carrying the event's id follows the feed unless it is hidden or
+was edited (then MANUAL — the person's); a day typed by hand wins (`skipped`)
+except the old seed's rows, which are adopted; two events on one day share
+the row (" · ", PUBLIC wins); nothing is deleted; a fetch or parse failure
+writes nothing and is recorded in AppConfig `holiday-calendar-sync`.
+
 ## The seed
+
+HC-1: retired while the calendar is on — `ensureHolidayCalendar()` runs it
+only while Settings › Integrations has the calendar off. The file stays: the
+sync adopts the rows it wrote.
 
 `ensureHolidays()` runs from `bootstrap/register-modules.ts` at boot, beside
 `ensureSystemRoles`, not awaited and skipped under `NODE_ENV=test`. It walks
@@ -129,7 +150,8 @@ write, which is also what makes the seed idempotent.
 
 - `hrRouter`.
 - `holidaysInRange(from, to)` and `findPerson(userId)` — for `schedule`.
-- `ensureHolidays()` — for bootstrap.
+- `ensureHolidays()` — the old seed; `ensureHolidayCalendar()` — for bootstrap (HC-1).
+- `runScheduledHolidaySync()` — for the weekly `holiday-calendar` job (HC-1).
 - `ensureDepartments()` — for bootstrap (Lot G); `DepartmentView`, `DepartmentDetail` types.
 
 ## Dependencies

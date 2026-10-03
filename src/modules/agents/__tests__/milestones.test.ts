@@ -11,7 +11,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  * inactive and ordered; and the reward is a decimal string end to end.
  */
 
-const { repository, agents, payouts } = vi.hoisted(() => ({
+const { repository, agents, payouts, compensation } = vi.hoisted(() => ({
   repository: {
     findActiveTemplates: vi.fn(),
     findTemplates: vi.fn(),
@@ -34,11 +34,16 @@ const { repository, agents, payouts } = vi.hoisted(() => ({
   },
   agents: { requireAgentProfile: vi.fn(), findAgentProfile: vi.fn() },
   payouts: { recordIncentive: vi.fn() },
+  /* CP-5: the quota tracker is the compensation module's standing. Mocked
+     here so the board's own derivation is what this file tests, and so a
+     unit test never reaches for a database to find out what day it is. */
+  compensation: { standingFor: vi.fn() },
 }));
 
 vi.mock('../milestones/prisma-agent-milestones.repository', () => ({ prismaAgentMilestonesRepository: repository }));
 vi.mock('../agents.service', () => agents);
 vi.mock('../../payouts', () => ({ recordIncentive: payouts.recordIncentive }));
+vi.mock('../compensation/compensation.service', () => compensation);
 
 import { Decimal } from '../../../shared/money';
 import {
@@ -103,6 +108,89 @@ beforeEach(() => {
   repository.hasTemplateOfType.mockResolvedValue(false);
   payouts.recordIncentive.mockResolvedValue({ id: 'inc_1', amount: new Decimal('5000.00'), status: 'PENDING_VERIFICATION' });
   repository.claim.mockImplementation(async (_id, data) => row({ ...data, completedAt: NOW }));
+  // CP-5: by default the agent is not on the quota model, which is every
+  // agent before CP-1 and keeps every test below reading the old board.
+  compensation.standingFor.mockResolvedValue({ onTheQuotaModel: false, dailyQuota: null });
+});
+
+/** CP-5: an agent on the salary-and-quota model, as `standingFor` answers. */
+const standing = (over: Record<string, unknown> = {}) => ({
+  agentId: 'agt_1',
+  day: '2026-09-11',
+  month: '2026-09',
+  onTheQuotaModel: true,
+  dailyQuota: 10,
+  workingDaysPerMonth: 26,
+  doneToday: 7,
+  quotaLeftToday: 3,
+  doneThisMonth: 120,
+  monthlySalary: '25000.00',
+  plannedUnitCost: '96.15',
+  commissionPerExtra: '105.77',
+  salaryPerOnboarding: '208.33',
+  ...over,
+});
+
+/**
+ * CP-5 — the daily quota is a tracker, not a milestone.
+ *
+ * The owner's model pays the quota through the salary. So the quota appears
+ * on the board (it is what the agent is working against all day) but it can
+ * never be claimed, and a milestone whose target sits INSIDE the planned
+ * month is flagged, because paying a bonus for it would pay twice for work
+ * the salary already bought.
+ */
+describe('CP-5: the quota beside the milestones', () => {
+  it('draws the day\'s quota as an unclaimable tracker, with what the next one past it earns', async () => {
+    compensation.standingFor.mockResolvedValue(standing());
+    const board = await getMilestoneBoard('usr_agent', 'ALL', NOW);
+    expect(board.quota).toEqual({
+      day: '2026-09-11',
+      target: 10,
+      progress: 7,
+      leftToday: 3,
+      pct: 70,
+      claimable: false,
+      commissionPerExtra: '105.77',
+      plannedPerMonth: 260,
+    });
+  });
+
+  it('has no tracker for an agent off the quota model, rather than one measured against nothing', async () => {
+    const board = await getMilestoneBoard('usr_agent', 'ALL', NOW);
+    expect(board.quota).toBeNull();
+  });
+
+  it('never fails the board over the tracker', async () => {
+    compensation.standingFor.mockRejectedValue(new Error('the pay read fell over'));
+    const board = await getMilestoneBoard('usr_agent', 'ALL', NOW);
+    expect(board.quota).toBeNull();
+    expect(board.milestones).toHaveLength(1);
+  });
+
+  it('flags an onboarding milestone whose target sits inside the planned month', async () => {
+    // Ten a day over twenty-six days is 260 planned; a target of 10 is bought and paid for already.
+    compensation.standingFor.mockResolvedValue(standing());
+    const board = await getMilestoneBoard('usr_agent', 'ALL', NOW);
+    expect(board.milestones[0]!.stretch).toBe(false);
+  });
+
+  it('calls a target above the planned month a stretch, which is what a bonus is for', async () => {
+    compensation.standingFor.mockResolvedValue(standing());
+    repository.findForAgent.mockResolvedValue([row({ template: template({ target: 300 }) })]);
+    const board = await getMilestoneBoard('usr_agent', 'ALL', NOW);
+    expect(board.milestones[0]!.stretch).toBe(true);
+  });
+
+  it('judges nothing when the agent is off the model, or when the milestone does not count onboardings', async () => {
+    const off = await getMilestoneBoard('usr_agent', 'ALL', NOW);
+    expect(off.milestones[0]!.stretch).toBeNull();
+
+    compensation.standingFor.mockResolvedValue(standing());
+    repository.findForAgent.mockResolvedValue([row({ template: template({ type: 'REVENUE', target: 5 }) })]);
+    const revenue = await getMilestoneBoard('usr_agent', 'ALL', NOW);
+    expect(revenue.milestones[0]!.stretch).toBeNull();
+  });
 });
 
 describe('the board', () => {

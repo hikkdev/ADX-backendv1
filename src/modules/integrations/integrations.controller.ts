@@ -8,6 +8,7 @@ import {
   isPublicOsmTileTemplate,
   resolveAudiencePolicy,
   resolveAudienceProviders,
+  resolveHolidayCalendarConfig,
   updateIntegrationsConfig,
   type AudiencePolicyPatch,
   type IntegrationsConfig,
@@ -16,6 +17,7 @@ import {
 import { AUDIENCE_FIELD_CATALOGUE, AUDIENCE_FIELD_GROUPS, AUDIENCE_FIELD_PATTERN, AUDIENCE_TEST_POINT, testAudienceVendor } from '../../shared/audience';
 import { readEtherealAccount, testEmailDoor } from '../../shared/email';
 import { testQrEngine } from '../../shared/qr-engine';
+import { resolveVerificationSettings } from '../../shared/verification';
 import { toIntegrationsResponse, type IntegrationsReadExtras } from './integrations.mapper';
 import { audienceTestSchema, emailTestSchema, patchSchemas, sectionSchema } from './integrations.schema';
 
@@ -37,7 +39,7 @@ export async function getIntegrationsHandler(_req: Request, res: Response): Prom
   res.json({ success: true, data: toIntegrationsResponse(cfg, await readExtras(cfg)) });
 }
 
-// PUT /integrations — body: { section: 'sms'|'email'|'storage'|'kyc'|'twilio'|'googleMaps'|'razorpay'|'stripe'|'branding'|'hrms'|'workTool'|'maps'|'audience', patch: {...} }
+// PUT /integrations — body: { section: 'sms'|'email'|'storage'|'kyc'|'twilio'|'googleMaps'|'razorpay'|'stripe'|'branding'|'hrms'|'workTool'|'maps'|'audience'|'holidayCalendar'|…, patch: {...} }
 // Any field omitted (or sent empty) from `patch` keeps its existing stored
 // value — since secrets are never sent back to the client, the form can't
 // round-trip the real value anyway, only a deliberately-entered new one.
@@ -120,8 +122,102 @@ export async function updateIntegrationsHandler(req: Request, res: Response): Pr
     }
   }
 
+  // Phase D (1 Oct 2026): the workflow overrides are merged key by key over
+  // the stored ones — blank keeps, null goes back to the default — and the
+  // per-party template names they replace (`templateName`, `templates`) are
+  // cleared off the row on the first KYC write.
+  if (section === 'kyc') {
+    const { workflowTemplates: overridesPatch, ...rest } = patchParsed.data as z.output<(typeof patchSchemas)['kyc']>;
+    patch = { ...rest };
+    if (overridesPatch !== undefined) {
+      const merged: Record<string, unknown> = { ...(before.kyc?.workflowTemplates ?? {}) };
+      for (const [key, value] of Object.entries(overridesPatch)) {
+        if (value === null) delete merged[key];
+        else if (value !== undefined && value !== '') merged[key] = value;
+      }
+      patch.workflowTemplates = merged;
+    }
+    const legacy = (before.kyc ?? {}) as Record<string, unknown>;
+    if ('templateName' in legacy) patch.templateName = null;
+    if ('templates' in legacy) patch.templates = null;
+  }
+
+  // Cashfree Phase 1: the routing's three sub-objects are merged key by key
+  // over the stored ones (a section write swaps whole keys) — blank keeps,
+  // null on a key goes back to its default.
+  if (section === 'verificationRouting') {
+    const { checks, breaker, composites, ...rest } = patchParsed.data as z.output<(typeof patchSchemas)['verificationRouting']>;
+    patch = { ...rest };
+    const mergeOver = (stored: object | undefined, incoming: object | undefined): Record<string, unknown> | undefined => {
+      if (incoming === undefined) return undefined;
+      const merged: Record<string, unknown> = { ...(stored ?? {}) };
+      for (const [key, value] of Object.entries(incoming)) {
+        if (value === null) delete merged[key];
+        else if (value !== undefined) merged[key] = value;
+      }
+      return merged;
+    };
+    const stored = before.verificationRouting ?? {};
+    const nextChecks = mergeOver(stored.checks, checks);
+    const nextBreaker = mergeOver(stored.breaker, breaker);
+    const nextComposites = mergeOver(stored.composites, composites);
+    if (nextChecks) patch.checks = nextChecks;
+    if (nextBreaker) patch.breaker = nextBreaker;
+    if (nextComposites) patch.composites = nextComposites;
+  }
+  // The public key travels as PEM text; a `\n`-escaped single line is unfolded before it is stored.
+  if (section === 'secureId' && typeof patch.publicKey === 'string' && patch.publicKey) {
+    patch.publicKey = patch.publicKey.replace(/\\n/g, '\n').trim();
+  }
+
   await updateIntegrationsConfig(section, patch);
   await logActivity(req.user!.sub, 'INTEGRATION_CONFIG_UPDATED', req, { section, fields: Object.keys(patchParsed.data) });
+
+  // Cashfree Phase 1: a change of routing decides who is asked to verify a
+  // person and when the backup takes over — named in the trail with the
+  // settings in force before and after. No key is part of this section.
+  if (section === 'verificationRouting') {
+    const after = await getIntegrationsConfig();
+    await logActivity(req.user!.sub, 'VERIFICATION_ROUTING_CHANGED', {
+      req,
+      targetType: 'AppConfig',
+      targetId: 'integrations',
+      module: 'integrations',
+      diff: auditDiff(resolveVerificationSettings(before.verificationRouting), resolveVerificationSettings(after.verificationRouting)),
+      metadata: { fields: Object.keys(patchParsed.data) },
+    });
+  }
+  // The Secure ID card: which keys changed, never what they are; the mode
+  // switch with its before and after, since it moves every call between the
+  // sandbox and the live host.
+  if (section === 'secureId') {
+    await logActivity(req.user!.sub, 'SECURE_ID_CONFIG_UPDATED', {
+      req,
+      targetType: 'AppConfig',
+      targetId: 'integrations',
+      module: 'integrations',
+      diff: auditDiff({ testMode: before.secureId?.testMode ?? null, publicKeySet: Boolean(before.secureId?.publicKey) }, {
+        testMode: 'testMode' in patch ? patch.testMode : (before.secureId?.testMode ?? null),
+        publicKeySet: patch.publicKey === null ? false : Boolean(patch.publicKey || before.secureId?.publicKey),
+      }),
+      metadata: { fields: Object.keys(patchParsed.data) },
+    });
+  }
+
+  // HC-1: the holiday calendar decides which days the whole console treats
+  // as holidays — the switch, the address and the observances choice named
+  // in the trail with what they were and what they became.
+  if (section === 'holidayCalendar') {
+    const after = await getIntegrationsConfig();
+    await logActivity(req.user!.sub, 'HOLIDAY_CALENDAR_CONFIG_UPDATED', {
+      req,
+      targetType: 'AppConfig',
+      targetId: 'integrations',
+      module: 'integrations',
+      diff: auditDiff(resolveHolidayCalendarConfig(before.holidayCalendar), resolveHolidayCalendarConfig(after.holidayCalendar)),
+      metadata: { fields: Object.keys(patchParsed.data) },
+    });
+  }
 
   // Lot D (Q129): the provider switch is a state change ops will want to find
   // in the trail by name, with what it was and what it became.
@@ -133,6 +229,18 @@ export async function updateIntegrationsHandler(req: Request, res: Response): Pr
       module: 'integrations',
       diff: auditDiff({ kycProvider: before.kyc?.kycProvider ?? 'DIGIO' }, { kycProvider: patchParsed.data.kycProvider }),
       metadata: { by: 'ops' },
+    });
+  }
+
+  // Phase D: a changed workflow id changes what every KYC request of that
+  // kind runs on Digio — named in the trail with the ids before and after.
+  if (section === 'kyc' && patch.workflowTemplates !== undefined) {
+    await logActivity(req.user!.sub, 'KYC_WORKFLOW_TEMPLATES_CHANGED', {
+      req,
+      targetType: 'AppConfig',
+      targetId: 'integrations',
+      module: 'integrations',
+      diff: auditDiff(before.kyc?.workflowTemplates ?? {}, patch.workflowTemplates as object),
     });
   }
 

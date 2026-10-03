@@ -19,6 +19,7 @@ const { repository, listings, notifications, orders, audit } = vi.hoisted(() => 
     findCreative: vi.fn(),
     findCreatives: vi.fn(),
     listCreativesPage: vi.fn(),
+    latestCreativeAnalyses: vi.fn(async () => []),
     findSpotsByOrderIds: vi.fn(),
     findCampaign: vi.fn(),
   },

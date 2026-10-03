@@ -5,13 +5,14 @@ import { Decimal, money, type Money } from '../../shared/money';
 import { MAX_LIST_PAGE_SIZE, type ListPage } from '../../shared/pagination';
 import { dayWindowISTFor } from '../../shared/time';
 import { advertiserFunnel, findAdvertiserLabels, type AdvertiserFunnel } from '../advertisers';
-import { findAgentLabels, getLeaderboardForCity, type LeaderboardView } from '../agents';
+import { agentCostOverWindow, findAgentLabels, getLeaderboardForCity, type CostSide, type LeaderboardView } from '../agents';
+import { launchQueueSummary, WAITING_REASONS, type WaitingReason } from '../campaigns';
 import { leadFunnel, LEAD_STAGES, type LeadFunnelRows } from '../leads';
 import { employeesOverview, workloadReport, type EmployeesOverview, type WorkloadReport } from '../employees';
 import { findPrintPartnerLabels } from '../print-partners';
 import { cityKeyFor } from '../pricing';
 import { findPublisherLabels } from '../publishers';
-import { supplyFunnel, type SupplyFunnel } from '../supply';
+import { RISK_WINDOW_DAYS, supplyFunnel, type SupplyFunnel } from '../supply';
 import { prismaSectionOverviewsRepository as repository } from './prisma-section-overviews.repository';
 import type { CityCount, CityGroup, DayCount, DaySum, GroupCount, KycStateCountMap, LeadTimeToConvert, Scope, Window } from './section-overviews.repository';
 
@@ -33,8 +34,8 @@ import type { CityCount, CityGroup, DayCount, DaySum, GroupCount, KycStateCountM
  * here.
  */
 
-// LH9: the Leads section joined the six user sections.
-export const SECTIONS = ['publishers', 'advertisers', 'agents', 'print-partners', 'employees', 'users', 'leads'] as const;
+// LH9: the Leads section joined the six user sections; the Listings section joined on 2 Oct 2026, and Campaigns the same day.
+export const SECTIONS = ['publishers', 'advertisers', 'agents', 'print-partners', 'employees', 'users', 'leads', 'listings', 'campaigns'] as const;
 export type Section = (typeof SECTIONS)[number];
 
 export const SECTION_OVERVIEW_CACHE_SECONDS = 60;
@@ -104,14 +105,103 @@ const cityRows = (rows: readonly CityCount[], href: (slug: string) => string): C
 export type LabelledSumRow = { key: string; label: string; displayId: string | null; href: string; amount: Money };
 export type LabelledCountRow = { key: string; label: string; displayId: string | null; href: string; count: number };
 
+/**
+ * CP-2: what an onboarding cost over the window.
+ *
+ * `perOnboarding` is the figure the owner asked for — the money that buys
+ * accounts, over the accounts agents actually brought in. It deliberately
+ * divides by the AGENT-led onboardings only: an account that walked in
+ * through the app cost no agent anything, and folding it into the
+ * denominator would flatter the number. `selfServe` is reported beside it so
+ * the split is visible rather than hidden.
+ *
+ * `basis` is the salary committed plus the rewards paid; the per-onboarding
+ * commission sits outside it in `commission`, and `allInPerOnboarding` adds
+ * it back for anyone who wants the whole bill over the same denominator.
+ *
+ * Null when nothing was onboarded: a window that produced none has no cost
+ * per one, and a zero there would read as "free".
+ */
+export type CostBlock = {
+  side: CostSide;
+  perOnboarding: Money | null;
+  allInPerOnboarding: Money | null;
+  salary: Money;
+  rewards: Money;
+  commission: Money;
+  basis: Money;
+  allIn: Money;
+  onboardings: { byAgent: number; selfServe: number };
+  /** How many agents of this side have a salary recorded at all — the figure's coverage. */
+  agentsOnTerms: number;
+};
+
+/** CP-2: the same figure for one city, folded onto the `byCity` row that page already draws. */
+export type CityCost = { basis: Money; onboardings: number; perOnboarding: Money | null };
+
+/**
+ * The cost block and the per-city figures behind it.
+ *
+ * The money comes from `agents` (it owns the salary and incentive rows and
+ * exports the aggregate); the onboardings come from this module's own
+ * repository. They are keyed together by city the way every other breakdown
+ * here is — a slug, or the one "Other (typed)" bucket.
+ */
+/**
+ * The cost of one onboarding: the money, over what it bought.
+ *
+ * Null twice over, and both matter. With nothing onboarded there is no cost
+ * per one. With no money recorded there is no cost either — a zero basis
+ * means no agent here has a salary on record, not that the work was free,
+ * and printing "₹0.00" would say the opposite of what is true. The screens
+ * read the null as "not recorded yet" and say which agents are missing.
+ *
+ * The division lives here rather than being imported from `agents` because
+ * it is a division; pulling it across a module boundary would buy nothing
+ * and would put the arithmetic behind a mock in every test of this file.
+ */
+const perOnboarding = (amount: Money, onboardings: number): Money | null =>
+  onboardings <= 0 || new Decimal(amount).lessThanOrEqualTo(0) ? null : money(new Decimal(amount).dividedBy(onboardings).toFixed(2));
+
+async function costOf(window: Window, scope: Scope, side: CostSide): Promise<{ block: CostBlock; byCity: Map<string, CityCost> }> {
+  const [cost, onboardings] = await Promise.all([agentCostOverWindow(window, scope, side), repository.onboardingsByProvenance(window, scope, side)]);
+  const keyOf = (row: { slug: string | null }): string => row.slug ?? OTHER_CITY_KEY;
+  const byCity = new Map<string, CityCost>();
+  for (const row of cost.byCity) byCity.set(keyOf(row), { basis: row.basis, onboardings: 0, perOnboarding: null });
+  for (const row of onboardings.byCity) {
+    const key = keyOf(row);
+    const current = byCity.get(key) ?? { basis: money('0'), onboardings: 0, perOnboarding: null };
+    current.onboardings += row.count;
+    byCity.set(key, current);
+  }
+  for (const [, row] of byCity) row.perOnboarding = perOnboarding(row.basis, row.onboardings);
+  return {
+    block: {
+      side,
+      perOnboarding: perOnboarding(cost.basis, onboardings.byAgent),
+      allInPerOnboarding: perOnboarding(cost.allIn, onboardings.byAgent),
+      salary: cost.salary,
+      rewards: cost.rewards,
+      commission: cost.commission,
+      basis: cost.basis,
+      allIn: cost.allIn,
+      onboardings: { byAgent: onboardings.byAgent, selfServe: onboardings.selfServe },
+      agentsOnTerms: cost.agentsOnTerms,
+    },
+    byCity,
+  };
+}
+
 export type PublishersOverview = Base & {
   section: 'publishers';
   tiles: { total: Figure; newInWindow: Figure; active: Figure; kyc: KycByState; suspended: Figure; closed: Figure };
   /** The supply funnel as `supply` answers it — the platform's state now, not the window's. */
   funnel: SupplyFunnel;
   series: { newPublishers: Series; firstListingsPublished: Series; firstBookings: Series };
+  /** CP-2: what a publisher onboarded cost in agent money over the window. */
+  cost: CostBlock;
   breakdowns: {
-    byCity: ListPage<CityRow & { listings: number; gmv: Money }>;
+    byCity: ListPage<CityRow & { listings: number; gmv: Money; cost: Money | null; onboardings: number }>;
     byCategory: ListPage<{ key: string; label: string; href: string; publishers: number; listings: number }>;
     bySubscriptionTier: ListPage<CountRow>;
     byAgent: ListPage<LabelledCountRow>;
@@ -126,8 +216,10 @@ export type AdvertisersOverview = Base & {
   /** The demand funnel as `advertisers` answers it — the platform's state now. */
   funnel: AdvertiserFunnel;
   series: { newAdvertisers: Series; firstCampaigns: Series; spend: MoneySeries };
+  /** CP-2: what an advertiser onboarded cost in agent money over the window. */
+  cost: CostBlock;
   breakdowns: {
-    byCity: ListPage<CityRow & { spend: Money }>;
+    byCity: ListPage<CityRow & { spend: Money; cost: Money | null; onboardings: number }>;
     byIndustry: ListPage<CountRow>;
     byPackageTier: ListPage<CountRow>;
     byAgent: ListPage<LabelledCountRow>;
@@ -148,7 +240,9 @@ export type AgentsOverview = Base & {
     suspended: Figure;
   };
   series: { onboardingsDone: Series; visitsCompleted: Series; jobsCompleted: Series };
-  breakdowns: { byCity: ListPage<CityRow>; byTier: ListPage<CountRow> };
+  /** CP-2: the blended cost per onboarding, both sides together. It never equals the two side figures added up — an agent holding both roles counts on both. */
+  cost: CostBlock;
+  breakdowns: { byCity: ListPage<CityRow & { cost: Money | null; onboardings: number }>; byTier: ListPage<CountRow> };
   top: { byCommission: ListPage<LabelledSumRow>; leaderboard: LeaderboardView | null };
   money: { incentivesPaid: MoneyFigure };
 };
@@ -246,7 +340,87 @@ export type LeadsOverview = Base & {
   money: { incentives: MoneyFigure; topUps: MoneyFigure };
 };
 
+/**
+ * The Listings overview (2 Oct 2026, the owner: an Overview tab first on
+ * Listings like every other section's). The inventory now and over the
+ * window: how many listings there are, how many are live, waiting on the
+ * desk or suspended (states — no previous), how many were created and went
+ * live in the window, what was booked on them and the accrual gross they
+ * earned; the work waiting on the section's three queues; and the listings
+ * by status, city, category and publisher.
+ */
+export type ListingsOverview = Base & {
+  section: 'listings';
+  tiles: {
+    total: Figure;
+    live: Figure;
+    awaitingReview: Figure;
+    suspended: Figure;
+    newInWindow: Figure;
+    published: Figure;
+    bookings: Figure;
+  };
+  series: { newListings: Series; published: Series };
+  /** The section's three queues, as their tabs count them now. */
+  work: {
+    renewals: { due: number; lapsed: number; horizonDays: number };
+    claimsOpen: number;
+    verification: { due: number; lapsed: number; horizonDays: number };
+  };
+  breakdowns: {
+    byStatus: ListPage<CountRow>;
+    byCity: ListPage<CityRow & { live: number; gmv: Money }>;
+    byCategory: ListPage<{ key: string; label: string; href: string; count: number; live: number; gmv: Money }>;
+    byPublisher: ListPage<LabelledCountRow & { live: number }>;
+  };
+  money: { gmv: MoneyFigure };
+};
+
+/**
+ * The Campaigns overview (the Campaigns lot, 2 Oct 2026 — the owner:
+ * "Campaigns section feels too weak here"). The book now (live, scheduled,
+ * awaiting payment, waiting to launch — states), what the window did
+ * (paid, completed, cancelled, the booked value, the engagement), the three
+ * work lists, and the campaigns by status, city, goal and advertiser.
+ */
+export type CampaignsOverview = Base & {
+  section: 'campaigns';
+  tiles: {
+    live: Figure;
+    scheduled: Figure;
+    awaitingPayment: Figure;
+    /** Paid (or reservation-fee-paid) and blocked — the launch queue's size. A state. */
+    waitingToLaunch: Figure;
+    paid: Figure;
+    completed: Figure;
+    cancelled: Figure;
+    scans: Figure;
+    landingViews: Figure;
+    ctaClicks: Figure;
+    enquiries: Figure;
+  };
+  series: { bookedValue: MoneySeries; scans: Series };
+  work: {
+    /** SCHEDULED campaigns whose flight overlaps the next seven days (today included), the directory filtered to them. */
+    launchingSoon: { count: number; horizonDays: number; href: string };
+    /** LIVE campaigns ending within the next seven days, the directory ending-soonest first. */
+    endingSoon: { count: number; horizonDays: number; href: string };
+    /** The launch queue, by what each campaign waits on (a campaign waiting on two counts under both). */
+    waitingToLaunch: { total: number; href: string; byReason: ListPage<CountRow> };
+  };
+  breakdowns: {
+    byStatus: ListPage<CountRow>;
+    byCity: ListPage<CityRow & { live: number; bookedValue: Money }>;
+    byGoal: ListPage<CountRow & { live: number }>;
+    /** The ten advertisers whose campaigns paid in the window are worth the most. */
+    byAdvertiser: ListPage<LabelledSumRow & { count: number }>;
+  };
+  money: { bookedValue: MoneyFigure };
+};
+
 export type SectionOverview =
+  | CampaignsOverview
+  | ListingsOverview
   | LeadsOverview
   | PublishersOverview
   | AdvertisersOverview
@@ -441,6 +615,8 @@ async function publishers(resolved: ResolvedWindow, scope: Scope, now: Date): Pr
     repository.publisherPayoutsReleased(window, scope),
     repository.publisherPayoutsReleased(previous, scope),
   ]);
+  // CP-2: the agent money behind the window's publisher onboardings.
+  const cost = await costOf(window, scope, 'PUBLISHER');
   const [topRows, agentRows] = await Promise.all([
     labelled(
       top.map((row) => ({ key: row.key, amount: row.sum })),
@@ -466,11 +642,18 @@ async function publishers(resolved: ResolvedWindow, scope: Scope, now: Date): Pr
       firstBookings: seriesOf(resolved, firstBookings, firstBookingsBefore),
     },
     breakdowns: {
-      byCity: listOf(byCity.map((row) => ({ ...cityRowOf(row, (slug) => `/publishers?city=${encodeURIComponent(slug)}`), count: row.count, listings: row.listings, gmv: money(row.gmv) }))),
-      byCategory: listOf(byCategory.map((row) => ({ key: row.key, label: titleCase(row.key), href: `/listings?category=${row.key}`, publishers: row.publishers, listings: row.listings }))),
+      byCity: listOf(
+        byCity.map((row) => {
+          const place = cityRowOf(row, (slug) => `/publishers?city=${encodeURIComponent(slug)}`);
+          const zone = cost.byCity.get(place.key);
+          return { ...place, count: row.count, listings: row.listings, gmv: money(row.gmv), cost: zone?.perOnboarding ?? null, onboardings: zone?.onboardings ?? 0 };
+        }),
+      ),
+      byCategory: listOf(byCategory.map((row) => ({ key: row.key, label: titleCase(row.key), href: `/listings/directory?category=${row.key}`, publishers: row.publishers, listings: row.listings }))),
       bySubscriptionTier: listOf(countRows(byTier, () => null)),
       byAgent: listOf(agentRows),
     },
+    cost: cost.block,
     top: { byEarnings: listOf(topRows) },
     money: { earningsPaid: moneyFigure(earnings, earningsBefore), payoutsReleased: moneyFigure(payouts, payoutsBefore) },
   };
@@ -525,6 +708,8 @@ async function advertisers(resolved: ResolvedWindow, scope: Scope, now: Date): P
     repository.advertiserTopUps(window, scope),
     repository.advertiserTopUps(previous, scope),
   ]);
+  // CP-2: the agent money behind the window's advertiser onboardings.
+  const cost = await costOf(window, scope, 'ADVERTISER');
   const [topRows, agentRows] = await Promise.all([
     labelled(
       top.map((row) => ({ key: row.key, amount: row.sum })),
@@ -550,11 +735,18 @@ async function advertisers(resolved: ResolvedWindow, scope: Scope, now: Date): P
       spend: moneySeriesOf(resolved, spend, spendBefore),
     },
     breakdowns: {
-      byCity: listOf(byCity.map((row) => ({ ...cityRowOf(row, (slug) => `/advertisers?city=${encodeURIComponent(slug)}`), count: row.count, spend: money(row.spend) }))),
+      byCity: listOf(
+        byCity.map((row) => {
+          const place = cityRowOf(row, (slug) => `/advertisers?city=${encodeURIComponent(slug)}`);
+          const zone = cost.byCity.get(place.key);
+          return { ...place, count: row.count, spend: money(row.spend), cost: zone?.perOnboarding ?? null, onboardings: zone?.onboardings ?? 0 };
+        }),
+      ),
       byIndustry: industries,
       byPackageTier: listOf(countRows(byPackageTier, () => null)),
       byAgent: listOf(agentRows),
     },
+    cost: cost.block,
     top: { bySpend: listOf(topRows) },
     money: { walletBalanceHeld: stateMoney(walletBalance), topUps: moneyFigure(topUps, topUpsBefore) },
   };
@@ -607,6 +799,10 @@ async function agents(resolved: ResolvedWindow, scope: Scope, now: Date): Promis
     repository.incentivesPaid(previous, scope),
     scope.city ? getLeaderboardForCity(scope.city.trim(), 'MONTH', now) : Promise.resolve(null),
   ]);
+  /* CP-2: the blended figure — both sides over one denominator. It is NOT
+     the two side figures added up: an agent holding both roles is counted on
+     both sides, and their salary genuinely buys both. */
+  const cost = await costOf(window, scope, 'ALL');
   const topRows = await labelled(
     top.map((row) => ({ key: row.key, amount: row.sum })),
     findAgentLabels,
@@ -629,7 +825,16 @@ async function agents(resolved: ResolvedWindow, scope: Scope, now: Date): Promis
       visitsCompleted: seriesOf(resolved, visits, visitsBefore),
       jobsCompleted: seriesOf(resolved, jobs, jobsBefore),
     },
-    breakdowns: { byCity: listOf(cityRows(byCity, (slug) => `/agents?city=${encodeURIComponent(slug)}`)), byTier: tiers },
+    cost: cost.block,
+    breakdowns: {
+      byCity: listOf(
+        cityRows(byCity, (slug) => `/agents?city=${encodeURIComponent(slug)}`).map((row) => {
+          const zone = cost.byCity.get(row.key);
+          return { ...row, cost: zone?.perOnboarding ?? null, onboardings: zone?.onboardings ?? 0 };
+        }),
+      ),
+      byTier: tiers,
+    },
     top: { byCommission: listOf(topRows), leaderboard },
     money: { incentivesPaid: moneyFigure(incentives, incentivesBefore) },
   };
@@ -996,8 +1201,266 @@ async function leads(resolved: ResolvedWindow, scope: Scope, now: Date): Promise
   };
 }
 
+/* ── Listings (2 Oct 2026) ───────────────────────────────────────────── */
+
+/** The renewals tab's horizon — `GET /supply/rights-queue?horizonDays=60`, as the console asks it. */
+export const LISTING_RENEWALS_HORIZON_DAYS = 60;
+/** The verification tab's horizon — the widest risk window, as `GET /supply/verification-queue` reads it. Read when asked, so the constant stays supply's. */
+export const listingVerificationHorizonDays = (): number => Math.max(...Object.values(RISK_WINDOW_DAYS));
+
+/** The lifecycle in the order a listing walks it, with the console's words. */
+const LISTING_STATUS_LABEL: Record<string, string> = {
+  UNCLAIMED: 'Unclaimed',
+  DRAFT: 'Draft',
+  AWAITING_AGREEMENT: 'Awaiting agreement',
+  AWAITING_DOCUMENTS: 'Awaiting documents',
+  PENDING_REVIEW: 'Pending review',
+  AWAITING_SITE_VERIFICATION: 'Awaiting site check',
+  ACTIVE: 'Live',
+  SUSPENDED: 'Suspended',
+  REJECTED: 'Rejected',
+  INACTIVE: 'Inactive',
+};
+const LISTING_STATUS_ORDER = Object.keys(LISTING_STATUS_LABEL);
+
+async function listings(resolved: ResolvedWindow, scope: Scope, now: Date): Promise<ListingsOverview> {
+  const { window, previous } = resolved;
+  const verificationHorizonDays = listingVerificationHorizonDays();
+  const [
+    total,
+    totalBefore,
+    created,
+    createdBefore,
+    byStatus,
+    suspended,
+    newByDay,
+    newByDayBefore,
+    publishedByDay,
+    publishedByDayBefore,
+    bookings,
+    bookingsBefore,
+    gmv,
+    gmvBefore,
+    byCity,
+    byCategory,
+    byPublisher,
+    renewals,
+    claimsOpen,
+    verification,
+  ] = await Promise.all([
+    repository.listingsAsAt(window.end, scope),
+    repository.listingsAsAt(previous.end, scope),
+    repository.listingsCreated(window, scope),
+    repository.listingsCreated(previous, scope),
+    repository.listingsByStatus(scope),
+    repository.listingsSuspended(scope),
+    repository.listingsCreatedByDay(window, scope),
+    repository.listingsCreatedByDay(previous, scope),
+    repository.listingsPublishedByDay(window, scope),
+    repository.listingsPublishedByDay(previous, scope),
+    repository.listingBookings(window, scope),
+    repository.listingBookings(previous, scope),
+    repository.listingGmv(window, scope),
+    repository.listingGmv(previous, scope),
+    repository.listingsByCity(window, scope),
+    repository.listingsByCategory(window, scope),
+    repository.topPublishersByListings(scope, TOP_LIMIT),
+    repository.listingRenewalsDue(now, LISTING_RENEWALS_HORIZON_DAYS, scope),
+    repository.listingClaimsOpen(scope),
+    repository.listingVerificationsDue(now, verificationHorizonDays, scope),
+  ]);
+  const status = new Map(byStatus.map((row) => [row.key, row.count]));
+  const newListings = seriesOf(resolved, newByDay, newByDayBefore);
+  const published = seriesOf(resolved, publishedByDay, publishedByDayBefore);
+  const publisherRows = await labelled(byPublisher, findPublisherLabels, (id) => `/publishers/${id}`);
+  const statusRows = [...byStatus].sort((a, b) => LISTING_STATUS_ORDER.indexOf(a.key) - LISTING_STATUS_ORDER.indexOf(b.key));
+  return {
+    ...base('listings', resolved, scope.city, now),
+    tiles: {
+      total: figure(total, totalBefore),
+      live: stateFigure(status.get('ACTIVE') ?? 0),
+      awaitingReview: stateFigure(status.get('PENDING_REVIEW') ?? 0),
+      suspended: stateFigure(suspended),
+      newInWindow: figure(created, createdBefore),
+      published: published.total,
+      bookings: figure(bookings, bookingsBefore),
+    },
+    series: { newListings, published },
+    work: {
+      renewals: { ...renewals, horizonDays: LISTING_RENEWALS_HORIZON_DAYS },
+      claimsOpen,
+      verification: { ...verification, horizonDays: verificationHorizonDays },
+    },
+    breakdowns: {
+      byStatus: listOf(
+        countRows(
+          statusRows,
+          (key) => `/listings/directory?status=${key}`,
+          (key) => LISTING_STATUS_LABEL[key] ?? titleCase(key),
+        ),
+      ),
+      byCity: listOf(byCity.map((row) => ({ ...cityRowOf(row, (slug) => `/listings?city=${encodeURIComponent(slug)}`), count: row.count, live: row.live, gmv: money(row.gmv) }))),
+      byCategory: listOf(byCategory.map((row) => ({ key: row.key, label: titleCase(row.key), href: `/listings/directory?category=${row.key}`, count: row.count, live: row.live, gmv: money(row.gmv) }))),
+      byPublisher: listOf(publisherRows),
+    },
+    money: { gmv: moneyFigure(gmv, gmvBefore) },
+  };
+}
+
+/* ── Campaigns (2 Oct 2026) ──────────────────────────────────────────── */
+
+/** The work lists' horizon — "launching / ending in the next 7 days". */
+export const CAMPAIGN_WORK_HORIZON_DAYS = 7;
+
+const CAMPAIGN_STATUS_LABEL: Record<string, string> = {
+  DRAFT: 'Draft',
+  PENDING_PAYMENT: 'Awaiting payment',
+  SCHEDULED: 'Scheduled',
+  LIVE: 'Live',
+  PAUSED: 'Paused',
+  COMPLETED: 'Completed',
+  CANCELLED: 'Cancelled',
+};
+const CAMPAIGN_STATUS_ORDER = Object.keys(CAMPAIGN_STATUS_LABEL);
+const CAMPAIGN_GOAL_LABEL: Record<string, string> = {
+  BRAND_AWARENESS: 'Brand awareness',
+  DIGITAL_LIFT: 'Digital lift',
+  LOCAL_FOOTFALL: 'Local footfall',
+};
+export const WAITING_REASON_LABEL: Record<WaitingReason, string> = {
+  RESERVATION_FEE: 'Reservation fee',
+  PAYMENT: 'Payment',
+  DESIGN_QUOTE: 'Design quote',
+  KYC: 'KYC',
+  ARTWORK: 'Artwork',
+  PUBLISHER: 'Publisher',
+  AGENT: 'Agent',
+};
+
+async function campaigns(resolved: ResolvedWindow, scope: Scope, now: Date): Promise<CampaignsOverview> {
+  const { window, previous } = resolved;
+  // The work lists read flight days, which are stored as UTC midnights: today in India, as that midnight.
+  const today = todayIst(now);
+  const horizonEnd = shiftDay(today, CAMPAIGN_WORK_HORIZON_DAYS - 1);
+  const horizon: Window = { start: new Date(`${today}T00:00:00.000Z`), end: new Date(`${shiftDay(today, CAMPAIGN_WORK_HORIZON_DAYS)}T00:00:00.000Z`) };
+  const [
+    byStatus,
+    paid,
+    paidBefore,
+    completed,
+    completedBefore,
+    cancelled,
+    cancelledBefore,
+    bookedValue,
+    bookedValueBefore,
+    valueByDay,
+    valueByDayBefore,
+    engagement,
+    engagementBefore,
+    scansByDay,
+    scansByDayBefore,
+    byCity,
+    byGoal,
+    byAdvertiser,
+    launchingSoon,
+    endingSoon,
+    queue,
+  ] = await Promise.all([
+    repository.campaignsByStatus(scope),
+    repository.campaignsPaid(window, scope),
+    repository.campaignsPaid(previous, scope),
+    repository.campaignsCompleted(window, scope),
+    repository.campaignsCompleted(previous, scope),
+    repository.campaignsCancelled(window, scope),
+    repository.campaignsCancelled(previous, scope),
+    repository.campaignBookedValue(window, scope),
+    repository.campaignBookedValue(previous, scope),
+    repository.campaignBookedValueByDay(window, scope),
+    repository.campaignBookedValueByDay(previous, scope),
+    repository.campaignEngagement(window, scope),
+    repository.campaignEngagement(previous, scope),
+    repository.campaignScansByDay(window, scope),
+    repository.campaignScansByDay(previous, scope),
+    repository.campaignsByCity(window, scope),
+    repository.campaignsByGoal(scope),
+    repository.topAdvertisersByBookedValue(window, scope, TOP_LIMIT),
+    repository.campaignsLaunchingIn(horizon, scope),
+    repository.campaignsEndingIn(horizon, scope),
+    // The launch queue is the campaigns module's: the same gates, the same population.
+    launchQueueSummary({ city: scope.city, cityId: scope.cityId }),
+  ]);
+  const status = new Map(byStatus.map((row) => [row.key, row.count]));
+  const advertiserRows = await labelled(
+    byAdvertiser.map((row) => ({ key: row.key, amount: row.sum, count: row.count })),
+    findAdvertiserLabels,
+    (id) => `/advertisers/${id}`,
+  );
+  const statusRows = [...byStatus].sort((a, b) => CAMPAIGN_STATUS_ORDER.indexOf(a.key) - CAMPAIGN_STATUS_ORDER.indexOf(b.key));
+  return {
+    ...base('campaigns', resolved, scope.city, now),
+    tiles: {
+      live: stateFigure(status.get('LIVE') ?? 0),
+      scheduled: stateFigure(status.get('SCHEDULED') ?? 0),
+      awaitingPayment: stateFigure(status.get('PENDING_PAYMENT') ?? 0),
+      waitingToLaunch: stateFigure(queue.total),
+      paid: figure(paid, paidBefore),
+      completed: figure(completed, completedBefore),
+      cancelled: figure(cancelled, cancelledBefore),
+      scans: figure(engagement.scans, engagementBefore.scans),
+      landingViews: figure(engagement.views, engagementBefore.views),
+      ctaClicks: figure(engagement.ctaClicks, engagementBefore.ctaClicks),
+      enquiries: figure(engagement.enquiries, engagementBefore.enquiries),
+    },
+    series: {
+      bookedValue: moneySeriesOf(resolved, valueByDay, valueByDayBefore),
+      scans: seriesOf(resolved, scansByDay, scansByDayBefore),
+    },
+    work: {
+      launchingSoon: {
+        count: launchingSoon,
+        horizonDays: CAMPAIGN_WORK_HORIZON_DAYS,
+        href: `/campaigns/directory?status=SCHEDULED&from=${today}&to=${horizonEnd}`,
+      },
+      endingSoon: { count: endingSoon, horizonDays: CAMPAIGN_WORK_HORIZON_DAYS, href: '/campaigns/directory?status=LIVE&sort=ENDING_SOON' },
+      waitingToLaunch: {
+        total: queue.total,
+        href: '/campaigns/launch-queue',
+        byReason: listOf(
+          WAITING_REASONS.map((reason) => ({
+            key: reason,
+            label: WAITING_REASON_LABEL[reason],
+            href: `/campaigns/launch-queue?reason=${reason}`,
+            count: queue.byReason[reason] ?? 0,
+          })),
+        ),
+      },
+    },
+    breakdowns: {
+      byStatus: listOf(
+        countRows(
+          statusRows,
+          (key) => `/campaigns/directory?status=${key}`,
+          (key) => CAMPAIGN_STATUS_LABEL[key] ?? titleCase(key),
+        ),
+      ),
+      byCity: listOf(
+        byCity.map((row) => ({ ...cityRowOf(row, (slug) => `/campaigns?city=${encodeURIComponent(slug)}`), count: row.count, live: row.live, bookedValue: money(row.bookedValue) })),
+      ),
+      byGoal: listOf(
+        byGoal.map((row) => ({ key: row.key, label: CAMPAIGN_GOAL_LABEL[row.key] ?? titleCase(row.key), href: `/campaigns/directory?goal=${row.key}`, count: row.count, live: row.live })),
+      ),
+      byAdvertiser: listOf(advertiserRows),
+    },
+    money: { bookedValue: moneyFigure(bookedValue, bookedValueBefore) },
+  };
+}
+
 function load(section: Section, resolved: ResolvedWindow, scope: Scope, now: Date): Promise<SectionOverview> {
   switch (section) {
+    case 'campaigns':
+      return campaigns(resolved, scope, now);
+    case 'listings':
+      return listings(resolved, scope, now);
     case 'leads':
       return leads(resolved, scope, now);
     case 'publishers':

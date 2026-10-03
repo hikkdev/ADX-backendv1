@@ -13,7 +13,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const { repository, pricing } = vi.hoisted(() => ({
   pricing: { citySupport: vi.fn() },
   // Lot G: the slot count rides every browse read; nothing held here.
-  repository: { findActive: vi.fn(), findActiveById: vi.fn(), savedListingIds: vi.fn(), slotsHeld: vi.fn(async () => new Map()) },
+  repository: { findActive: vi.fn(), findActiveById: vi.fn(), findActiveByDisplayId: vi.fn(), savedListingIds: vi.fn(), slotsHeld: vi.fn(async () => new Map()), datedHolds: vi.fn(async () => []) },
 }));
 
 vi.mock('../prisma-listings.repository', () => ({ prismaListingsRepository: repository }));
@@ -203,5 +203,27 @@ describe('browsing', () => {
     repository.findActiveById.mockResolvedValueOnce(null);
     await expect(getBrowseListing('lst_x')).rejects.toMatchObject({ statusCode: 404 });
     expect((await getBrowseListing('lst_1')).title).toBe('MG Road Digital Billboard');
+  });
+});
+
+/* W1 (24 Sep 2026): the website addresses a spot by its display id, and lists a publisher's other spaces by the id the card now carries. */
+describe("the website's reads", () => {
+  it('answers a spot by its display id when the id read finds nothing', async () => {
+    repository.findActiveById.mockResolvedValue(null);
+    repository.findActiveByDisplayId.mockResolvedValue(spot());
+    const card = await getBrowseListing('LST-0001');
+    expect(card.id).toBe('lst_1');
+    expect(repository.findActiveByDisplayId).toHaveBeenCalledWith('LST-0001');
+  });
+
+  it('does not try the display-id read for an id that is not one', async () => {
+    repository.findActiveById.mockResolvedValue(null);
+    await expect(getBrowseListing('lst_missing')).rejects.toMatchObject({ statusCode: 404 });
+    expect(repository.findActiveByDisplayId).not.toHaveBeenCalled();
+  });
+
+  it('carries the publisher id on the card, and null for a spot with no publisher', () => {
+    expect(toBrowseCard(spot({ publisherId: 'pub_1' }) as never, null, false).publisherId).toBe('pub_1');
+    expect(toBrowseCard(spot({ publisherId: undefined }) as never, null, false).publisherId).toBeNull();
   });
 });

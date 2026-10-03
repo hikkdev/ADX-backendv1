@@ -35,6 +35,10 @@ const {
     setCaseTicket: vi.fn(),
     decideCase: vi.fn(),
     listCases: vi.fn(),
+    // Account lifecycle (2 Oct 2026): the print shop and the HR record a closure covers.
+    countOpenPrintWork: vi.fn(async () => ({ jobs: [] as string[], quotes: 0 })),
+    retirePrintPartner: vi.fn(),
+    deactivateEmployee: vi.fn(),
   },
   audit: { logActivity: vi.fn() },
   auth: { revokeSessions: vi.fn() },
@@ -400,5 +404,37 @@ describe('deciding a case', () => {
     await expect(decideClosureCase('acc_1', { decision: 'REFUSED' }, ADMIN)).rejects.toMatchObject({
       statusCode: 409,
     });
+  });
+});
+
+describe('account lifecycle (2 Oct 2026): closure covers the print shop and the HR record', () => {
+  it('counts the shop’s wallet, refuses on its jobs in hand, and reports its open quotes', async () => {
+    const { closureReview } = await import('../closure/closure-review');
+    repository.findParties.mockResolvedValue(parties({ printPartnerId: 'prt_1' }));
+    wallets.findWalletFor.mockImplementation(async (owner: { kind: string }) => (owner.kind === 'PRINT_PARTNER' ? { id: 'wal_prt' } : null));
+    wallets.snapshot.mockResolvedValue(snapshot('300.00'));
+    repository.countOpenPrintWork.mockResolvedValue({ jobs: ['job_1'], quotes: 2 });
+    const review = await closureReview(USER);
+    expect(review.wallets).toEqual([expect.objectContaining({ kind: 'PRINT_PARTNER', partyId: 'prt_1', walletId: 'wal_prt' })]);
+    expect(review.summary).toMatchObject({ openPrintJobs: 1, openPrintQuotes: 2, canClose: false });
+    expect(review.blockers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'OPEN_PRINT_JOBS', count: 1, blocking: true }),
+        expect.objectContaining({ kind: 'OPEN_PRINT_QUOTES', count: 2, blocking: false }),
+      ]),
+    );
+    await expect(closeAccount(USER, REASON, ADMIN)).rejects.toMatchObject({ code: 'CLOSURE_BLOCKED' });
+    expect(repository.retirePrintPartner).not.toHaveBeenCalled();
+  });
+
+  it('takes the shop off the roster and switches the HR record off, beside closing the person', async () => {
+    repository.findParties.mockResolvedValue(parties({ printPartnerId: 'prt_1', employeeId: 'emp_1' }));
+    wallets.findWalletFor.mockResolvedValue(null);
+    repository.countOpenPrintWork.mockResolvedValue({ jobs: [], quotes: 0 });
+    const outcome = await closeAccount(USER, REASON, ADMIN);
+    expect(repository.retirePrintPartner).toHaveBeenCalledWith('prt_1');
+    expect(repository.deactivateEmployee).toHaveBeenCalledWith('emp_1');
+    expect(repository.closeUser).toHaveBeenCalled();
+    expect(outcome).toMatchObject({ printPartnerRetired: 'prt_1', employeeDeactivated: 'emp_1' });
   });
 });

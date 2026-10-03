@@ -7,7 +7,7 @@ import { inMemoryRepository } from './in-memory.repository';
 const state = vi.hoisted(() => ({
   repository: null as unknown as ReturnType<typeof import('./in-memory.repository').inMemoryRepository>,
   cache: { readThrough: vi.fn(), invalidate: vi.fn() },
-  agents: { findAgentLabels: vi.fn(), getLeaderboardForCity: vi.fn() },
+  agents: { agentCostOverWindow: vi.fn(), findAgentLabels: vi.fn(), getLeaderboardForCity: vi.fn() },
 }));
 
 vi.mock('../prisma-section-overviews.repository', () => ({
@@ -28,6 +28,7 @@ vi.mock('../../advertisers', () => ({}));
 vi.mock('../../publishers', () => ({}));
 vi.mock('../../employees', () => ({}));
 vi.mock('../../print-partners', () => ({}));
+vi.mock('../../campaigns', () => ({ WAITING_REASONS: [], launchQueueSummary: async () => ({ total: 0, byReason: {} }) }));
 
 import { SECTION_OVERVIEW_CACHE_SECONDS, sectionOverview, sectionOverviewCacheKey, type AgentsOverview } from '../section-overviews.service';
 
@@ -38,8 +39,23 @@ const read = (query: { from?: string; to?: string; city?: string } = QUERY) => {
   return sectionOverview('agents', query, NOW) as Promise<AgentsOverview>;
 };
 
+/* CP-2: the agents module owns the salary and incentive rows and exports the
+   cost as an aggregate; here it is a fixed answer, so the division the
+   service does is what gets pinned. */
+const COST = {
+  side: 'ALL',
+  salary: '40000.00',
+  rewards: '2000.00',
+  commission: '6000.00',
+  basis: '42000.00',
+  allIn: '48000.00',
+  agentsOnTerms: 4,
+  byCity: [{ key: 'city_bengaluru', cityId: 'city_bengaluru', slug: 'bengaluru', name: 'Bengaluru', typed: [], salary: '30000.00', rewards: '1500.00', commission: '4500.00', basis: '31500.00', allIn: '36000.00' }],
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
+  state.agents.agentCostOverWindow.mockResolvedValue(COST);
   state.cache.readThrough.mockImplementation(async (_key: string, _ttl: number, load: () => Promise<unknown>) => load());
   state.agents.findAgentLabels.mockImplementation(labelsOf);
   state.agents.getLeaderboardForCity.mockResolvedValue(BOARD);
@@ -86,12 +102,29 @@ describe('the agents overview', () => {
     expect(state.agents.getLeaderboardForCity).toHaveBeenCalledWith('Bengaluru', 'MONTH', NOW);
   });
 
+  /**
+   * CP-2: the blended figure, both sides over one denominator.
+   *
+   * It is deliberately NOT the two side figures added up — an agent holding
+   * both roles is counted on both sides, because their salary genuinely buys
+   * both and splitting it by guesswork would invent a number.
+   */
+  it('blends both sides into one cost per onboarding', async () => {
+    const { cost } = await read();
+    expect(cost.side).toBe('ALL');
+    // Two onboardings inside the window; the third is on the far side of the seam.
+    expect(cost.onboardings).toEqual({ byAgent: 2, selfServe: 0 });
+    expect(cost.perOnboarding).toBe('21000.00');
+    expect(cost.allInPerOnboarding).toBe('24000.00');
+  });
+
   it('narrows to a city and answers the breakdowns on the list contract', async () => {
     const result = await read({ ...QUERY, city: 'mumbai' });
     expect(result.tiles.newInWindow).toEqual({ value: 1, previous: 2, delta: -1 });
     expect(result.money.incentivesPaid).toEqual({ value: '0.00', previous: '300.00', delta: '-300.00' });
     expect(result.breakdowns.byCity).toMatchObject({ total: 1, page: 1, pageSize: 100, counts: {} });
-    expect(result.breakdowns.byCity.items[0]).toEqual({ key: 'mumbai', label: 'Mumbai', href: '/agents?city=mumbai', cityId: 'city_mumbai', typed: [], count: 3 });
+    // CP-2: the seeded cost names Bengaluru only, so Mumbai carries no agent money.
+    expect(result.breakdowns.byCity.items[0]).toEqual({ key: 'mumbai', label: 'Mumbai', href: '/agents?city=mumbai', cityId: 'city_mumbai', typed: [], count: 3, cost: null, onboardings: 0 });
   });
 
   it('is cached a minute per section, window and city', async () => {

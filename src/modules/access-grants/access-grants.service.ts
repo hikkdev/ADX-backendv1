@@ -247,6 +247,22 @@ export async function revokeLiveGrantsForAgent(agentId: string, actorUserId: str
   return revoked;
 }
 
+/**
+ * Account lifecycle (2 Oct 2026): every live grant ON one account — pending
+ * or active, any agent — closed by ADX, codes and all, when the account is
+ * suspended from new work, blocked from signing in, or closed. Returns how many.
+ */
+export async function revokeLiveGrantsOnParty(subject: GrantSubject, actorUserId: string): Promise<number> {
+  const grants = await repository.listForSubject(subject);
+  let revoked = 0;
+  for (const grant of grants) {
+    if (grant.status !== 'PENDING' && grant.status !== 'ACTIVE') continue;
+    await revokeGrant(grant.id, { userId: actorUserId, isAdmin: true });
+    revoked += 1;
+  }
+  return revoked;
+}
+
 /** Ops view: every grant still open, so nobody has to ask who has access. */
 export async function listOpenGrants() {
   return repository.listOpen();

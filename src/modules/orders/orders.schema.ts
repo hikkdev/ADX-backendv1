@@ -54,6 +54,8 @@ export const adminOrdersQuerySchema = listQuerySchema(ORDER_STATUSES, ['NEWEST',
     city: z.string().trim().min(1).max(80).optional(),
     /** E7-2: the advertiser account, reached through the campaign the order was raised from. */
     advertiserId: z.string().trim().min(1).max(64).optional(),
+    /** OM-2: one campaign's orders — the campaign page's Orders tab, which used to filter the first hundred by name. */
+    campaignId: z.string().trim().min(1).max(64).optional(),
     /**
      * E7-2: a window. An order is in it when its slot falls inside, or its
      * startDate..endDate flight overlaps it. Either bound alone is open-ended.
@@ -183,8 +185,12 @@ export const chooseFulfilmentSchema = z.object({
 
 export const slotTimeSchema = z.object({ slotTime: z.string().datetime() });
 export const counterNoteSchema = z.object({ counterNote: z.string().optional() });
-export const photoUrlSchema = z.object({ photoUrl: z.string().url() });
-export const photoUrlsSchema = z.object({ photoUrls: z.array(z.string().url()).min(1) });
+/** SI-N: `note` is what the publisher wrote beside a self-install proof; the agent lane ignores it. */
+export const photoUrlSchema = z.object({ photoUrl: z.string().url(), note: z.string().trim().max(500).optional() });
+/* SI-N (26 Sep 2026): a note may come with no new photographs — it is kept, the photographs on file stay; a body with neither is still refused. */
+export const photoUrlsSchema = z
+  .object({ photoUrls: z.array(z.string().url()).default([]), note: z.string().trim().max(500).optional() })
+  .refine((body) => body.photoUrls.length > 0 || Boolean(body.note), { message: 'Send at least one photograph or a note', path: ['photoUrls'] });
 
 /*
  * The pickup photograph is optional.
@@ -251,3 +257,31 @@ export const selfCheckInSchema = z.object({
   longitude: z.number().optional(),
   qrToken: z.string().min(1).optional(),
 });
+
+/**
+ * Order fraud screening (2 Oct 2026): `GET /orders/fraud-review` — one
+ * status (FLAGGED by default; HELD is the hold, whatever the review says;
+ * ALL is every order the screening has scored or anybody held), a search,
+ * and the score (highest first) or the newest first. Case-insensitive.
+ */
+export const RISK_REVIEW_STATUSES = ['FLAGGED', 'HELD', 'CLEARED', 'CONFIRMED', 'ALL'] as const;
+export type RiskReviewStatusFilter = (typeof RISK_REVIEW_STATUSES)[number];
+export const RISK_REVIEW_SORTS = ['score', 'newest'] as const;
+export const riskReviewQuerySchema = z.object({
+  status: z
+    .string()
+    .trim()
+    .transform((value) => value.toUpperCase())
+    .pipe(z.enum(RISK_REVIEW_STATUSES))
+    .default('FLAGGED'),
+  q: z.string().trim().min(1).max(120).optional(),
+  sort: z
+    .string()
+    .trim()
+    .transform((value) => value.toLowerCase())
+    .pipe(z.enum(RISK_REVIEW_SORTS))
+    .default('score'),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(MAX_LIST_PAGE_SIZE).default(DEFAULT_LIST_PAGE_SIZE),
+});
+export type RiskReviewQuery = z.infer<typeof riskReviewQuerySchema>;

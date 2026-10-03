@@ -62,6 +62,10 @@ const holiday = (over: Record<string, unknown> = {}) => ({
   name: 'Gandhi Jayanti',
   region: null,
   kind: 'PUBLIC' as const,
+  source: 'MANUAL' as const,
+  externalId: null,
+  tentative: false,
+  hiddenAt: null,
   createdAt: new Date('2026-01-01T00:00:00.000Z'),
   ...over,
 });
@@ -91,7 +95,7 @@ describe('holidays', () => {
     const res = await request(app()).get('/api/v1/hr/holidays?year=2026').set('Authorization', `Bearer ${admin}`);
     expect(res.status).toBe(200);
     expect(repository.findHolidaysInYear).toHaveBeenCalledWith(2026);
-    expect(res.body.data).toEqual([{ id: 'hol_1', date: '2026-10-02', name: 'Gandhi Jayanti', region: null, kind: 'PUBLIC' }]);
+    expect(res.body.data).toEqual([{ id: 'hol_1', date: '2026-10-02', name: 'Gandhi Jayanti', region: null, kind: 'PUBLIC', source: 'MANUAL', tentative: false }]);
   });
 
   it('refuses a year it cannot draw', async () => {

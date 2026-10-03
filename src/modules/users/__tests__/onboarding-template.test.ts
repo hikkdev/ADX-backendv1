@@ -32,9 +32,11 @@ const partial: ManifestKycContext = {
 const parties = ['PUBLISHER', 'ADVERTISER'] as const;
 const types = ['INDIVIDUAL', 'BUSINESS', 'ORGANISATION'] as const;
 
+/** The fixture predates two later claims: the manifest version, and (Cashfree Phase 2) whether the KYC backup is ready. */
 const withoutVersion = (manifest: object) => {
-  const { manifestVersion: _version, ...rest } = manifest as { manifestVersion: number };
-  return rest;
+  const { manifestVersion: _version, ...rest } = manifest as { manifestVersion: number; verification: { digio: Record<string, unknown> } };
+  const { backup: _backup, ...digio } = rest.verification.digio;
+  return { ...rest, verification: { ...rest.verification, digio } };
 };
 const clone = (): OnboardingTemplate => JSON.parse(JSON.stringify(CODE_ONBOARDING_TEMPLATE)) as OnboardingTemplate;
 

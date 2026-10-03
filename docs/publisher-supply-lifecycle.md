@@ -26,8 +26,9 @@ clear their own document and verification gates independently.
 
 **QR-5 (17 Sep 2026): gate 2 no longer holds a listing back.** The owner's
 rule: a publisher uses the account unverified and lists once the basics are
-in — name, email, address, date of birth (`shared/kyc-state`'s
-`profileBasicsMissing`). `publishListing` refuses only on a missing basic
+in — name, email, address (`shared/kyc-state`'s `profileBasicsMissing`;
+AGE-1, 29 Sep 2026, took the date of birth back out — 18 or over is asked
+only when an order is placed, `shared/age-gate`). `publishListing` refuses only on a missing basic
 (409 `PROFILE_INCOMPLETE`); a spot of a PENDING / NEEDS_INFO / REJECTED
 publisher goes live, marked unverified, and ranks below the verified when an
 advertiser browses (`listings.findActive` partitions verified-first; every

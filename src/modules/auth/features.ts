@@ -21,6 +21,16 @@ feature('auth.otp-sign-in', {
   routes: ['/api/v1/auth'],
 });
 
+feature('auth.email-door', {
+  surfaces: ['APP_USER', 'APP_AGENT', 'WEBSITE', 'BACKEND'],
+  owner: 'senior',
+  kind: 'FEATURE',
+  launch: 'on',
+  description:
+    'ED-1: sign up or sign in by email — a code to the address, then the number is proved too, so every account holds a verified phone and a verified email. First door on the website, second in the apps.',
+  routes: ['/api/v1/auth/send-otp-email', '/api/v1/auth/verify-otp-email'],
+});
+
 feature('auth.password-sign-in', {
   surfaces: ['CONSOLE', 'BACKEND'],
   owner: 'senior',
@@ -37,13 +47,23 @@ feature('auth.password-sign-in', {
 });
 
 feature('auth.google-sign-in', {
-  surfaces: ['APP_USER', 'BACKEND'],
+  surfaces: ['APP_USER', 'WEBSITE', 'BACKEND'],
   owner: 'senior',
   kind: 'FEATURE',
   launch: 'on',
   description:
-    'Sign in with Google on the user app.',
+    'Sign in with Google — and, G-2 (25 Sep 2026), sign up with it: a Google-verified mailbox goes straight to the phone step.',
   routes: ['/api/v1/auth/google'],
+});
+
+feature('auth.facebook-sign-in', {
+  surfaces: ['WEBSITE', 'BACKEND'],
+  owner: 'senior',
+  kind: 'FEATURE',
+  launch: 'on',
+  description:
+    'FB-1: Continue with Facebook on the website — register-or-login on the mailbox Facebook vouches for; needs the app id and secret under Settings › Integrations.',
+  routes: ['/api/v1/auth/facebook'],
 });
 
 feature('auth.two-factor', {

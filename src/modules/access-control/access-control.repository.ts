@@ -45,4 +45,10 @@ export interface RoleConfigRepository {
   /** Whether the user holds the ADMIN Role — a role config is console access, and only an admin has a console. */
   isAdmin(userId: string): Promise<boolean>;
   userExists(userId: string): Promise<boolean>;
+  /**
+   * RP-1: the account to seat as super admin when nobody holds the chair —
+   * the open ADMIN `named` by mobile or email, else (named null) the oldest
+   * open ADMIN. Null when no such account exists.
+   */
+  findBootstrapAdmin(named: string | null): Promise<{ id: string; mobile: string; email: string | null } | null>;
 }

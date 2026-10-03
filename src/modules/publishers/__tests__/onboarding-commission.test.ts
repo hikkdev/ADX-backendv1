@@ -21,7 +21,7 @@ const { repository, qr, agents, grants, payouts } = vi.hoisted(() => ({
     completeOnboarding: vi.fn(),
   },
   qr: { deactivateQrsFor: vi.fn(), findActiveQrFor: vi.fn(), generateQr: vi.fn(), findPendingScan: vi.fn(), decideOnboardingScan: vi.fn(), ONBOARDING_QR_TTL_SECONDS: 90 },
-  agents: (() => { const o = { findAgentProfile: vi.fn(), requireAgentProfile: vi.fn(), findAgentTier: vi.fn() }; return { ...o, findWorkingAgentProfile: o.findAgentProfile, requireWorkingAgent: o.requireAgentProfile }; })(),
+  agents: (() => { const o = { findAgentProfile: vi.fn(), requireAgentProfile: vi.fn(), findAgentTier: vi.fn(), payForNextOnboarding: vi.fn() }; return { ...o, findWorkingAgentProfile: o.findAgentProfile, requireWorkingAgent: o.requireAgentProfile }; })(),
   grants: { openOnboardingGrant: vi.fn(), closeOnboardingGrants: vi.fn(), accessLogFor: vi.fn() },
   payouts: { recordIncentiveOnce: vi.fn() },
 }));
@@ -53,6 +53,10 @@ beforeEach(() => {
   repository.completeOnboarding.mockImplementation(async (id: string) => ({ ...publisher(), id, onboardingStatus: 'ONBOARDING_COMPLETE' }));
   agents.requireAgentProfile.mockResolvedValue({ id: 'agt_1', tier: 'SILVER' });
   agents.findAgentTier.mockResolvedValue('SILVER');
+  /* CP-1: an agent with no pay record is not on the quota model, so the
+     commission behaves exactly as it did before — the flat rate table. The
+     quota's own behaviour is pinned in its block below. */
+  agents.payForNextOnboarding.mockResolvedValue({ agentId: 'agt_1', day: '2026-09-23', covered: false, reason: 'NO_TERMS', quota: null, doneToday: 0, amount: null });
   payouts.recordIncentiveOnce.mockResolvedValue({ id: 'inc_1', amount: new Decimal('2000.00'), status: 'PENDING_VERIFICATION' });
 });
 
@@ -100,5 +104,37 @@ describe('the publisher closes it themselves', () => {
     const result = await completeMyOnboarding('usr_1');
     expect(payouts.recordIncentiveOnce).not.toHaveBeenCalled();
     expect(result).toMatchObject({ onboardingStatus: 'ONBOARDING_COMPLETE', incentive: null });
+  });
+});
+
+/**
+ * CP-1: the commission is what the day's quota says it is.
+ *
+ * The salary covers `dailyQuota` onboardings a day, so those record nothing —
+ * the money has already been paid. Past the quota the commission is the
+ * planned unit cost plus the uplift, a fraction of the flat rate this used to
+ * pay. An agent with no pay record keeps the flat rate, which is what the
+ * block above pins.
+ */
+describe('CP-1: the daily quota decides what an onboarding pays', () => {
+  it('records nothing inside the quota — the salary already paid for it', async () => {
+    agents.payForNextOnboarding.mockResolvedValue({ agentId: 'agt_1', day: '2026-09-23', covered: true, reason: 'WITHIN_QUOTA', quota: 10, doneToday: 4, amount: null });
+    const result = await completeOnboarding('pub_1', 'usr_agent', false);
+    expect(payouts.recordIncentiveOnce).not.toHaveBeenCalled();
+    expect(result.incentive).toBeNull();
+  });
+
+  it('pays the quota-priced commission past it, and says so on the row', async () => {
+    agents.payForNextOnboarding.mockResolvedValue({ agentId: 'agt_1', day: '2026-09-23', covered: false, reason: 'BEYOND_QUOTA', quota: 10, doneToday: 10, amount: '105.77' });
+    await completeOnboarding('pub_1', 'usr_agent', false);
+    expect(payouts.recordIncentiveOnce).toHaveBeenCalledWith(
+      expect.objectContaining({ event: 'PUBLISHER_ONBOARDED', agentId: 'agt_1', amount: '105.77', note: expect.stringContaining("beyond the day's quota of 10") }),
+    );
+  });
+
+  it('records nothing when the terms cannot price an onboarding, rather than guessing', async () => {
+    agents.payForNextOnboarding.mockResolvedValue({ agentId: 'agt_1', day: '2026-09-23', covered: false, reason: 'UNPRICEABLE', quota: 10, doneToday: 12, amount: null });
+    expect((await completeOnboarding('pub_1', 'usr_agent', false)).incentive).toBeNull();
+    expect(payouts.recordIncentiveOnce).not.toHaveBeenCalled();
   });
 });

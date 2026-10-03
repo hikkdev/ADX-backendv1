@@ -1,13 +1,28 @@
-import { prisma } from '../../shared/database';
+import { prisma, type Prisma } from '../../shared/database';
+import { kycPartyStateWhere } from '../../shared/kyc-state';
+import { ACCOUNT_STATES, agentStateWhere, workingAgentWhere, type AccountState } from '../../shared/party-status';
+import { mobileSearchNeedle } from '../../shared/validation';
 import { pickAssignable, priorityWindowStart, type DispatchAsk } from '../../shared/dispatch';
 import { money } from '../../shared/money';
 import {
   AGENT_ACTIVE_ORDER_STATUSES,
   type AgentFilter,
+  type AssignablePlace,
   type AgentProfilePatch,
   type AgentsRepository,
   type NewAgent,
 } from './agents.repository';
+
+/**
+ * 29 Sep 2026: the side an agent works, as a where — the rule
+ * `application.service.sideOf` reads off the roles: an AGENT_PUBLISHER role,
+ * or no AGENT_ADVERTISER one, is the publisher side.
+ */
+function sideWhere(side: 'PUBLISHER' | 'ADVERTISER'): Prisma.AgentProfileWhereInput {
+  return side === 'PUBLISHER'
+    ? { user: { OR: [{ roles: { some: { role: 'AGENT_PUBLISHER' } } }, { roles: { none: { role: 'AGENT_ADVERTISER' } } }] } }
+    : { user: { roles: { some: { role: 'AGENT_ADVERTISER' }, none: { role: 'AGENT_PUBLISHER' } } } };
+}
 
 export const prismaAgentsRepository: AgentsRepository = {
   async findUserByMobile(mobile: string) {
@@ -47,6 +62,7 @@ export const prismaAgentsRepository: AgentsRepository = {
         user: {
           create: {
             mobile: input.mobile,
+            ...(input.userDisplayId ? { displayId: input.userDisplayId } : {}),
             name: input.name,
             email: input.email ?? null,
             roles: { create: { role: input.role } },
@@ -89,31 +105,47 @@ export const prismaAgentsRepository: AgentsRepository = {
   },
 
   async findPage(filter: AgentFilter, limit: number, offset: number) {
-    const { city, cityId, tier, search } = filter;
-    const where = {
+    const { city, cityId, tier, search, sourceKind, side, kycState } = filter;
+    // Account lifecycle (2 Oct 2026): the roster's default is the working accounts; ALL is everyone.
+    const status = filter.status ?? 'ACTIVE';
+    const digits = search ? mobileSearchNeedle(search) : null;
+    // Each cut is one AND part, so the city's `OR` and the search's `OR` cannot overwrite each other.
+    const parts: Prisma.AgentProfileWhereInput[] = [
       // Lot X-B: the key is the identity — by the key when the facet resolved
       // to one, the spelling catching only the rows whose key is null.
       ...(city
-        ? cityId
-          ? { OR: [{ cityId }, { cityId: null, city: { equals: city, mode: 'insensitive' as const } }] }
-          : { cityId: null, city: { equals: city, mode: 'insensitive' as const } }
-        : {}),
-      ...(tier ? { tier } : {}),
-      // Search spans the joined user, not the agent profile: agents are
-      // recognised by the person's name or number, not by profile fields.
+        ? [
+            cityId
+              ? { OR: [{ cityId }, { cityId: null, city: { equals: city, mode: 'insensitive' as const } }] }
+              : { cityId: null, city: { equals: city, mode: 'insensitive' as const } },
+          ]
+        : []),
+      ...(tier ? [{ tier }] : []),
+      // Search spans the joined user — agents are recognised by the person's
+      // name or number — and, 29 Sep 2026, the email, the AGT- id and the city.
       ...(search
-        ? {
-            user: {
+        ? [
+            {
               OR: [
-                { name: { contains: search, mode: 'insensitive' as const } },
-                { mobile: { contains: search } },
+                { user: { name: { contains: search, mode: 'insensitive' as const } } },
+                { user: { mobile: { contains: search } } },
+                ...(digits ? [{ user: { mobile: { contains: digits } } }] : []),
+                { user: { email: { contains: search, mode: 'insensitive' as const } } },
+                { displayId: { contains: search, mode: 'insensitive' as const } },
+                { city: { contains: search, mode: 'insensitive' as const } },
               ],
             },
-          }
-        : {}),
-    };
+          ]
+        : []),
+      // 29 Sep 2026: the door, the side and the KYC state — the cuts every party desk takes.
+      ...(sourceKind ? [{ sourceKind }] : []),
+      ...(side ? [sideWhere(side)] : []),
+      ...(kycState ? [kycPartyStateWhere(kycState, false)] : []),
+    ];
+    const cuts: Prisma.AgentProfileWhereInput = { AND: parts };
+    const where: Prisma.AgentProfileWhereInput = status === 'ALL' ? cuts : { AND: [cuts, agentStateWhere(status)] };
 
-    const [items, total] = await Promise.all([
+    const [rows, total, perState] = await Promise.all([
       prisma.agentProfile.findMany({
         where,
         skip: offset,
@@ -122,12 +154,20 @@ export const prismaAgentsRepository: AgentsRepository = {
         include: {
           // No `city` here: it lives on the profile, not the user. Selecting it
           // off `user` was a runtime PrismaClientValidationError on every call.
-          user: { select: { id: true, name: true, mobile: true, isActive: true } },
+          // 29 Sep 2026: the email and the roles ride the join — the roster's Contact and Type.
+          user: { select: { id: true, name: true, mobile: true, email: true, isActive: true, closedAt: true, roles: { select: { role: true } } } },
+          // The six columns the KYC state is derived from — never the document links.
+          kyc: { select: { id: true, status: true, submittedAt: true, requestedAt: true, requestedChannel: true, method: true } },
+          // The roster's activity: the publishers and advertisers this agent brought in.
+          _count: { select: { publishers: true, advertisers: true } },
         },
       }),
       prisma.agentProfile.count({ where }),
+      // The status chips leave the status facet out, so each stays a way back in.
+      Promise.all(ACCOUNT_STATES.map(async (state) => [state, await prisma.agentProfile.count({ where: { AND: [cuts, agentStateWhere(state)] } })] as const)),
     ]);
-    return { items, total };
+    const items = rows.map(({ _count, ...row }) => ({ ...row, onboardedCount: _count.publishers + _count.advertisers }));
+    return { items, total, statusCounts: Object.fromEntries(perState) as Record<AccountState, number> };
   },
 
   findById(id: string) {
@@ -138,7 +178,8 @@ export const prismaAgentsRepository: AgentsRepository = {
       where: { id },
       include: {
         user: {
-          select: { id: true, name: true, mobile: true, email: true, isActive: true, closedAt: true, closeReason: true },
+          // 28 Sep 2026: displayId — the person's own ADX-… id, beside the AGT- id that names the agent profile.
+          select: { id: true, displayId: true, name: true, mobile: true, email: true, isActive: true, closedAt: true, closeReason: true },
         },
         // N3-B: the KYC record's summary, for the `kyc: { state, ... }` the party read carries.
         kyc: { select: { id: true, status: true, submittedAt: true, requestedAt: true, requestedChannel: true, method: true } },
@@ -175,26 +216,31 @@ export const prismaAgentsRepository: AgentsRepository = {
   async findWithUser(agentId: string) {
     const agent = await prisma.agentProfile.findUnique({
       where: { id: agentId },
-      include: { user: true },
+      select: { id: true, user: { select: { id: true } } },
     });
     return agent?.user ? { id: agent.id, userId: agent.user.id } : null;
   },
 
-  async findAssignable(excludeIds: string[], ask: DispatchAsk = {}, now: Date = new Date()) {
+  async findAssignable(excludeIds: string[], ask: DispatchAsk = {}, now: Date = new Date(), place?: AssignablePlace) {
+    // 3 Oct 2026: a place narrows the pool to that city's agents (by the key, the spelling for null keys).
+    const cityParts: Prisma.AgentProfileWhereInput[] = place
+      ? [
+          place.cityId
+            ? { OR: [{ cityId: place.cityId }, ...(place.city ? [{ cityId: null, city: { equals: place.city, mode: 'insensitive' as const } }] : [])] }
+            : { city: { equals: place.city ?? '', mode: 'insensitive' as const } },
+        ]
+      : [];
     // D5: only agents offered work (profile ACTIVE), and only under their own
     // cap. The cap is a comparison between two columns of the same row, which
     // the query language cannot express, so a short list is read and filtered.
     // DR 07: the order of that list is the offer priority — the sweep goes to
     // the fast lane first — so each candidate's recent answers come with them.
     const candidates = await prisma.agentProfile.findMany({
+      // Account lifecycle (2 Oct 2026): the one working-agent predicate — stage
+      // and status ACTIVE, no BLOCK_NEW (belt and braces beside `status`), the
+      // account signing in and not closed.
       where: {
-        id: { notIn: excludeIds },
-        status: 'ACTIVE',
-        // Lot A BLOCK_NEW: belt and braces beside `status`. Suspension keeps
-        // the two in step, and an agent who is blocked by either is not
-        // offered work.
-        NOT: { suspensionScopes: { has: 'BLOCK_NEW' } },
-        user: { isActive: true, roles: { some: { role: 'AGENT_PUBLISHER' } } },
+        AND: [{ id: { notIn: excludeIds } }, workingAgentWhere(), { user: { roles: { some: { role: 'AGENT_PUBLISHER' } } } }, ...cityParts],
       },
       select: {
         id: true,

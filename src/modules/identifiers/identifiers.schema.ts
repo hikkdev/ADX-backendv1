@@ -12,6 +12,10 @@ export const partyTypeSchema = z.enum([
   'SAFETY',
   'LEAD',
   'USER',
+  /** BK-1: BKG-… on a booking. */
+  'ORDER',
+  'AD_BOOKING',
+  'LISTING_BOOST',
   'VISIT',
   'CERTIFICATE',
   'FRAUD_CASE',

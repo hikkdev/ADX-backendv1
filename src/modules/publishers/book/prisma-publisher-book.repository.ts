@@ -11,6 +11,7 @@ export type BookPublisher = {
   mobile: string;
   city: string | null;
   address: string | null;
+  postalCode: string | null;
   kycStatus: string;
   onboardingStatus: string;
   activatedAt: Date | null;
@@ -40,6 +41,7 @@ const select = {
   mobile: true,
   city: true,
   address: true,
+  postalCode: true,
   kycStatus: true,
   onboardingStatus: true,
   activatedAt: true,

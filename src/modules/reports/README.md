@@ -8,11 +8,11 @@ private file, listed as runs, and scheduled daily / weekly / monthly at
 
 ```
 reports/
-  catalogue.ts                the twelve kinds: name, description, filters, columns, query
+  catalogue.ts                the thirteen kinds: name, description, filters, columns, query
   windows.ts                  presets and custom windows (Indian days); the cadence windows; nextRunAt
   render.ts                   CSV (shared/csv) and PDF (pdfkit, landscape A4, a table per page)
   links.ts                    the signed, time-limited file link a schedule mails
-  reports.repository.ts       ReportsRepository (runs, schedules) and ReportData (the twelve reads)
+  reports.repository.ts       ReportsRepository (runs, schedules) and ReportData (the thirteen reads)
   prisma-reports.repository.ts
   reports.service.ts          run now, list, open the file; schedules CRUD; the job's tick
   reports.schema.ts / .controller.ts / .routes.ts
@@ -26,7 +26,7 @@ with purpose `REPORT` (private, folder `reports/`), stored through
 a schedule — and read back through `uploads.openStoredFile` on a route that
 has already decided who may read it.
 
-The twelve reads (`ReportData`) walk the other modules' tables read-only —
+The thirteen reads (`ReportData`) walk the other modules' tables read-only —
 campaigns, package sales, accruals, withdrawals, refunds, incentives, the
 four KYC tables, listings, tickets, disputes, fraud cases, deliveries, the
 daily campaign metrics, the ledger's revenue account — the way
@@ -59,7 +59,7 @@ inclusive (`from`/`to` as `YYYY-MM-DD`, at most 366 days) or a preset —
 All under `/reports`, ADMIN at the router except where noted.
 
 ```
-GET    /reports/catalogue                 the twelve, with filters and columns (no query function on the wire);
+GET    /reports/catalogue                 the thirteen, with filters and columns (no query function on the wire);
                                           G11-2: `filterLabels: { [field]: label }` per kind, for printing a stored filter by its label
 POST   /reports/run                       { kind, format: CSV|PDF, filters, window } → 201 the run (READY: fileId, rowCount, expiresAt);
                                           500 REPORT_FAILED { runId, error } when the query or the render threw — the run row says why
@@ -132,7 +132,7 @@ Nothing imports this module but `bootstrap` and the job.
 
 ## Tests
 
-`__tests__/catalogue.test.ts` — the twelve, their columns against their
+`__tests__/catalogue.test.ts` — the thirteen, their columns against their
 rows, the filter contract, CSV and PDF rendering. `__tests__/windows.test.ts`
 — presets, cadence windows, `nextRunAtFor` at the 06:00 IST boundaries.
 `__tests__/reports.routes.test.ts` — the routes through supertest, the

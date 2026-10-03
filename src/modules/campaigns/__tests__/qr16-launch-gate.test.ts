@@ -31,7 +31,7 @@ const { repository, revenueQuote, advertisers, orders, agreements, issueTracking
     captureCampaignHold: vi.fn(),
     releaseCampaignHold: vi.fn(),
   },
-  orders: { placeOrder: vi.fn(), notifyAdmins: vi.fn(async () => undefined) },
+  orders: { placeOrder: vi.fn(), notifyAdmins: vi.fn(async () => undefined), announceOrdersPaid: vi.fn() },
   agreements: { transactionAcceptance: vi.fn() },
   issueTrackingCodes: vi.fn(),
   notifications: { createNotification: vi.fn(async () => ({})) },

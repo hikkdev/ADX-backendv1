@@ -72,6 +72,27 @@ feature('kyc.digio', {
   jobs: ['kyc-provider-probe'],
 });
 
+feature('kyc.verification-backup', {
+  surfaces: ['APP_USER', 'APP_AGENT', 'CONSOLE', 'WEBSITE', 'BACKEND'],
+  owner: 'platform',
+  kind: 'FEATURE',
+  launch: 'on',
+  description:
+    'Cashfree Phase 1 (1 Oct 2026): the verification layer — Cashfree Secure ID as Digio\'s automatic backup (a session of single checks on ADX\'s own screens, handed out only with the backup ON to a client that says `supports: [\'CASHFREE\']`), every provider call recorded as an attempt with a breaker per provider, the desk\'s attempt list, health read and "Resend on backup", Cashfree\'s webhook, and the two-minute status sweep.',
+  routes: ['/api/v1/verification', '/api/v1/webhooks/cashfree/verification'],
+  jobs: ['verification-status-sweep'],
+});
+
+feature('kyc.entity-type', {
+  surfaces: ['APP_USER', 'CONSOLE', 'WEBSITE'],
+  owner: 'platform',
+  kind: 'FEATURE',
+  launch: 'on',
+  description:
+    'Phase D (1 Oct 2026): the legal form a publisher, advertiser or print partner verifies as — asked at the Digio start (409 ENTITY_TYPE_REQUIRED) and it picks which of the 25 Digio workflows runs.',
+  routes: ['/api/v1/kyc'],
+});
+
 feature('kyc.desk-intake', {
   surfaces: ['APP_USER', 'CONSOLE'],
   owner: 'platform',

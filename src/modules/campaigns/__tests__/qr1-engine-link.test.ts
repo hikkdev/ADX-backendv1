@@ -96,7 +96,7 @@ beforeEach(() => {
 
 describe('printedUrl', () => {
   it("is the engine's short URL when hosted, else /t/", () => {
-    expect(printedUrl({ code: 'AAAA2345', shortUrl: 'https://go.adx.example/r/SC1' })).toBe('https://go.adx.example/r/SC1');
+    expect(printedUrl({ code: 'AAAA2345', shortUrl: 'https://go.adx.in/r/SC1' })).toBe('https://go.adx.in/r/SC1');
     expect(printedUrl({ code: 'AAAA2345', shortUrl: null })).toBe(trackingUrl('AAAA2345'));
   });
 });
@@ -116,7 +116,7 @@ describe('issuing codes with the engine hosting them', () => {
   beforeEach(() => {
     engine.dynamicCodesAvailable.mockResolvedValue(true);
     engine.registerDynamicCodes.mockImplementation(async (items: { name: string }[]) =>
-      items.map((_, i) => ({ engineCodeId: `g${i}`, shortCode: `SC${i}`, shortUrl: `https://go.adx.example/r/SC${i}` })),
+      items.map((_, i) => ({ engineCodeId: `g${i}`, shortCode: `SC${i}`, shortUrl: `https://go.adx.in/r/SC${i}` })),
     );
   });
 
@@ -138,14 +138,14 @@ describe('issuing codes with the engine hosting them', () => {
     ]);
     expect(repository.linkTrackingCodesToEngine).toHaveBeenCalledWith(
       [
-        { id: first.id, engineCodeId: 'g0', shortUrl: 'https://go.adx.example/r/SC0' },
-        { id: second.id, engineCodeId: 'g1', shortUrl: 'https://go.adx.example/r/SC1' },
+        { id: first.id, engineCodeId: 'g0', shortUrl: 'https://go.adx.in/r/SC0' },
+        { id: second.id, engineCodeId: 'g1', shortUrl: 'https://go.adx.in/r/SC1' },
       ],
       expect.any(Date),
     );
     expect(codes.map((row) => [row.code, row.engineCodeId, printedUrl(row)])).toEqual([
-      [first.code, 'g0', 'https://go.adx.example/r/SC0'],
-      [second.code, 'g1', 'https://go.adx.example/r/SC1'],
+      [first.code, 'g0', 'https://go.adx.in/r/SC0'],
+      [second.code, 'g1', 'https://go.adx.in/r/SC1'],
     ]);
   });
 
@@ -173,11 +173,11 @@ describe('issuing codes with the engine hosting them', () => {
 describe('linkCodesToEngine — the sync', () => {
   it('links only the QR codes not yet hosted, skipping linked and non-QR ones', async () => {
     engine.dynamicCodesAvailable.mockResolvedValue(true);
-    engine.registerDynamicCodes.mockResolvedValue([{ engineCodeId: 'g9', shortCode: 'SC9', shortUrl: 'https://go.adx.example/r/SC9' }]);
+    engine.registerDynamicCodes.mockResolvedValue([{ engineCodeId: 'g9', shortCode: 'SC9', shortUrl: 'https://go.adx.in/r/SC9' }]);
     repository.findCampaign.mockResolvedValue(
       campaign({
         codes: [
-          code({ code: 'AAAA2345', spotId: 'spt_1', engineCodeId: 'g0', shortUrl: 'https://go.adx.example/r/SC0' }),
+          code({ code: 'AAAA2345', spotId: 'spt_1', engineCodeId: 'g0', shortUrl: 'https://go.adx.in/r/SC0' }),
           code({ code: 'BBBB2345', spotId: 'spt_2' }),
           code({ code: 'PROMO234', method: 'VANITY_OR_PROMO', promoCode: 'MG10' }),
         ],
@@ -186,7 +186,7 @@ describe('linkCodesToEngine — the sync', () => {
     const linked = await linkCodesToEngine('cmp_1');
     expect(linked.map((row) => row.code)).toEqual(['BBBB2345']);
     expect(engine.registerDynamicCodes.mock.calls[0]![0]).toEqual([{ name: 'CMP-2026-0042 · Indiranagar bus shelter', target: trackingUrl('BBBB2345') }]);
-    expect(repository.linkTrackingCodesToEngine).toHaveBeenCalledWith([{ id: 'tc_BBBB2345', engineCodeId: 'g9', shortUrl: 'https://go.adx.example/r/SC9' }], expect.any(Date));
+    expect(repository.linkTrackingCodesToEngine).toHaveBeenCalledWith([{ id: 'tc_BBBB2345', engineCodeId: 'g9', shortUrl: 'https://go.adx.in/r/SC9' }], expect.any(Date));
   });
 
   it('does nothing, quietly, when no engine hosts codes', async () => {

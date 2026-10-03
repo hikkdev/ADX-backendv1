@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { asyncHandler } from '../../shared/http';
-import { authenticate, requireRole } from '../../shared/auth';
+import { authenticate, requireRole, requirePermission } from '../../shared/auth';
 import {
   generateQrHandler,
   resolveQrHandler,
@@ -32,14 +32,14 @@ qrRouter.use(authenticate);
 qrRouter.post('/resolve', asyncHandler(resolveQrHandler));
 // The agent's poll after an onboarding scan: has the owner approved?
 // D6: ops' view of one person's scans. Literal path, ahead of /scans/:scanId.
-qrRouter.get('/scans', requireRole('ADMIN'), asyncHandler(scansByHandler));
+qrRouter.get('/scans', requireRole('ADMIN'), requirePermission('marketplace.view'), asyncHandler(scansByHandler));
 qrRouter.get('/scans/:scanId', asyncHandler(getScanForScannerHandler));
 
 // Admin: the desk (K-B1) — list, generate, view scans, regenerate, deactivate
-qrRouter.get('/', requireRole('ADMIN'), asyncHandler(listQrHandler));
-qrRouter.post('/', requireRole('ADMIN'), asyncHandler(generateQrHandler));
-qrRouter.get('/:qrId/scans', requireRole('ADMIN'), asyncHandler(getQrScansHandler));
-qrRouter.post('/:qrId/regenerate', requireRole('ADMIN'), asyncHandler(regenerateQrHandler));
-qrRouter.delete('/:qrId', requireRole('ADMIN'), asyncHandler(deactivateQrHandler));
+qrRouter.get('/', requireRole('ADMIN'), requirePermission('marketplace.view'), asyncHandler(listQrHandler));
+qrRouter.post('/', requireRole('ADMIN'), requirePermission('marketplace.edit'), asyncHandler(generateQrHandler));
+qrRouter.get('/:qrId/scans', requireRole('ADMIN'), requirePermission('marketplace.view'), asyncHandler(getQrScansHandler));
+qrRouter.post('/:qrId/regenerate', requireRole('ADMIN'), requirePermission('marketplace.edit'), asyncHandler(regenerateQrHandler));
+qrRouter.delete('/:qrId', requireRole('ADMIN'), requirePermission('marketplace.delete'), asyncHandler(deactivateQrHandler));
 
 qrRouter.get('/:qrId', asyncHandler(getQrHandler));

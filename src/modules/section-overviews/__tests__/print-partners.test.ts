@@ -23,6 +23,7 @@ vi.mock('../../pricing', () => ({
 }));
 
 vi.mock('../../print-partners', () => state.printPartners);
+vi.mock('../../campaigns', () => ({ WAITING_REASONS: [], launchQueueSummary: async () => ({ total: 0, byReason: {} }) }));
 vi.mock('../../supply', () => ({}));
 vi.mock('../../advertisers', () => ({}));
 vi.mock('../../publishers', () => ({}));

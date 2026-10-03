@@ -7,6 +7,8 @@
  */
 export { visitRouter, agentDayRouter } from './visits.routes';
 export { createVisit, expireVisitOffers, visitsToday } from './visits.service';
+/** 3 Oct 2026: `supply`'s "Send an agent" reads the visit it dispatched last, so a second is not sent while the first is still open. */
+export { getVisit } from './visits.service';
 /** Used by `suspension`: Lot A STOP_OPEN_WORK takes an agent's open visits off them. */
 export { cancelAgentVisits } from './visits.service';
 /** Used by `account-lifecycle`: the same visits, counted rather than cancelled, for Lot A's closure review. */

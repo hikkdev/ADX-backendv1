@@ -237,6 +237,10 @@ export async function executeErasure(id: string, adminId: string): Promise<Erasu
       : null,
     agentProfileId: parties.agentProfileId,
     advertiserKycUserId: parties.userId,
+    // Account lifecycle (2 Oct 2026): the print shop and the HR record are erased too, and the moment is stamped on the person.
+    printPartnerId: parties.printPartnerId ?? null,
+    employeeId: parties.employeeId ?? null,
+    erasedAt: new Date(),
   });
 
   const completedAt = new Date();

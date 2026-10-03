@@ -35,6 +35,11 @@ const { repository, notifications, users } = vi.hoisted(() => ({
 vi.mock('../prisma-supply.repository', () => ({ prismaSupplyRepository: repository }));
 vi.mock('../../notifications', () => notifications);
 vi.mock('../../users', () => users);
+// ST-2: filing a document asks `uploads` to adopt the file it names; an outside link comes back as given.
+vi.mock('../../uploads', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../uploads')>()),
+  adoptListingDocument: vi.fn(async (url: string) => ({ url, adopted: false, fileId: null, reason: 'NOT_IN_REGISTER' })),
+}));
 
 import { reviewDocument, rightsState, runRightsSweep, setRights, submitDocument } from '../supply.service';
 import { rightsSchema, submitDocumentSchema } from '../supply.schema';
@@ -53,6 +58,8 @@ const listing = (over: Record<string, unknown> = {}) => ({
   rightsValidUntil: inDays(200),
   rightsLapsedAt: null,
   rightsRemindedAt: null,
+  // Account lifecycle (2 Oct 2026): the sweep's rows say whether the publisher is a working account.
+  publisherWorking: true,
   ...over,
 });
 
@@ -143,6 +150,22 @@ describe('the sweep', () => {
     expect(sent.find((note) => note.relatedId === 'a')?.title).toContain('ends in 20 days');
     expect(sent.filter((note) => note.relatedId === 'd').map((note) => note.userId).sort()).toEqual(['usr_admin', 'usr_pub']);
     expect(sent.find((note) => note.relatedId === 'd' && note.userId === 'usr_pub')?.title).toBe('Your right to this spot has run out');
+  });
+});
+
+describe('account lifecycle (2 Oct 2026): the sweep skips a publisher who is not a working account', () => {
+  it('no reminder and no "renew" notice to a suspended or closed publisher — the lapse is still recorded, and ADX is still told', async () => {
+    repository.rightsDue.mockResolvedValue([
+      listing({ id: 'a', rightsValidUntil: inDays(20), publisherWorking: false }),
+      listing({ id: 'd', rightsValidUntil: inDays(-1), publisherWorking: false }),
+    ]);
+    const result = await runRightsSweep(NOW);
+    expect(result).toEqual({ considered: 2, lapsed: 1, reminded: 0 });
+    expect(repository.setRights).not.toHaveBeenCalledWith('a', expect.anything());
+    expect(repository.setRights).toHaveBeenCalledWith('d', { rightsLapsedAt: NOW, availableNow: false });
+    const sent = notifications.createNotification.mock.calls.map((call) => call[0] as { userId: string; relatedId: string });
+    expect(sent.filter((note) => note.userId === 'usr_pub')).toEqual([]);
+    expect(sent.filter((note) => note.relatedId === 'd').map((note) => note.userId)).toEqual(['usr_admin']);
   });
 });
 

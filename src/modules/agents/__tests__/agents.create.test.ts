@@ -62,7 +62,8 @@ beforeEach(() => {
   repository.createAgent.mockResolvedValue({ id: 'agt_new' });
   repository.attachAgent.mockResolvedValue({ id: 'agt_attached' });
   repository.findById.mockImplementation(async (id: string) => ({ id, displayId: 'AGT-1009-2601' }));
-  identifiers.allocateIdentifier.mockResolvedValue('AGT-1009-2601');
+  // 28 Sep 2026: the person's own ADX-… id comes off the USER series, the profile's off AGENT.
+  identifiers.allocateIdentifier.mockImplementation(async (series: string) => (series === 'USER' ? 'ADX-1009-2601' : 'AGT-1009-2601'));
   pricing.assertCityAllows.mockImplementation(gate);
 });
 
@@ -76,6 +77,8 @@ describe('creating an agent', () => {
       name: 'Rahul Kumar',
       role: 'AGENT_PUBLISHER',
       displayId: 'AGT-1009-2601',
+      // 28 Sep 2026: the account the desk opens is a person with their own ADX-… id.
+      userDisplayId: 'ADX-1009-2601',
       stage: 'ACTIVE',
     });
     expect(agent).toMatchObject({ id: 'agt_new', displayId: 'AGT-1009-2601' });
@@ -118,6 +121,9 @@ describe('creating an agent', () => {
 
     expect(repository.createAgent).not.toHaveBeenCalled();
     expect(repository.attachAgent).toHaveBeenCalledWith('usr_pub', expect.objectContaining({ role: 'AGENT_PUBLISHER' }));
+    // The account keeps the ADX-… id it already has: none is minted for it.
+    expect(repository.attachAgent.mock.calls[0]![1]).not.toHaveProperty('userDisplayId');
+    expect(identifiers.allocateIdentifier).not.toHaveBeenCalledWith('USER');
     expect(agent).toMatchObject({ id: 'agt_attached' });
   });
 

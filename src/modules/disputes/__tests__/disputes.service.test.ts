@@ -323,7 +323,7 @@ describe('rating the resolution', () => {
 /* Lot F: the evidence-file door. `uploads` asks, through bootstrap's port,
    who the case a DISPUTE_EVIDENCE file sits on is between. */
 describe('the parties behind an evidence file', () => {
-  const evidence = (disputeId: string, fileId: string, suffix = '') => ({ disputeId, url: `https://adx.local/api/v1/files/${fileId}${suffix}` });
+  const evidence = (disputeId: string, fileId: string, suffix = '') => ({ disputeId, url: `https://adx.in/api/v1/files/${fileId}${suffix}` });
 
   it('names the raiser and the party against, across every case the file is on, once each — each case resolved by its own disputeId', async () => {
     repository.findEvidenceByFileId.mockResolvedValue([evidence('dsp_1', 'f1'), evidence('dsp_2', 'f1', '?download=1'), evidence('dsp_1', 'f1')]);
@@ -345,9 +345,9 @@ describe('the parties behind an evidence file', () => {
     await expect(disputePartiesForEvidenceFile('f1', ['usr_adv'])).resolves.toEqual(['usr_adv', 'usr_pub']);
     expect(repository.findPartiesByDisputeIds).toHaveBeenCalledWith(['dsp_mine']);
 
-    expect(evidenceFileIdOf('https://adx.local/api/v1/files/f1')).toBe('f1');
-    expect(evidenceFileIdOf('https://adx.local/api/v1/files/f1/thumb?x=1')).toBe('f1');
-    expect(evidenceFileIdOf('https://adx.local/api/v1/files/f12')).toBe('f12');
+    expect(evidenceFileIdOf('https://adx.in/api/v1/files/f1')).toBe('f1');
+    expect(evidenceFileIdOf('https://adx.in/api/v1/files/f1/thumb?x=1')).toBe('f1');
+    expect(evidenceFileIdOf('https://adx.in/api/v1/files/f12')).toBe('f12');
     expect(evidenceFileIdOf('https://cdn.example.com/photo.jpg')).toBeNull();
   });
 

@@ -1,4 +1,4 @@
-import { redis } from '../shared/cache';
+import { redis, orSkipWhenRedisDown } from '../shared/cache';
 import { logger } from '../shared/logging';
 import { reportError } from '../shared/errors';
 import { recordHeartbeat } from '../shared/jobs';
@@ -23,7 +23,8 @@ export let agentDocumentExpiryInterval: ReturnType<typeof setInterval> | null = 
 export function startAgentDocumentExpiryJob(): void {
   agentDocumentExpiryInterval = setInterval(async () => {
     recordHeartbeat('agent-document-expiry');
-    const acquired = await redis.set(LOCK_KEY, '1', 'PX', LOCK_TTL_MS, 'NX');
+    // Redis away (Docker stopped): skip this tick rather than take the API down.
+    const acquired = await orSkipWhenRedisDown(redis.set(LOCK_KEY, '1', 'PX', LOCK_TTL_MS, 'NX'), TAG);
     if (!acquired) return;
     try {
       const result = await runDocumentExpirySweep();

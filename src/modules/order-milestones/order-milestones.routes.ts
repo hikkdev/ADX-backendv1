@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { asyncHandler } from '../../shared/http';
-import { authenticate, requireRole } from '../../shared/auth';
+import { authenticate, requireRole, requirePermission } from '../../shared/auth';
 import {
   createTemplateHandler,
   listTemplatesHandler,
@@ -29,34 +29,34 @@ import {
 export const milestoneTemplateRouter = Router();
 milestoneTemplateRouter.use(authenticate);
 
-milestoneTemplateRouter.post('/', requireRole('ADMIN'), asyncHandler(createTemplateHandler));
-milestoneTemplateRouter.get('/', asyncHandler(listTemplatesHandler));
-milestoneTemplateRouter.get('/:id', asyncHandler(getTemplateHandler));
-milestoneTemplateRouter.patch('/:id', requireRole('ADMIN'), asyncHandler(updateTemplateHandler));
+milestoneTemplateRouter.post('/', requireRole('ADMIN'), requirePermission('marketplace.edit'), asyncHandler(createTemplateHandler));
+milestoneTemplateRouter.get('/', requirePermission('content.view'), asyncHandler(listTemplatesHandler));
+milestoneTemplateRouter.get('/:id', requirePermission('content.view'), asyncHandler(getTemplateHandler));
+milestoneTemplateRouter.patch('/:id', requireRole('ADMIN'), requirePermission('marketplace.edit'), asyncHandler(updateTemplateHandler));
 
 export const milestonePlanRouter = Router();
 milestonePlanRouter.use(authenticate);
 
-milestonePlanRouter.post('/', requireRole('ADMIN'), asyncHandler(createPlanHandler));
+milestonePlanRouter.post('/', requireRole('ADMIN'), requirePermission('marketplace.edit'), asyncHandler(createPlanHandler));
 milestonePlanRouter.get('/', asyncHandler(listPlansHandler));
 milestonePlanRouter.get('/:id', asyncHandler(getPlanHandler));
-milestonePlanRouter.patch('/:id', requireRole('ADMIN'), asyncHandler(updatePlanHandler));
-milestonePlanRouter.put('/:id/items', requireRole('ADMIN'), asyncHandler(replacePlanItemsHandler));
+milestonePlanRouter.patch('/:id', requireRole('ADMIN'), requirePermission('marketplace.edit'), asyncHandler(updatePlanHandler));
+milestonePlanRouter.put('/:id/items', requireRole('ADMIN'), requirePermission('marketplace.edit'), asyncHandler(replacePlanItemsHandler));
 
 // mergeParams so :orderId from the mount path reaches these handlers.
 export const orderMilestoneRouter = Router({ mergeParams: true });
 orderMilestoneRouter.use(authenticate);
 
-orderMilestoneRouter.get('/', requireRole('ADMIN'), asyncHandler(getOrderMilestonesHandler));
-orderMilestoneRouter.post('/', requireRole('ADMIN'), asyncHandler(addMilestoneToOrderHandler));
-orderMilestoneRouter.patch('/:milestoneId', requireRole('ADMIN'), asyncHandler(updateOrderMilestoneHandler));
-orderMilestoneRouter.delete('/:milestoneId', requireRole('ADMIN'), asyncHandler(removeOrderMilestoneHandler));
+orderMilestoneRouter.get('/', requireRole('ADMIN'), requirePermission('marketplace.view'), asyncHandler(getOrderMilestonesHandler));
+orderMilestoneRouter.post('/', requireRole('ADMIN'), requirePermission('marketplace.edit'), asyncHandler(addMilestoneToOrderHandler));
+orderMilestoneRouter.patch('/:milestoneId', requireRole('ADMIN'), requirePermission('marketplace.edit'), asyncHandler(updateOrderMilestoneHandler));
+orderMilestoneRouter.delete('/:milestoneId', requireRole('ADMIN'), requirePermission('marketplace.delete'), asyncHandler(removeOrderMilestoneHandler));
 
 export const agentMilestoneRouter = Router();
 agentMilestoneRouter.use(authenticate);
 agentMilestoneRouter.use(requireRole('AGENT_PUBLISHER', 'AGENT_ADVERTISER'));
 
-agentMilestoneRouter.get('/', asyncHandler(getAgentMilestonesHandler));
+agentMilestoneRouter.get('/', requirePermission('agents.view'), asyncHandler(getAgentMilestonesHandler));
 agentMilestoneRouter.get('/:milestoneId', asyncHandler(getMilestoneDetailHandler));
 // A12: the offer's answers, then the slot — DR 01's three sheets.
 agentMilestoneRouter.post('/:milestoneId/accept', asyncHandler(acceptMilestoneHandler));

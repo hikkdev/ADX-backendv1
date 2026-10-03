@@ -1,17 +1,23 @@
 import { Prisma, prisma } from '../../shared/database';
 import { slotsHeldWith } from '../listings';
-import type { CampaignRefundStatus, CampaignStatus, CreativeStatus, LandingPageStatus } from '../../shared/database';
+import type { CampaignRefundStatus, CampaignStatus, CreativeStatus, LandingPageStatus, PrintJobStatus } from '../../shared/database';
 import { countsFrom, listArgs } from '../../shared/pagination';
 import {
+  AGENT_WAITING_ORDER_STATUSES,
   CAMPAIGN_REFUND_STATUSES,
   LANDING_PAGE_STATUSES,
+  PUBLISHER_WAITING_ORDER_STATUSES,
   SlotClashError,
+  type CampaignAdvertiserRow,
+  type CampaignPerformanceTotals,
   type CampaignRefundView,
+  type CampaignScopeFilter,
   type CampaignsRepository,
   type LandingPageView,
+  type CreativeReviewRow,
   type SlotAsk,
 } from './campaigns.repository';
-import { CAMPAIGN_STATUSES, CREATIVE_STATUSES } from './campaigns.schema';
+import { CAMPAIGN_STATUSES, CREATIVE_STATUSES, type WaitingReason } from './campaigns.schema';
 
 /** What the desk reads beside a creative: its campaign and, when it has one, its spot. */
 const creativeReviewInclude = {
@@ -26,6 +32,13 @@ const creativeReviewInclude = {
       createdByUserId: true,
       trackingMethod: true,
       contentCategoryId: true,
+      industry: true,
+      /* CR-1: the flight is a design request's deadline, and the config is
+         the brief the advertiser wrote when choosing ADX Design Agency. */
+      startDate: true,
+      endDate: true,
+      creativePath: true,
+      creativeConfig: true,
       advertiser: { select: { id: true, name: true, companyName: true } },
     },
   },
@@ -33,10 +46,65 @@ const creativeReviewInclude = {
     select: {
       id: true,
       listingId: true,
-      listing: { select: { id: true, title: true, city: true, widthFt: true, heightFt: true } },
+      listing: { select: { id: true, title: true, city: true, widthFt: true, heightFt: true, category: true } },
+      /* CR-1: Print-ready — the spot's order. Its print job is stitched on
+         afterwards by `withPrintJobs`: `PrintJob.orderId` is a plain unique
+         column with no Prisma relation to `Order`, so it cannot be selected
+         through it. */
+      order: { select: { id: true, status: true } },
     },
   },
-} as const;
+  /* `satisfies`, not `as const`: an include held in a variable is not checked
+     for unknown fields when it is passed, so a bad key here reached the
+     database as a 500. This makes it a compile error. */
+} satisfies Prisma.CampaignCreativeInclude;
+
+/** The include's row as Prisma types it — before the print job is stitched on. */
+type CreativeReviewFetched = Prisma.CampaignCreativeGetPayload<{ include: typeof creativeReviewInclude }>;
+
+/** A print job as the stitch wants it: keyed by its order. */
+export type PrintJobForRow = { id: string; orderId: string; status: PrintJobStatus; printPartner: { id: string; name: string } };
+
+/** The orders a page of rows sits on — what to fetch jobs for. */
+export function orderIdsOf(rows: readonly { spot: { order: { id: string } | null } | null }[]): string[] {
+  return [...new Set(rows.map((row) => row.spot?.order?.id).filter((id): id is string => Boolean(id)))];
+}
+
+/**
+ * CR-1: put each order's print job onto `spot.order.printJob`. Pure, so the
+ * merge is tested without a database: null where the spot is unbooked or
+ * the order has no job; a job on an order no row sits on is ignored.
+ */
+export function stitchPrintJobs<T extends { spot: { order: { id: string } | null } | null }>(
+  rows: readonly T[],
+  jobs: readonly PrintJobForRow[],
+): (Omit<T, 'spot'> & {
+  spot:
+    | (Omit<NonNullable<T['spot']>, 'order'> & {
+        order: (NonNullable<NonNullable<T['spot']>['order']> & { printJob: Omit<PrintJobForRow, 'orderId'> | null }) | null;
+      })
+    | null;
+})[] {
+  const byOrder = new Map(jobs.map((job) => [job.orderId, { id: job.id, status: job.status, printPartner: job.printPartner }]));
+  return rows.map((row) => ({
+    ...row,
+    spot: row.spot
+      ? { ...row.spot, order: row.spot.order ? { ...row.spot.order, printJob: byOrder.get(row.spot.order.id) ?? null } : null }
+      : null,
+  })) as never;
+}
+
+/** The fetch half: one query for the whole page, then the pure stitch. */
+async function withPrintJobs(rows: CreativeReviewFetched[]): Promise<CreativeReviewRow[]> {
+  const orderIds = orderIdsOf(rows);
+  const jobs = orderIds.length
+    ? await prisma.printJob.findMany({
+        where: { orderId: { in: orderIds } },
+        select: { id: true, orderId: true, status: true, printPartner: { select: { id: true, name: true } } },
+      })
+    : [];
+  return stitchPrintJobs(rows, jobs);
+}
 import { spendToDate } from './flight';
 
 /**
@@ -56,6 +124,131 @@ const landingPageViewInclude = {
     },
   },
 } satisfies Prisma.LandingPageInclude;
+
+/* ── The Campaigns lot (2 Oct 2026) ──────────────────────────────────── */
+
+/**
+ * The advertiser behind a campaign for the console's reads — the business,
+ * its KYC state, and the person's names and id, shaped into the orders'
+ * `placedBy` by the service. The person's row is named column by column:
+ * no email, no birth date, no credential ever rides along.
+ */
+const advertiserPartySelect = {
+  id: true,
+  name: true,
+  companyName: true,
+  displayId: true,
+  kycStatus: true,
+  userId: true,
+  suspensionScopes: true,
+  user: { select: { id: true, name: true, firstName: true, lastName: true, displayId: true, isActive: true, closedAt: true } },
+} satisfies Prisma.AdvertiserSelect;
+
+/** What `launch-gates` reads for one campaign. */
+const gateFactsSelect = {
+  id: true,
+  reference: true,
+  name: true,
+  status: true,
+  brandName: true,
+  startDate: true,
+  endDate: true,
+  total: true,
+  createdAt: true,
+  submittedForPaymentAt: true,
+  paidAt: true,
+  reservationFeeStatus: true,
+  reservationFeeAmount: true,
+  reservationFeeDueAt: true,
+  reservationFeePaidAt: true,
+  creativePath: true,
+  designQuoteStatus: true,
+  designQuoteAmount: true,
+  designQuotedAt: true,
+  advertiser: { select: advertiserPartySelect },
+  creatives: { select: { id: true, resubmissionOfId: true, fileUrl: true, status: true, designedByAdx: true } },
+  spots: { select: { id: true, status: true, order: { select: { id: true, status: true } } } },
+  landingPage: { select: { id: true, slug: true, status: true, publishedAt: true } },
+} satisfies Prisma.CampaignSelect;
+
+const contains = (q: string) => ({ contains: q, mode: 'insensitive' as const });
+
+/**
+ * Lot X-B on a campaign: its city is `targetMarketCityId`, the typed
+ * `targetMarket` the fallback for a row with no key — the same rule every
+ * section overview's `cityOf` applies to a party's own columns.
+ */
+export function campaignCityWhere(scope: Pick<CampaignScopeFilter, 'city' | 'cityId'>): Prisma.CampaignWhereInput {
+  if (!scope.city) return {};
+  const spelling = { equals: scope.city.trim(), mode: 'insensitive' as const };
+  return scope.cityId
+    ? { OR: [{ targetMarketCityId: scope.cityId }, { targetMarketCityId: null, targetMarket: spelling }] }
+    : { targetMarketCityId: null, targetMarket: spelling };
+}
+
+/** The advertiser's business, person and ADV-/ADX- ids, for `q`. */
+const advertiserMatches = (q: string): Prisma.AdvertiserWhereInput => ({
+  OR: [
+    { name: contains(q) },
+    { companyName: contains(q) },
+    { displayId: contains(q) },
+    { user: { is: { OR: [{ name: contains(q) }, { firstName: contains(q) }, { lastName: contains(q) }, { displayId: contains(q) }] } } },
+  ],
+});
+
+/** Scope and search — everything but the status facet, which the chips count around. Whole where-objects under one AND. */
+export function campaignScopeWhere(filter: CampaignScopeFilter): Prisma.CampaignWhereInput {
+  const and: Prisma.CampaignWhereInput[] = [];
+  if (filter.advertiserId) and.push({ advertiserId: filter.advertiserId });
+  if (filter.agentId) and.push({ agentId: filter.agentId });
+  if (filter.q) {
+    and.push({
+      OR: [{ name: contains(filter.q) }, { reference: contains(filter.q) }, { brandName: contains(filter.q) }, { advertiser: advertiserMatches(filter.q) }],
+    });
+  }
+  if (filter.city) and.push(campaignCityWhere(filter));
+  if (filter.from) and.push({ endDate: { gte: filter.from } });
+  if (filter.to) and.push({ startDate: { lt: filter.to } });
+  if (filter.goal?.length) and.push({ goal: { in: filter.goal } });
+  return and.length ? { AND: and } : {};
+}
+
+/** The launch queue's population: paid and not live (SCHEDULED), or held by a paid reservation fee. */
+export const PAID_UNLAUNCHED_WHERE: Prisma.CampaignWhereInput = {
+  OR: [{ status: 'SCHEDULED' }, { status: 'PENDING_PAYMENT', reservationFeeStatus: 'PAID' }],
+};
+
+/**
+ * Each gate as a where — exact for all but ARTWORK, which cannot see that a
+ * creative was superseded (the resubmission is a plain column) and so reads
+ * a superset; `launch-gates.waitingOnOf` narrows the rows exactly.
+ */
+export function waitingPrefilter(reason: WaitingReason): Prisma.CampaignWhereInput {
+  switch (reason) {
+    case 'RESERVATION_FEE':
+      return { status: 'PENDING_PAYMENT', reservationFeeStatus: 'DUE' };
+    case 'PAYMENT':
+      return { status: 'PENDING_PAYMENT', OR: [{ reservationFeeStatus: null }, { reservationFeeStatus: { not: 'DUE' } }] };
+    case 'DESIGN_QUOTE':
+      return { status: 'PENDING_PAYMENT', creativePath: 'ADX_DESIGN_AGENCY', OR: [{ designQuoteStatus: null }, { designQuoteStatus: 'QUOTED' }] };
+    case 'KYC':
+      return { AND: [PAID_UNLAUNCHED_WHERE, { advertiser: { kycStatus: { not: 'VERIFIED' } } }] };
+    case 'ARTWORK':
+      return { status: { in: ['PENDING_PAYMENT', 'SCHEDULED'] }, creatives: { some: { fileUrl: { not: null }, status: { not: 'APPROVED' } } } };
+    case 'PUBLISHER':
+      return { status: 'SCHEDULED', spots: { some: { status: { not: 'CANCELLED' }, order: { is: { status: { in: [...PUBLISHER_WAITING_ORDER_STATUSES] } } } } } };
+    case 'AGENT':
+      return { status: 'SCHEDULED', spots: { some: { status: { not: 'CANCELLED' }, order: { is: { status: { in: [...AGENT_WAITING_ORDER_STATUSES] } } } } } };
+  }
+}
+
+/** The landing-page list's search: the slug, the campaign, the advertiser. */
+const landingPageMatches = (q: string): Prisma.LandingPageWhereInput => ({
+  OR: [
+    { slug: contains(q) },
+    { campaign: { OR: [{ name: contains(q) }, { reference: contains(q) }, { advertiser: advertiserMatches(q) }] } },
+  ],
+});
 
 const listSelect = {
   id: true,
@@ -129,6 +322,8 @@ export const prismaCampaignsRepository: CampaignsRepository = {
         codes: true,
         advertiser: { select: { id: true, name: true, companyName: true } },
         brand: { select: { id: true, name: true } },
+        // PC-1: the code on the booking, priced at every review.
+        promoCode: true,
       },
     });
   },
@@ -139,20 +334,11 @@ export const prismaCampaignsRepository: CampaignsRepository = {
 
   async listCampaignsPage(filter) {
     // Scope and search, but not the status facet — the chips have to keep
-    // their own counts while one of them is selected.
-    const base: Prisma.CampaignWhereInput = {
-      ...(filter.advertiserId ? { advertiserId: filter.advertiserId } : {}),
-      ...(filter.agentId ? { agentId: filter.agentId } : {}),
-      ...(filter.q
-        ? {
-            OR: [
-              { name: { contains: filter.q, mode: 'insensitive' as const } },
-              { reference: { contains: filter.q, mode: 'insensitive' as const } },
-              { brandName: { contains: filter.q, mode: 'insensitive' as const } },
-            ],
-          }
-        : {}),
-    };
+    // their own counts while one of them is selected. The Campaigns lot:
+    // city, flight, goal and the advertiser in the search; a `waitingOn`
+    // filter arrives as the ids it resolved to.
+    const scope = campaignScopeWhere(filter);
+    const base: Prisma.CampaignWhereInput = filter.ids ? { AND: [scope, { id: { in: filter.ids } }] } : scope;
     const where: Prisma.CampaignWhereInput = {
       ...base,
       ...(filter.status?.length ? { status: { in: filter.status as CampaignStatus[] } } : {}),
@@ -224,10 +410,59 @@ export const prismaCampaignsRepository: CampaignsRepository = {
     }));
   },
 
+  gateCandidates(filter, cap) {
+    const and: Prisma.CampaignWhereInput[] = [campaignScopeWhere(filter)];
+    if (filter.paidOnly) and.push(PAID_UNLAUNCHED_WHERE);
+    if (filter.reasons.length) and.push({ OR: filter.reasons.map(waitingPrefilter) });
+    return prisma.campaign.findMany({
+      where: { AND: and },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      take: cap,
+      select: gateFactsSelect,
+    });
+  },
+
+  campaignGateFacts(ids) {
+    if (ids.length === 0) return Promise.resolve([]);
+    return prisma.campaign.findMany({ where: { id: { in: ids } }, select: gateFactsSelect });
+  },
+
+  async performanceTotals(campaignIds) {
+    if (campaignIds.length === 0) return {};
+    // Two queries for the whole page: the codes (their scan counters, and
+    // which campaign each belongs to), then the landing page's events
+    // grouped by code and type.
+    const codes = await prisma.campaignTrackingCode.findMany({
+      where: { campaignId: { in: campaignIds } },
+      select: { id: true, campaignId: true, scans: true },
+    });
+    if (codes.length === 0) return {};
+    const events = await prisma.trackingEvent.groupBy({
+      by: ['codeId', 'type'],
+      where: { codeId: { in: codes.map((code) => code.id) }, type: { in: ['VIEW', 'CTA_CLICK', 'FORM_SUBMIT'] } },
+      _count: { _all: true },
+    });
+    const campaignOf = new Map(codes.map((code) => [code.id, code.campaignId]));
+    const out: Record<string, CampaignPerformanceTotals> = {};
+    const totalsFor = (campaignId: string): CampaignPerformanceTotals => (out[campaignId] ??= { scans: 0, views: 0, ctaClicks: 0, enquiries: 0 });
+    for (const code of codes) totalsFor(code.campaignId).scans += code.scans;
+    for (const row of events) {
+      const campaignId = campaignOf.get(row.codeId);
+      if (!campaignId) continue;
+      const totals = totalsFor(campaignId);
+      if (row.type === 'VIEW') totals.views += row._count._all;
+      else if (row.type === 'CTA_CLICK') totals.ctaClicks += row._count._all;
+      else if (row.type === 'FORM_SUBMIT') totals.enquiries += row._count._all;
+    }
+    return out;
+  },
+
   updateCampaign(id, patch) {
+    // WG-1: a JSON column clears with Prisma's JsonNull, never a bare null.
+    const data = patch.placementPreferences === null ? { ...patch, placementPreferences: Prisma.JsonNull } : patch;
     return prisma.campaign.update({
       where: { id },
-      data: patch as Prisma.CampaignUpdateInput,
+      data: data as Prisma.CampaignUpdateInput,
     });
   },
 
@@ -400,6 +635,47 @@ export const prismaCampaignsRepository: CampaignsRepository = {
     return count;
   },
 
+  campaignsWithReservationFeeDue(now, limit = 200) {
+    return prisma.campaign.findMany({
+      where: { status: 'PENDING_PAYMENT', reservationFeeStatus: 'DUE', reservationFeeDueAt: { lte: now } },
+      orderBy: { reservationFeeDueAt: 'asc' },
+      take: limit,
+      select: { id: true },
+    });
+  },
+
+  campaignsWithLapsedReservationHold(now, limit = 200) {
+    return prisma.campaign.findMany({
+      where: { status: 'PENDING_PAYMENT', reservationFeeStatus: 'PAID', reservationHoldUntil: { lte: now } },
+      orderBy: { reservationHoldUntil: 'asc' },
+      take: limit,
+      select: { id: true },
+    });
+  },
+
+  async advertisersWithCampaignActivity(since, limit = 5000) {
+    const rows = await prisma.campaign.findMany({
+      where: {
+        OR: [
+          { status: { in: ['LIVE', 'PAUSED', 'SCHEDULED'] } },
+          { status: 'COMPLETED', completedAt: { gte: since } },
+        ],
+      },
+      distinct: ['advertiserId'],
+      take: limit,
+      select: { advertiserId: true },
+    });
+    return rows;
+  },
+
+  async clearCampaignReservations(campaignId) {
+    const { count } = await prisma.campaignSpot.updateMany({
+      where: { campaignId, status: 'RESERVED', reservedUntil: { not: null } },
+      data: { reservedUntil: null },
+    });
+    return count;
+  },
+
   createCreative(data) {
     const { checks, ...rest } = data;
     return prisma.campaignCreative.create({
@@ -418,12 +694,93 @@ export const prismaCampaignsRepository: CampaignsRepository = {
     });
   },
 
-  findCreative(id) {
-    return prisma.campaignCreative.findUnique({ where: { id }, include: creativeReviewInclude });
+  async findCreative(id) {
+    const row = await prisma.campaignCreative.findUnique({ where: { id }, include: creativeReviewInclude });
+    if (!row) return null;
+    const [stitched] = await withPrintJobs([row]);
+    return stitched ?? null;
   },
 
   findCreatives(campaignId) {
     return prisma.campaignCreative.findMany({ where: { campaignId }, orderBy: { createdAt: 'asc' } });
+  },
+
+  createCreativeAnalysis(data) {
+    const { raw, ...rest } = data;
+    return prisma.creativeAnalysis.create({ data: { ...rest, raw: raw === null ? Prisma.JsonNull : raw } });
+  },
+  latestCreativeAnalysis(creativeId) {
+    return prisma.creativeAnalysis.findFirst({ where: { creativeId }, orderBy: { createdAt: 'desc' } });
+  },
+  latestCreativeAnalyses(creativeIds) {
+    if (creativeIds.length === 0) return Promise.resolve([]);
+    // Newest first, one per creative: `distinct` keeps the first row it meets per key.
+    return prisma.creativeAnalysis.findMany({ where: { creativeId: { in: creativeIds } }, orderBy: { createdAt: 'desc' }, distinct: ['creativeId'] });
+  },
+  async listCreativesAwaitingAnalysis(limit) {
+    const rows = await prisma.campaignCreative.findMany({
+      where: { status: 'IN_REVIEW', fileUrl: { not: null }, mimeType: { startsWith: 'image/' }, analyses: { none: {} } },
+      orderBy: [{ submittedAt: { sort: 'asc', nulls: 'last' } }, { createdAt: 'asc' }],
+      take: limit,
+      include: creativeReviewInclude,
+    });
+    return withPrintJobs(rows);
+  },
+  listCreativeHashes(exceptCreativeId) {
+    return prisma.campaignCreative.findMany({
+      where: { id: { not: exceptCreativeId }, perceptualHash: { not: null }, fileUrl: { not: null } },
+      select: { id: true, perceptualHash: true },
+    });
+  },
+
+  async listDesignRequestCandidates() {
+    /* Past the draft and not finished: a draft has not been submitted, so
+       nothing is owed on it yet, and a completed or cancelled campaign has
+       nothing left to print. Oldest first — a queue is worked from the back. */
+    return prisma.campaign.findMany({
+      where: {
+        creativePath: 'ADX_DESIGN_AGENCY',
+        status: { in: ['PENDING_PAYMENT', 'SCHEDULED', 'LIVE', 'PAUSED'] },
+      },
+      orderBy: [{ startDate: { sort: 'asc', nulls: 'last' } }, { createdAt: 'asc' }],
+      select: {
+        id: true,
+        reference: true,
+        name: true,
+        status: true,
+        startDate: true,
+        endDate: true,
+        creativeConfig: true,
+        createdAt: true,
+        updatedAt: true,
+        // DQ-1: where the quote stands.
+        designQuoteAmount: true,
+        designQuoteStatus: true,
+        designQuoteNote: true,
+        designQuotedAt: true,
+        designQuoteRespondedAt: true,
+        advertiser: { select: { id: true, name: true, companyName: true } },
+        spots: {
+          where: { status: { not: 'CANCELLED' } },
+          select: {
+            id: true,
+            listing: { select: { id: true, title: true, city: true, widthFt: true, heightFt: true, category: true } },
+          },
+        },
+        creatives: {
+          select: {
+            id: true,
+            status: true,
+            designedByAdx: true,
+            resubmissionOfId: true,
+            fileUrl: true,
+            reviewNote: true,
+            reviewedAt: true,
+            createdAt: true,
+          },
+        },
+      },
+    });
   },
 
   async listCreativesPage(filter) {
@@ -436,6 +793,8 @@ export const prismaCampaignsRepository: CampaignsRepository = {
       ...(filter.flagged === false ? { flags: { isEmpty: true } } : {}),
       ...(filter.resubmitted === true ? { resubmissionOfId: { not: null } } : {}),
       ...(filter.resubmitted === false ? { resubmissionOfId: null } : {}),
+      ...(filter.analysed === true ? { analyses: { some: {} } } : {}),
+      ...(filter.analysed === false ? { analyses: { none: {} } } : {}),
       ...(filter.q
         ? {
             campaign: {
@@ -452,24 +811,44 @@ export const prismaCampaignsRepository: CampaignsRepository = {
       ...base,
       ...(filter.status?.length ? { status: { in: filter.status as CreativeStatus[] } } : {}),
     };
+    /*
+     * 28 Sep 2026 (the owner: "If there's only two creatives here, why does it
+     * count 8?"): the kind row is one choice, so its chips count over the scope
+     * the kind does NOT narrow — the search and the status in view — and
+     * `everyKind` is how many that is. Before, they counted over every status
+     * and narrowed each other, and the console summed them into its totals.
+     */
+    const kindScope: Prisma.CampaignCreativeWhereInput = {
+      fileUrl: { not: null },
+      ...(filter.q ? { campaign: base.campaign! } : {}),
+      ...(filter.status?.length ? { status: { in: filter.status as CreativeStatus[] } } : {}),
+    };
     // Oldest submission first by default: a queue is worked from the back.
     const orderBy: Prisma.CampaignCreativeOrderByWithRelationInput[] =
       filter.sort === 'NEWEST'
         ? [{ submittedAt: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }]
         : [{ submittedAt: { sort: 'asc', nulls: 'last' } }, { createdAt: 'asc' }];
-    // E7-2: the desk's other four chips, counted over the same scope as the
-    // status histogram (search and facets, not the status), so a chip never
-    // reads zero because another one is selected.
-    const [rows, total, groups, flagged, statics, video, resubmitted] = await Promise.all([
+    // E7-2: the status chips count over the search and the kind in view, not the
+    // status, so a chip never reads zero because another one is selected. The
+    // kind chips count over `kindScope` (above) for the same reason.
+    const [rows, total, groups, everyKind, flagged, statics, video, resubmitted, analysed, unanalysed] = await Promise.all([
       prisma.campaignCreative.findMany({ where, orderBy, ...listArgs(filter), include: creativeReviewInclude }),
       prisma.campaignCreative.count({ where }),
       prisma.campaignCreative.groupBy({ by: ['status'], where: base, _count: { _all: true } }),
-      prisma.campaignCreative.count({ where: { ...base, flags: { isEmpty: false } } }),
-      prisma.campaignCreative.count({ where: { ...base, path: 'STATIC_IMAGES' } }),
-      prisma.campaignCreative.count({ where: { ...base, path: 'VIDEO_OR_MOTION' } }),
-      prisma.campaignCreative.count({ where: { ...base, resubmissionOfId: { not: null } } }),
+      prisma.campaignCreative.count({ where: kindScope }),
+      prisma.campaignCreative.count({ where: { ...kindScope, flags: { isEmpty: false } } }),
+      prisma.campaignCreative.count({ where: { ...kindScope, path: 'STATIC_IMAGES' } }),
+      prisma.campaignCreative.count({ where: { ...kindScope, path: 'VIDEO_OR_MOTION' } }),
+      prisma.campaignCreative.count({ where: { ...kindScope, resubmissionOfId: { not: null } } }),
+      // VA-4: the reading facet, over the same scope.
+      prisma.campaignCreative.count({ where: { ...kindScope, analyses: { some: {} } } }),
+      prisma.campaignCreative.count({ where: { ...kindScope, analyses: { none: {} } } }),
     ]);
-    return { items: rows, total, counts: { ...countsFrom(groups, CREATIVE_STATUSES), flagged, static: statics, video, resubmitted } };
+    return {
+      items: await withPrintJobs(rows),
+      total,
+      counts: { ...countsFrom(groups, CREATIVE_STATUSES), everyKind, flagged, static: statics, video, resubmitted, analysed, unanalysed },
+    };
   },
 
   async deleteCreative(id) {
@@ -609,7 +988,7 @@ export const prismaCampaignsRepository: CampaignsRepository = {
   advertiserContext(advertiserId) {
     return prisma.advertiser.findUnique({
       where: { id: advertiserId },
-      select: { id: true, agentId: true, userId: true, kycStatus: true },
+      select: { id: true, agentId: true, userId: true, kycStatus: true, name: true },
     });
   },
 
@@ -745,20 +1124,30 @@ export const prismaCampaignsRepository: CampaignsRepository = {
 
   async listLandingPages(query) {
     const statuses = query.status as LandingPageStatus[] | undefined;
-    const where = statuses?.length ? { status: { in: statuses } } : {};
+    // The Campaigns lot: `q` narrows the chips' counts too; the status facet does not.
+    const base: Prisma.LandingPageWhereInput = query.q ? landingPageMatches(query.q) : {};
+    const where: Prisma.LandingPageWhereInput = statuses?.length ? { AND: [base, { status: { in: statuses } }] } : base;
     // E7-2 (Lot E addendum 2): LandingPage now has its campaign relation, so
-    // the campaign beside each row is the same query, not a second one.
+    // the campaign beside each row is the same query, not a second one —
+    // and (the Campaigns lot) its advertiser's party row with it.
     const [rows, total, groups] = await Promise.all([
       prisma.landingPage.findMany({
         where,
         orderBy: { updatedAt: 'desc' },
         ...listArgs(query),
-        include: landingPageViewInclude,
+        include: {
+          campaign: { select: { ...landingPageViewInclude.campaign.select, advertiser: { select: advertiserPartySelect } } },
+        },
       }),
       prisma.landingPage.count({ where }),
-      prisma.landingPage.groupBy({ by: ['status'], _count: { _all: true } }),
+      prisma.landingPage.groupBy({ by: ['status'], where: base, _count: { _all: true } }),
     ]);
-    const items: LandingPageView[] = rows.map(({ campaign, ...row }) => ({ ...row, campaign }));
+    const items = rows.map(({ campaign, ...row }) => {
+      if (!campaign) return { ...row, campaign: null, advertiserRow: null };
+      const { advertiser, ...rest } = campaign;
+      const view: LandingPageView['campaign'] = { ...rest, advertiser: { id: advertiser.id, name: advertiser.name, companyName: advertiser.companyName } };
+      return { ...row, campaign: view, advertiserRow: advertiser as CampaignAdvertiserRow };
+    });
     return { items, total, counts: countsFrom(groups, LANDING_PAGE_STATUSES) };
   },
 };

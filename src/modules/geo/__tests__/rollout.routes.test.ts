@@ -60,6 +60,10 @@ vi.mock('../../pricing', async (importOriginal) => {
         : { support: 'UNKNOWN', resolved: false, stage: null, switches: { ...OFF, supplyIntake: true, publishing: true, demand: true, agentOnboarding: true, printPartners: true, leadFeeds: true }, city: null },
   };
 });
+vi.mock('../../../shared/security', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  publicReadLimiter: (_req: unknown, _res: unknown, next: () => void) => next(),
+}));
 vi.mock('../../../shared/maps', () => ({ DIRECTIONS_MODES: ['driving', 'two_wheeler'], geocodeAddress: vi.fn(), reverseGeocode: vi.fn(), autocompletePlaces: vi.fn(), placeDetails: vi.fn(), routeDirections: vi.fn() }));
 
 import { errorHandler } from '../../../shared/errors';
@@ -118,8 +122,17 @@ describe('guards', () => {
   it('needs a session everywhere, and ADMIN on the console reads', async () => {
     expect((await request(app()).get('/api/v1/geo/summary')).status).toBe(401);
     expect((await request(app()).get('/api/v1/geo/summary').set('Authorization', `Bearer ${publisher}`)).status).toBe(403);
-    expect((await request(app()).get('/api/v1/app/geo/cities')).status).toBe(401);
     expect((await request(app()).get('/api/v1/app/geo/cities').set('Authorization', `Bearer ${publisher}`)).status).toBe(200);
+  });
+
+  /* 26 Sep 2026: the website's city suggestions and stage pill work signed out; the waitlist write does not. */
+  it('the picker and the resolver answer a visitor; a bad token is still refused; the waitlist stays signed-in', async () => {
+    expect((await request(app()).get('/api/v1/app/geo/cities')).status).toBe(200);
+    const resolved = await request(app()).get('/api/v1/app/geo/resolve?name=Mysore');
+    expect(resolved.status).toBe(200);
+    expect(resolved.body.data).toMatchObject({ resolved: true, slug: 'mysuru', stage: 'SEEDING', comingSoon: true });
+    expect((await request(app()).get('/api/v1/app/geo/cities').set('Authorization', 'Bearer not-a-jwt')).status).toBe(401);
+    expect((await request(app()).post('/api/v1/app/geo/waitlist').send({ citySlug: 'mysuru', side: 'ADVERTISER' })).status).toBe(401);
   });
 });
 

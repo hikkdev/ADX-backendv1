@@ -1,4 +1,5 @@
-import type { KycStatus, Prisma } from '../../shared/database';
+import type { PromoCode, KycStatus, ListingCategory, OrderStatus, PrintJobStatus, Prisma, SuspensionScope } from '../../shared/database';
+import type { WaitingReason } from './campaigns.schema';
 
 /** G10: what a clash check asks per listing — a bare id wants one slot. */
 export type SlotAsk = string | { listingId: string; quantity: number };
@@ -20,6 +21,7 @@ import type {
   BrandAwarenessLevel,
   Campaign,
   CampaignCreative,
+  CreativeAnalysis,
   CampaignRefund,
   CampaignRefundStatus,
   CampaignDailyMetric,
@@ -111,13 +113,79 @@ export type CreativeReviewRow = CampaignCreative & {
     createdByUserId: string;
     trackingMethod: TrackingMethod;
     contentCategoryId: string | null;
+    /** VA-1: what the model is told the advertiser does. */
+    industry: string | null;
+    /** CR-1: the flight — a design request is due by the day the campaign starts. */
+    startDate: Date | null;
+    endDate: Date | null;
+    /** CR-1: the path chosen and, for ADX Design Agency, the brief: objective, key message, style. */
+    creativePath: CreativePath | null;
+    creativeConfig: Prisma.JsonValue | null;
     advertiser: { id: string; name: string; companyName: string | null };
   };
   spot: {
     id: string;
     listingId: string;
-    listing: { id: string; title: string; city: string | null; widthFt: Prisma.Decimal | null; heightFt: Prisma.Decimal | null };
+    listing: {
+      id: string;
+      title: string;
+      city: string | null;
+      widthFt: Prisma.Decimal | null;
+      heightFt: Prisma.Decimal | null;
+      category: ListingCategory;
+    };
+    /** CR-1: the spot's order and the print job on it, for Print-ready. Null until the spot is booked. */
+    order: {
+      id: string;
+      status: OrderStatus;
+      printJob: { id: string; status: PrintJobStatus; printPartner: { id: string; name: string } } | null;
+    } | null;
   } | null;
+};
+
+/**
+ * CR-1: a campaign that may be owed a design — on the ADX Design Agency
+ * path, past the draft. Whether it *is* owed one is the service's call, from
+ * the creatives carried here.
+ */
+export type DesignRequestCandidate = {
+  id: string;
+  reference: string;
+  name: string;
+  status: CampaignStatus;
+  startDate: Date | null;
+  endDate: Date | null;
+  creativeConfig: Prisma.JsonValue | null;
+  createdAt: Date;
+  updatedAt: Date;
+  /** DQ-1 */
+  designQuoteAmount: Prisma.Decimal | null;
+  designQuoteStatus: string | null;
+  designQuoteNote: string | null;
+  designQuotedAt: Date | null;
+  designQuoteRespondedAt: Date | null;
+  advertiser: { id: string; name: string; companyName: string | null };
+  spots: {
+    id: string;
+    listing: {
+      id: string;
+      title: string;
+      city: string | null;
+      widthFt: Prisma.Decimal | null;
+      heightFt: Prisma.Decimal | null;
+      category: ListingCategory;
+    };
+  }[];
+  creatives: {
+    id: string;
+    status: CreativeStatus;
+    designedByAdx: boolean;
+    resubmissionOfId: string | null;
+    fileUrl: string | null;
+    reviewNote: string | null;
+    reviewedAt: Date | null;
+    createdAt: Date;
+  }[];
 };
 
 export type NewCreative = {
@@ -152,8 +220,14 @@ export type CreativePatch = Partial<{
   advertiserAcceptedById: string | null;
   submittedAt: Date | null;
   trackingCodeId: string | null;
+  /** VA-1: the 64-bit difference hash, 16 hex characters, kept once analysed. */
+  perceptualHash: string | null;
 }>;
 export type TrackingCodeRow = CampaignTrackingCode;
+
+/** VA-1: one run of the vision pass, as stored. */
+export type CreativeAnalysisRow = CreativeAnalysis;
+export type NewCreativeAnalysis = Omit<CreativeAnalysis, 'id' | 'createdAt' | 'raw'> & { raw: Prisma.InputJsonValue | null };
 export type MetricRow = CampaignDailyMetric;
 
 /** A campaign with everything the detail screen and the checkout need. */
@@ -178,6 +252,8 @@ export type CampaignAggregate = Campaign & {
   codes: CampaignTrackingCode[];
   advertiser: { id: string; name: string; companyName: string | null };
   brand: { id: string; name: string } | null;
+  /** PC-1: the promo code on the booking; absent on readers that do not load it. */
+  promoCode?: PromoCode | null;
 };
 
 /** A row in the campaign list — enough for a card, not the whole brief. */
@@ -255,6 +331,30 @@ export type CampaignPatch = Partial<{
   trackingMethod: TrackingMethod;
   trackingConfig: Prisma.InputJsonValue | null;
   fulfilment: FulfilmentChoice | null;
+  /** DQ-1: ADX's design quote. */
+  designQuoteAmount: Prisma.Decimal | null;
+  designQuoteStatus: string | null;
+  designQuoteNote: string | null;
+  designQuotedAt: Date | null;
+  designQuotedByUserId: string | null;
+  designQuoteRespondedAt: Date | null;
+  /** RF-1: the reservation fee. */
+  reservationFeeAmount: Prisma.Decimal | null;
+  reservationFeeStatus: string | null;
+  reservationFeeDueAt: Date | null;
+  reservationFeePaidAt: Date | null;
+  reservationFeeHoldId: string | null;
+  reservationHoldUntil: Date | null;
+  reservationFeeRetained: Prisma.Decimal | null;
+  reservationFeeSettledAt: Date | null;
+  reservationFeePaymentId: string | null;
+  /** WG-1 */
+  /** Null clears; the repository writes Prisma's JsonNull for it. */
+  placementPreferences: Prisma.InputJsonValue | null;
+  brandApprovalRequired: boolean;
+  contactName: string | null;
+  contactEmail: string | null;
+  contactPhone: string | null;
   status: CampaignStatus;
   spotsSubtotal: Prisma.Decimal | null;
   feesTotal: Prisma.Decimal | null;
@@ -262,6 +362,8 @@ export type CampaignPatch = Partial<{
   gstAmount: Prisma.Decimal | null;
   total: Prisma.Decimal | null;
   walletHoldId: string | null;
+  /** PC-1 */
+  promoCodeId: string | null;
   reference: string;
   paidAt: Date | null;
   launchedAt: Date | null;
@@ -282,6 +384,8 @@ export type NewSpot = {
   campaignId: string;
   listingId: string;
   matchScore: number | null;
+  /** PS-1: the spot's own print choice; null means the campaign's. */
+  fulfilment: FulfilmentChoice | null;
   ratePerDay: Prisma.Decimal;
   days: number;
   quantity: number;
@@ -302,6 +406,88 @@ export type CandidateQuery = {
   limit: number;
 };
 
+/* ── The Campaigns lot (2 Oct 2026): the console's reads ─────────────── */
+
+/**
+ * The advertiser behind a campaign, as the admin reads shape it into the
+ * orders' `placedBy` (`launch-gates.campaignAdvertiserOf`). The account
+ * columns (`isActive`, `closedAt`, the suspension scopes) are read for the
+ * lifecycle predicates and never leave the service.
+ */
+export type CampaignAdvertiserRow = {
+  id: string;
+  name: string;
+  companyName: string | null;
+  displayId: string | null;
+  kycStatus: KycStatus;
+  userId: string | null;
+  suspensionScopes: SuspensionScope[];
+  user: {
+    id: string;
+    name: string | null;
+    firstName: string | null;
+    lastName: string | null;
+    displayId: string | null;
+    isActive: boolean;
+    closedAt: Date | null;
+  } | null;
+};
+
+/** Everything the launch gates read for one campaign — the list's `waitingOn` and the launch queue's facts. */
+export type CampaignGateFacts = {
+  id: string;
+  reference: string;
+  name: string;
+  status: CampaignStatus;
+  brandName: string | null;
+  startDate: Date | null;
+  endDate: Date | null;
+  total: Prisma.Decimal | null;
+  createdAt: Date;
+  submittedForPaymentAt: Date | null;
+  paidAt: Date | null;
+  reservationFeeStatus: string | null;
+  reservationFeeAmount: Prisma.Decimal | null;
+  reservationFeeDueAt: Date | null;
+  reservationFeePaidAt: Date | null;
+  creativePath: CreativePath | null;
+  designQuoteStatus: string | null;
+  designQuoteAmount: Prisma.Decimal | null;
+  designQuotedAt: Date | null;
+  advertiser: CampaignAdvertiserRow;
+  creatives: { id: string; resubmissionOfId: string | null; fileUrl: string | null; status: CreativeStatus; designedByAdx: boolean }[];
+  spots: { id: string; status: CampaignSpotStatus; order: { id: string; status: OrderStatus } | null }[];
+  /** The narrow landing-page summary the detail carries (`landingPageSummary`) — four columns, never the blocks. */
+  landingPage: LandingPageSummaryRow | null;
+};
+
+/**
+ * The order statuses that mean a booked spot still waits on its publisher
+ * (to accept) or on an agent (to take the job — none has, or the one
+ * offered it said no). The launch gates and their prefilter read the same
+ * two lists.
+ */
+export const PUBLISHER_WAITING_ORDER_STATUSES = ['PENDING_PUBLISHER'] as const satisfies readonly OrderStatus[];
+export const AGENT_WAITING_ORDER_STATUSES = ['PENDING_AGENT', 'AGENT_REJECTED'] as const satisfies readonly OrderStatus[];
+
+/** The scope every console read of campaigns narrows by — the list's, the launch queue's, the overview's. */
+export type CampaignScopeFilter = {
+  advertiserId?: string | undefined;
+  agentId?: string | undefined;
+  /** Name, reference, brand — and the advertiser's business, person and ADV-/ADX- ids. */
+  q?: string | undefined;
+  /** Lot X-B: the facet as typed and the key it resolved to (`null` when it resolved to none). */
+  city?: string | undefined;
+  cityId?: string | null | undefined;
+  /** Flight overlap: starts before `to` (exclusive) and ends on or after `from`. */
+  from?: Date | undefined;
+  to?: Date | undefined;
+  goal?: CampaignGoal[] | undefined;
+};
+
+/** A campaign's engagement, lifetime: the codes' scans, and the landing page's views, CTA presses and form submissions. */
+export type CampaignPerformanceTotals = { scans: number; views: number; ctaClicks: number; enquiries: number };
+
 export interface CampaignsRepository {
   createCampaign(data: {
     advertiserId: string;
@@ -315,15 +501,29 @@ export interface CampaignsRepository {
   findCampaign(id: string): Promise<CampaignAggregate | null>;
   findCampaignBare(id: string): Promise<CampaignRow | null>;
   /** One page of the list, with the total and a count per status chip. */
-  listCampaignsPage(filter: {
-    advertiserId?: string;
-    agentId?: string;
-    status?: CampaignStatus[];
-    q?: string;
-    sort: string;
-    page: number;
-    pageSize: number;
-  }): Promise<{ items: CampaignListRow[]; total: number; counts: Record<string, number> }>;
+  listCampaignsPage(
+    filter: CampaignScopeFilter & {
+      status?: CampaignStatus[];
+      /** The Campaigns lot: the ids a `waitingOn` filter resolved to — the page is read within them. */
+      ids?: string[] | undefined;
+      sort: string;
+      page: number;
+      pageSize: number;
+    },
+  ): Promise<{ items: CampaignListRow[]; total: number; counts: Record<string, number> }>;
+  /**
+   * The Campaigns lot: the gate facts of campaigns in the scope that MAY be
+   * waiting on one of `reasons` — a superset (the artwork prefilter cannot
+   * tell a superseded creative from a current one), narrowed exactly in
+   * memory by `launch-gates.waitingOnOf`. `paidOnly` keeps the launch
+   * queue's population (SCHEDULED, or PENDING_PAYMENT with the reservation
+   * fee PAID). At most `cap` rows, oldest first.
+   */
+  gateCandidates(filter: CampaignScopeFilter & { reasons: readonly WaitingReason[]; paidOnly?: boolean }, cap: number): Promise<CampaignGateFacts[]>;
+  /** The gate facts of these campaigns, in no particular order. */
+  campaignGateFacts(ids: string[]): Promise<CampaignGateFacts[]>;
+  /** Lifetime engagement per campaign id — two queries for the whole page, never one per row. Ids with nothing are absent. */
+  performanceTotals(campaignIds: string[]): Promise<Record<string, CampaignPerformanceTotals>>;
   listCampaigns(filter: {
     advertiserId?: string;
     agentId?: string;
@@ -377,6 +577,14 @@ export interface CampaignsRepository {
    */
   holdReservations(campaignId: string, until: Date, now?: Date): Promise<number>;
   clearExpiredReservations(now: Date): Promise<number>;
+  /** RF-1: PENDING_PAYMENT campaigns whose reservation fee was not paid within its hour. */
+  campaignsWithReservationFeeDue(now: Date, limit?: number): Promise<{ id: string }[]>;
+  /** RF-1: PENDING_PAYMENT campaigns whose paid reservation's hold has lapsed unpaid. */
+  campaignsWithLapsedReservationHold(now: Date, limit?: number): Promise<{ id: string }[]>;
+  /** RF-1: drops this campaign's own spot holds (back to plain RESERVED); answers how many. */
+  clearCampaignReservations(campaignId: string): Promise<number>;
+  /** WS-1: every advertiser with a campaign running now, or one that ended since `since` — the digest's audience. */
+  advertisersWithCampaignActivity(since: Date, limit?: number): Promise<{ advertiserId: string }[]>;
 
   candidateListings(query: CandidateQuery): Promise<CandidateListing[]>;
   /**
@@ -399,6 +607,15 @@ export interface CampaignsRepository {
    */
   createCreative(data: NewCreative): Promise<CreativeRow>;
   updateCreative(id: string, patch: CreativePatch): Promise<CreativeRow>;
+  /** VA-1: a vision run, kept as its own row so a re-upload's verdict sits beside the one it replaced. */
+  createCreativeAnalysis(data: NewCreativeAnalysis): Promise<CreativeAnalysisRow>;
+  latestCreativeAnalysis(creativeId: string): Promise<CreativeAnalysisRow | null>;
+  /** VA-4: the latest run per creative, for a page of the queue. Creatives nobody has asked about are simply absent. */
+  latestCreativeAnalyses(creativeIds: string[]): Promise<CreativeAnalysisRow[]>;
+  /** VA-4: the batch's default scope — IN_REVIEW, a still image on file, no reading yet; oldest submission first. */
+  listCreativesAwaitingAnalysis(limit: number): Promise<CreativeReviewRow[]>;
+  /** Every OTHER creative's hash, for the uniqueness check — only the ones already hashed, with a file. */
+  listCreativeHashes(exceptCreativeId: string): Promise<{ id: string; perceptualHash: string | null }[]>;
   findCreative(id: string): Promise<CreativeReviewRow | null>;
   findCreatives(campaignId: string): Promise<CreativeRow[]>;
   deleteCreative(id: string): Promise<void>;
@@ -408,11 +625,19 @@ export interface CampaignsRepository {
     kind?: CreativePath;
     flagged?: boolean;
     resubmitted?: boolean;
+    /** VA-4: with (true) or without (false) a vision reading. `counts` then also carries `analysed` and `unanalysed`. */
+    analysed?: boolean;
     q?: string;
     sort: string;
     page: number;
     pageSize: number;
   }): Promise<{ items: CreativeReviewRow[]; total: number; counts: Record<string, number> }>;
+  /**
+   * CR-1: every campaign on the ADX Design Agency path that is past the
+   * draft and not finished, with its spots and its creatives. The service
+   * decides which of them ADX still owes a design.
+   */
+  listDesignRequestCandidates(): Promise<DesignRequestCandidate[]>;
 
   createTrackingCodes(
     rows: {
@@ -481,7 +706,7 @@ export interface CampaignsRepository {
    * dependency this module does not need.
    */
   /** QR-16: `kycStatus` rides along — the launch gate reads it; absent on a narrow read. */
-  advertiserContext(advertiserId: string): Promise<{ id: string; agentId: string | null; userId: string | null; kycStatus?: KycStatus } | null>;
+  advertiserContext(advertiserId: string): Promise<{ id: string; agentId: string | null; userId: string | null; kycStatus?: KycStatus; name?: string | null } | null>;
 
   /** The listings behind a cart, priced and measured. */
   listingsByIds(ids: string[]): Promise<CandidateListing[]>;
@@ -529,8 +754,14 @@ export interface CampaignsRepository {
     createdByUserId: string;
   }): Promise<LandingPageRow>;
   updateLandingPage(campaignId: string, patch: LandingPagePatch): Promise<LandingPageRow>;
-  listLandingPages(query: { status?: readonly string[] | undefined; page: number; pageSize: number }): Promise<{
-    items: LandingPageView[];
+  /**
+   * The Campaigns lot: `q` matches the slug, the campaign's name and
+   * reference, and the advertiser's business, person and ids; the status
+   * counts are taken with `q` and without the status facet. Each row
+   * carries the advertiser's row (`advertiserRow`) for the service to shape.
+   */
+  listLandingPages(query: { status?: readonly string[] | undefined; q?: string | undefined; page: number; pageSize: number }): Promise<{
+    items: (LandingPageView & { advertiserRow: CampaignAdvertiserRow | null })[];
     total: number;
     counts: Record<string, number>;
   }>;

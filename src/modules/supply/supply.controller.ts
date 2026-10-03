@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { ApiError } from '../../shared/errors';
 import { pageQueryFrom } from '../../shared/pagination';
+import { baseUrlFor } from '../uploads';
 import type {
   ComplianceCaseStatus,
   ListingAttemptOrigin,
@@ -34,6 +35,10 @@ import {
   runRightsSweep,
   submitDocument,
   submitVerification,
+  remindReverification,
+  remindRightsRenewal,
+  extendReverification,
+  dispatchSiteCheck,
 } from './supply.service';
 import {
   acceptListingSchema,
@@ -48,6 +53,9 @@ import {
   submitDocumentSchema,
   rightsSchema,
   submitVerificationSchema,
+  resolveCaseSchema,
+  extendReverificationSchema,
+  siteCheckSchema,
 } from './supply.schema';
 
 /** Every handler validates the same way: parse, or 400 with the flattened error. */
@@ -146,7 +154,13 @@ export async function requestAcceptanceHandler(req: Request, res: Response): Pro
 
 export async function submitDocumentHandler(req: Request, res: Response): Promise<void> {
   const body = parse(submitDocumentSchema, req.body);
-  const document = await submitDocument({ listingId: req.params['listingId'] as string, ...body });
+  // ST-2: the filer and the host, so a paper uploaded as a public file is adopted as a private one.
+  const document = await submitDocument({
+    listingId: req.params['listingId'] as string,
+    ...body,
+    filer: { userId: actor(req), isAdmin: (req.user?.roles ?? []).includes('ADMIN') },
+    baseUrl: baseUrlFor(req),
+  });
   res.status(201).json({ success: true, data: document });
 }
 
@@ -201,6 +215,22 @@ export async function enforcementSweepHandler(_req: Request, res: Response): Pro
   res.json({ success: true, data: await runEnforcementSweep() });
 }
 
+/* The verification queue's actions — 3 Oct 2026 ------------------- */
+
+export async function remindReverificationHandler(req: Request, res: Response): Promise<void> {
+  res.json({ success: true, data: await remindReverification(req.params['listingId'] as string, actor(req), new Date(), req) });
+}
+
+export async function extendReverificationHandler(req: Request, res: Response): Promise<void> {
+  const body = parse(extendReverificationSchema, req.body);
+  res.json({ success: true, data: await extendReverification(req.params['listingId'] as string, body, actor(req), new Date(), req) });
+}
+
+export async function siteCheckHandler(req: Request, res: Response): Promise<void> {
+  const body = parse(siteCheckSchema, req.body ?? {});
+  res.status(201).json({ success: true, data: await dispatchSiteCheck(req.params['listingId'] as string, body, actor(req), new Date(), req) });
+}
+
 /* Rights — QR-24 ---------------------------------------------------- */
 
 export async function setRightsHandler(req: Request, res: Response): Promise<void> {
@@ -212,6 +242,11 @@ export async function setRightsHandler(req: Request, res: Response): Promise<voi
 export async function rightsQueueHandler(req: Request, res: Response): Promise<void> {
   const horizon = Number(req.query['horizonDays']);
   res.json({ success: true, data: await getRightsQueue(new Date(), Number.isFinite(horizon) && horizon > 0 ? Math.min(horizon, 365) : 60) });
+}
+
+/** 3 Oct 2026: the renewals desk's "Remind publisher to renew" — once a day per listing. */
+export async function remindRightsHandler(req: Request, res: Response): Promise<void> {
+  res.json({ success: true, data: await remindRightsRenewal(req.params['listingId'] as string, actor(req), new Date(), req) });
 }
 
 export async function rightsSweepHandler(_req: Request, res: Response): Promise<void> {
@@ -262,5 +297,6 @@ export async function contactAttemptHandler(req: Request, res: Response): Promis
 }
 
 export async function resolveCaseHandler(req: Request, res: Response): Promise<void> {
-  res.json({ success: true, data: await resolveComplianceCase(req.params['caseId'] as string) });
+  const body = parse(resolveCaseSchema, req.body ?? {});
+  res.json({ success: true, data: await resolveComplianceCase(req.params['caseId'] as string, body, actor(req), req) });
 }

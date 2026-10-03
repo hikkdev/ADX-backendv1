@@ -1,4 +1,5 @@
 import { Prisma, prisma } from '../../shared/database';
+import { isWorkingAccount } from '../../shared/party-status';
 import { MAX_PAGE_SIZE, pageArgs, toPage, type PageQuery } from '../../shared/pagination';
 import type {
   AgreementAcceptance,
@@ -339,6 +340,20 @@ export const prismaSupplyRepository: SupplyRepository = {
     return total > 0 && total === verified;
   },
 
+  // ST-2: which listings a file is filed on as a document. A handful of
+  // rows at most — a file is one paper on one listing — so the read is capped.
+  async listingsNamingFile(urlSuffixes) {
+    if (urlSuffixes.length === 0) return [];
+    const documents = await prisma.listingDocument.findMany({
+      where: { OR: urlSuffixes.map((suffix) => ({ url: { endsWith: suffix } })) },
+      select: { listing: { select: { id: true, publisher: { select: { userId: true } } } } },
+      take: 20,
+    });
+    const found = new Map<string, string | null>();
+    for (const row of documents) found.set(row.listing.id, row.listing.publisher?.userId ?? null);
+    return [...found].map(([listingId, publisherUserId]) => ({ listingId, publisherUserId }));
+  },
+
   /* ---------------------------------------------------------------- */
   /* Verification                                                      */
   /* ---------------------------------------------------------------- */
@@ -395,6 +410,10 @@ export const prismaSupplyRepository: SupplyRepository = {
         verifiedAt: true,
         verificationExpiresAt: true,
         status: true,
+        displayId: true,
+        city: true,
+        cityId: true,
+        suspensionScopes: true,
         publisher: { select: { name: true } },
       },
     });
@@ -408,6 +427,10 @@ export const prismaSupplyRepository: SupplyRepository = {
       verifiedAt: row.verifiedAt,
       verificationExpiresAt: row.verificationExpiresAt,
       status: row.status,
+      displayId: row.displayId,
+      city: row.city,
+      cityId: row.cityId,
+      suspensionScopes: row.suspensionScopes,
     }));
   },
 
@@ -437,6 +460,7 @@ export const prismaSupplyRepository: SupplyRepository = {
       select: {
         id: true,
         title: true,
+        displayId: true,
         publisherId: true,
         status: true,
         availableNow: true,
@@ -444,10 +468,15 @@ export const prismaSupplyRepository: SupplyRepository = {
         rightsValidUntil: true,
         rightsLapsedAt: true,
         rightsRemindedAt: true,
-        publisher: { select: { name: true } },
+        // Account lifecycle: whether the publisher is a working account, for the reminder.
+        publisher: { select: { name: true, suspensionScopes: true, user: { select: { isActive: true, closedAt: true } } } },
       },
     });
-    return rows.map(({ publisher, ...row }) => ({ ...row, publisherName: publisher?.name ?? null }));
+    return rows.map(({ publisher, ...row }) => ({
+      ...row,
+      publisherName: publisher?.name ?? null,
+      publisherWorking: publisher ? isWorkingAccount({ suspensionScopes: publisher.suspensionScopes, user: publisher.user }) : true,
+    }));
   },
 
   async publisherUserId(publisherId: string) {
@@ -473,6 +502,19 @@ export const prismaSupplyRepository: SupplyRepository = {
 
   markListingVerified(listingId, data) {
     return prisma.listing.update({ where: { id: listingId }, data });
+  },
+
+  setVerificationExpiry(listingId: string, at: Date) {
+    return prisma.listing.update({ where: { id: listingId }, data: { verificationExpiresAt: at } });
+  },
+
+  async publisherContact(publisherId: string) {
+    const row = await prisma.publisher.findUnique({
+      where: { id: publisherId },
+      select: { name: true, userId: true, suspensionScopes: true, user: { select: { isActive: true, closedAt: true } } },
+    });
+    if (!row) return null;
+    return { name: row.name, userId: row.userId, working: isWorkingAccount({ suspensionScopes: row.suspensionScopes, user: row.user }) };
   },
 
   markDocumentsCleared(listingId: string, at: Date | null) {
@@ -548,8 +590,25 @@ export const prismaSupplyRepository: SupplyRepository = {
       where: status ? { status } : {},
       orderBy: { dueAt: 'asc' },
       ...pageArgs(page),
+      include: {
+        listing: { select: { title: true, displayId: true } },
+        publisher: { select: { name: true } },
+        attempts: { select: { attemptedAt: true }, orderBy: { attemptedAt: 'desc' }, take: 1 },
+        _count: { select: { attempts: true } },
+      },
     });
-    return toPage(rows, page);
+    const { rows: pageRows, nextCursor } = toPage(rows, page);
+    return {
+      rows: pageRows.map(({ listing, publisher, attempts, _count, ...row }) => ({
+        ...row,
+        listingTitle: listing.title,
+        listingDisplayId: listing.displayId,
+        publisherName: publisher?.name ?? null,
+        attemptCount: _count.attempts,
+        lastAttemptAt: attempts[0]?.attemptedAt ?? null,
+      })),
+      nextCursor,
+    };
   },
 
   addContactAttempt(data) {

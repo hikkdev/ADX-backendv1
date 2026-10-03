@@ -73,7 +73,7 @@ export interface ManifestKycContext {
   /** Lot D (Q131): the liveness video's state, or null before one is recorded. */
   liveness?: { status: 'PENDING' | 'VERIFIED' | 'REJECTED' | 'NEEDS_INFO'; rejectionReason?: string | null } | null;
   /** Lot D (Q129): whether the Digio branch may be offered right now. */
-  digio?: { available: boolean; provider: 'DIGIO' | 'DEGRADED' | 'MANUAL'; retryAfter: number | null };
+  digio?: { available: boolean; provider: 'DIGIO' | 'DEGRADED' | 'MANUAL'; retryAfter: number | null; backup?: boolean };
 }
 
 export interface OnboardingManifest {
@@ -94,7 +94,8 @@ export interface OnboardingManifest {
   manifestVersion: number;
   verification: {
     /** The Digio branch, and why it is off when it is. */
-    digio: { available: boolean; provider: 'DIGIO' | 'DEGRADED' | 'MANUAL'; retryAfter: number | null };
+    /** `backup` (Cashfree Phase 2): the party's own start can hand out ADX's own identity check even while Digio is off — keep the start offered. */
+    digio: { available: boolean; provider: 'DIGIO' | 'DEGRADED' | 'MANUAL'; retryAfter: number | null; backup: boolean };
     /** The manual branch needs the liveness video before the desk can verify (Q131). */
     liveness: { required: true; status: 'PENDING' | 'VERIFIED' | 'REJECTED' | 'NEEDS_INFO' | null };
     kycStatus: 'PENDING' | 'VERIFIED' | 'REJECTED' | 'NEEDS_INFO' | null;
@@ -329,13 +330,13 @@ export const CODE_ONBOARDING_TEMPLATE: OnboardingTemplate = {
       key: 'details',
       kind: 'form',
       title: 'Publisher details',
-      subtitle: 'Legal name, PAN, and GSTIN as printed on your documents',
+      subtitle: 'Who you are and how to reach you',
     },
     'advertiser-details': {
       key: 'details',
       kind: 'form',
       title: 'Advertiser details',
-      subtitle: 'Legal name, PAN, and GSTIN as printed on your documents',
+      subtitle: 'Who you are and how to reach you',
     },
     business: {
       key: 'business',
@@ -424,7 +425,7 @@ export function buildOnboardingManifest(
 ): OnboardingManifest {
   const manifestVersion = template.version ?? 1;
   const verification: OnboardingManifest['verification'] = {
-    digio: context.digio ?? DIGIO_DEFAULT,
+    digio: { ...(context.digio ?? DIGIO_DEFAULT), backup: context.digio?.backup ?? false },
     liveness: { required: true, status: context.liveness?.status ?? null },
     kycStatus: context.status ?? null,
     reviewNote: context.reviewNote ?? null,

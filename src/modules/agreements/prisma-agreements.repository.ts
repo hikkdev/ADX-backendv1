@@ -358,6 +358,15 @@ export const prismaAgreementsRepository: AgreementsRepository = {
     return [...publishers.map(asParty('publisher')), ...advertisers.map(asParty('advertiser'))];
   },
 
+  async partiesOfUser(userId: string) {
+    const [publisher, advertiser, agent] = await Promise.all([
+      prisma.publisher.findUnique({ where: { userId }, select: { id: true } }),
+      prisma.advertiser.findUnique({ where: { userId }, select: { id: true } }),
+      prisma.agentProfile.findUnique({ where: { userId }, select: { id: true } }),
+    ]);
+    return { publisherId: publisher?.id ?? null, advertiserId: advertiser?.id ?? null, agentId: agent?.id ?? null };
+  },
+
   async findParty(type: PartyType, id: string) {
     if (type === 'agent') {
       // Lot D: an agent signs JOB_TERMS. No KYC status or activation on the

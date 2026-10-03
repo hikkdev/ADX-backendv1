@@ -44,17 +44,94 @@ const VIEW_EDIT_APPROVE = ['view', 'edit', 'approve'] as const;
  * The console's sections, in the order the matrix draws them. `approve`
  * exists only where there is a queue somebody signs off: payouts and refunds
  * (finance), party verification (kyc), listing verification and claims
- * (supply), and moderation (content).
+ * (supply), rate cards (pricing), agent applications (agents), moderation
+ * (content) and the work desk's reviews (work).
  */
 export const MODULE_GROUPS: readonly ModuleGroupSpec[] = [
-  { id: 'marketplace', label: 'Marketplace', tiers: VIEW_EDIT, capabilities: [] },
-  { id: 'supply', label: 'Supply', tiers: VIEW_EDIT_APPROVE, capabilities: [] },
-  { id: 'demand', label: 'Demand', tiers: VIEW_EDIT, capabilities: [] },
-  { id: 'kyc', label: 'KYC', tiers: VIEW_EDIT_APPROVE, capabilities: [] },
-  { id: 'finance', label: 'Finance', tiers: VIEW_EDIT_APPROVE, capabilities: [] },
-  { id: 'content', label: 'Content', tiers: VIEW_EDIT_APPROVE, capabilities: [] },
+  // RP-3 (24 Sep 2026): the desks the console draws as sections are groups of
+  // their own — Publishers & listings, Pricing, Print partners and Agents
+  // used to share two — and the actions an Edit tier should not carry are
+  // named powers: suspending, issuing credit, running jobs, committing
+  // imports, deleting, acting on another account, exporting records.
+  {
+    id: 'marketplace',
+    label: 'Marketplace',
+    tiers: VIEW_EDIT,
+    capabilities: [
+      { key: 'import', label: 'Commit a bulk import of parties' },
+      { key: 'delete', label: 'Delete a QR code, milestone, submission, report schedule or listing draft' },
+      { key: 'export', label: 'Export the overview or sightings as CSV' },
+    ],
+  },
+  {
+    id: 'supply',
+    label: 'Publishers & listings',
+    tiers: VIEW_EDIT_APPROVE,
+    capabilities: [
+      { key: 'suspend', label: 'Suspend or reinstate a publisher or listing' },
+      { key: 'import', label: 'Commit a publisher or listing import' },
+    ],
+  },
+  {
+    id: 'pricing',
+    label: 'Pricing',
+    tiers: VIEW_EDIT_APPROVE,
+    capabilities: [
+      { key: 'import', label: 'Commit a rate-card or market-data import' },
+      { key: 'delete', label: 'Delete a pricing rule, dimension or factor' },
+    ],
+  },
+  {
+    id: 'print',
+    label: 'Print partners',
+    tiers: VIEW_EDIT,
+    capabilities: [{ key: 'suspend', label: 'Activate or deactivate a print partner' }],
+  },
+  {
+    id: 'agents',
+    label: 'Agents',
+    tiers: VIEW_EDIT_APPROVE,
+    capabilities: [{ key: 'suspend', label: 'Suspend, reinstate or exit an agent' }],
+  },
+  {
+    id: 'demand',
+    label: 'Demand',
+    tiers: VIEW_EDIT,
+    capabilities: [{ key: 'suspend', label: 'Suspend or reinstate an advertiser' }],
+  },
+  {
+    id: 'kyc',
+    label: 'KYC',
+    tiers: VIEW_EDIT_APPROVE,
+    capabilities: [{ key: 'delete', label: 'Delete a verification case' }],
+  },
+  {
+    id: 'finance',
+    label: 'Finance',
+    tiers: VIEW_EDIT_APPROVE,
+    capabilities: [
+      { key: 'issue', label: 'Issue or expire wallet credit' },
+      { key: 'export', label: 'Export payouts and reconciliation as CSV' },
+    ],
+  },
+  {
+    id: 'content',
+    label: 'Content',
+    tiers: VIEW_EDIT_APPROVE,
+    capabilities: [
+      { key: 'delete', label: 'Delete a page, legal document or agreement template' },
+      // PB-1 (the owner, 27 Sep 2026): "Only admins can change the addresses." In no
+      // system role but Super admin; a custom role may be given it.
+      { key: 'addresses', label: "Change a page's web address or its redirects" },
+    ],
+  },
   { id: 'comms', label: 'Communications', tiers: VIEW_EDIT, capabilities: [] },
-  { id: 'support', label: 'Support', tiers: VIEW_EDIT, capabilities: [] },
+  {
+    id: 'support',
+    label: 'Support',
+    tiers: VIEW_EDIT,
+    capabilities: [{ key: 'delete', label: 'Delete a canned reply' }],
+  },
   { id: 'growth', label: 'Growth', tiers: VIEW_EDIT, capabilities: [] },
   {
     id: 'hr',
@@ -63,11 +140,17 @@ export const MODULE_GROUPS: readonly ModuleGroupSpec[] = [
     capabilities: [
       { key: 'salary.view', label: 'See salary figures' },
       { key: 'documents.view', label: 'Open employee documents' },
+      { key: 'delete', label: 'Delete an employee, department, holiday or shift' },
     ],
   },
   // Lot AA (Q70): the work desk. `approve` is signing off a review as an
   // approver and approving hours — a reviewer's mark, never a payroll step.
-  { id: 'work', label: 'Work', tiers: VIEW_EDIT_APPROVE, capabilities: [] },
+  {
+    id: 'work',
+    label: 'Work',
+    tiers: VIEW_EDIT_APPROVE,
+    capabilities: [{ key: 'delete', label: 'Delete a task or a time log' }],
+  },
   { id: 'settings', label: 'Settings', tiers: VIEW_EDIT, capabilities: [] },
   {
     id: 'system',
@@ -80,6 +163,9 @@ export const MODULE_GROUPS: readonly ModuleGroupSpec[] = [
       // Lot G (answer 145): rolling a feature flag back is its own power,
       // because it moves a switch without the person choosing where to.
       { key: 'flags', label: 'Roll a feature flag back to its last good state' },
+      { key: 'accounts', label: 'Delete, reset or close another account' },
+      { key: 'jobs', label: 'Run a job or sweep by hand' },
+      { key: 'delete', label: 'Delete an invite or a contact' },
     ],
   },
   // Flow definitions have no view tier of their own: reading a flow is

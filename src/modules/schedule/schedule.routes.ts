@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { authenticate, requireRole } from '../../shared/auth';
+import { authenticate, requireRole, requirePermission } from '../../shared/auth';
 import { asyncHandler } from '../../shared/http';
 import {
   createEntryHandler,
@@ -16,9 +16,9 @@ import {
 export const scheduleRouter = Router();
 scheduleRouter.use(authenticate, requireRole('ADMIN'));
 
-scheduleRouter.get('/', asyncHandler(readScheduleHandler));
+scheduleRouter.get('/', requirePermission('hr.view'), asyncHandler(readScheduleHandler));
 /* Declared ahead of '/:entryId' so "log" is never read as an entry id. */
-scheduleRouter.get('/log', asyncHandler(readScheduleLogHandler));
-scheduleRouter.post('/', asyncHandler(createEntryHandler));
-scheduleRouter.patch('/:entryId', asyncHandler(patchEntryHandler));
-scheduleRouter.delete('/:entryId', asyncHandler(deleteEntryHandler));
+scheduleRouter.get('/log', requirePermission('hr.view'), asyncHandler(readScheduleLogHandler));
+scheduleRouter.post('/', requirePermission('hr.edit'), asyncHandler(createEntryHandler));
+scheduleRouter.patch('/:entryId', requirePermission('hr.edit'), asyncHandler(patchEntryHandler));
+scheduleRouter.delete('/:entryId', requirePermission('hr.delete'), asyncHandler(deleteEntryHandler));

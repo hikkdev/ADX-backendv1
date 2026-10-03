@@ -115,6 +115,7 @@ import {
 } from '../rules.service';
 import { CLEARING_DAYS, elapsedDays, splitDay } from '../accrual.service';
 import { creditIncentive, recordIncentive, resetIncentiveCache } from '../incentives.service';
+import { registerWithdrawalPaidPort } from '../withdrawal-paid.port';
 
 const NOW = new Date('2026-09-09T10:00:00Z');
 
@@ -544,6 +545,31 @@ describe('approval is always a person', () => {
       'wdr_1',
       expect.objectContaining({ status: 'PAID', railReference: 'UTR777', paidAt: NOW })
     );
+  });
+
+  /* Account lifecycle (2 Oct 2026): the PAID moment is offered to the
+     registered hook (an exited agent's sign-in ends with the final payout),
+     and a hook that fails never unwinds the payment. */
+  it('hands the paid line and who paid it to the withdrawal-paid hook, best effort', async () => {
+    const onPaid = vi.fn(async () => undefined);
+    registerWithdrawalPaidPort({ onPaid });
+    repository.findWithdrawal.mockResolvedValue({
+      id: 'wdr_1',
+      reference: 'WDR-2026-000118',
+      status: 'PROCESSING',
+      walletId: 'wal_1',
+      batchId: null,
+      amount: new Decimal('5000.00'),
+      netAmount: new Decimal('5000.00'),
+      rail: 'MANUAL_NEFT',
+      payoutMethod: method(),
+      wallet: { id: 'wal_1' },
+    });
+    const paid = await markWithdrawalPaid('wdr_1', { railReference: 'UTR777', byUserId: 'usr_finance' }, NOW);
+    expect(onPaid).toHaveBeenCalledWith(paid, 'usr_finance');
+    onPaid.mockRejectedValueOnce(new Error('agents down'));
+    await expect(markWithdrawalPaid('wdr_1', { railReference: 'UTR777', byUserId: 'usr_finance' }, NOW)).resolves.toBeDefined();
+    registerWithdrawalPaidPort(null);
   });
 
   /* Lot E1/F: the person is told the transfer landed — one notify call, the

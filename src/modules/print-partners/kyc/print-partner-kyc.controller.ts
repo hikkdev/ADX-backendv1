@@ -1,7 +1,9 @@
 import type { Request, Response } from 'express';
 import { ApiError } from '../../../shared/errors';
+import { includesInactive } from '../../../shared/party-status';
 import { assignCaseSchema, documentDecisionSchema, kycEscalateSchema, reuploadRequestSchema } from '../../kyc';
 import { getPartnerForUser } from '../print-partners.service';
+import { kycStartBodySchema, type KycStartBody } from '../../../shared/kyc-state';
 import {
   printPartnerKycQueueQuerySchema,
   requestPrintPartnerKycSchema,
@@ -23,7 +25,7 @@ import {
   reviewPrintPartnerKyc,
   submitMyPrintPartnerKyc,
 } from './print-partner-kyc.service';
-import { initiatePrintPartnerDigioKyc, printPartnerDigioStatus, restartPrintPartnerDigioKyc } from './print-partner-digio.service';
+import { printPartnerDigioStatus, restartPrintPartnerDigioKyc, startPrintPartnerKyc } from './print-partner-digio.service';
 
 /**
  * `/print-partners/me/kyc*` (PARTNER — the partner's own) and
@@ -54,9 +56,13 @@ export async function submitMyKycHandler(req: Request, res: Response): Promise<v
   res.status(201).json({ success: true, data: record });
 }
 
+// POST /print-partners/me/kyc/digio/initiate — body `{ entityType?, supports? }` (Phase D; Cashfree Phase 1 —
+// the partner's own start is the one that may be handed a Cashfree session, and only when the client
+// said it can draw one).
 export async function initiateMyDigioHandler(req: Request, res: Response): Promise<void> {
+  const body = parse<KycStartBody>(kycStartBodySchema, req.body ?? {});
   const partner = await me(req);
-  res.json({ success: true, data: await initiatePrintPartnerDigioKyc(partner) });
+  res.json({ success: true, data: await startPrintPartnerKyc(partner, { onBehalf: false, byUserId: userId(req), entityType: body.entityType, supports: body.supports, req }) });
 }
 
 export async function myDigioStatusHandler(req: Request, res: Response): Promise<void> {
@@ -77,6 +83,8 @@ export async function listQueueHandler(req: Request, res: Response): Promise<voi
     ...(query.assignedTo ? { assignedToId: query.assignedTo === 'me' ? userId(req) : null } : {}),
     ...(query.escalated !== undefined ? { escalated: query.escalated } : {}),
     ...(query.q ? { q: query.q } : {}),
+    // Account lifecycle (2 Oct 2026): `?include=inactive` puts partners off the roster back on the queue.
+    ...(includesInactive(req.query['include']) ? { includeInactive: true } : {}),
   };
   res.json({ success: true, data: await listPrintPartnerKycQueue(where, query.page, query.pageSize, query.sort === 'newest' ? 'newest' : undefined) });
 }
@@ -120,7 +128,9 @@ export async function escalateHandler(req: Request, res: Response): Promise<void
   res.json({ success: true, data: await escalatePrintPartnerCase(caseId(req), body, userId(req), req) });
 }
 
+// Phase D: body `{ entityType? }` — asked when the legal form is not known, or the upgrade.
 export async function restartDigioHandler(req: Request, res: Response): Promise<void> {
+  const body = parse<KycStartBody>(kycStartBodySchema, req.body ?? {});
   const row = await requireCase(caseId(req));
-  res.json({ success: true, data: await restartPrintPartnerDigioKyc(row, userId(req), req) });
+  res.json({ success: true, data: await restartPrintPartnerDigioKyc(row, userId(req), req, body) });
 }

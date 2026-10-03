@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import { auditDiff, logActivity } from '../../shared/audit';
 import { ApiError } from '../../shared/errors';
-import { isVerifiedParty } from '../../shared/kyc-state';
+import { entityTypeFacts, isVerifiedParty } from '../../shared/kyc-state';
 import { money } from '../../shared/money';
 import { addMethodSchema, shapeMethod, shapeWithdrawal, type AddMethodInput } from '../payouts';
 import * as schema from './print-partners.schema';
@@ -30,9 +30,11 @@ import {
   updateMe,
   completeApplication,
   updatePartner,
+  partnerDoorFacts,
   withLastLogin,
 } from './print-partners.service';
 import { withKycSummary, type PartnerKycSummary } from './kyc/print-partner-kyc.service';
+import { editPrintPartnerEntityType } from './kyc/print-partner-digio.service';
 import { approvePrintCost, getJobForOrder, openPrintJob, updatePrintJob } from './print-jobs.service';
 import {
   awardQuoteRequest,
@@ -95,10 +97,12 @@ const requestId = (req: Request) => req.params['requestId'] as string;
 /** Lot H: the partner behind the signed-in user — the floor's every handler starts here. */
 const me = (req: Request) => getPartnerForUser(userId(req));
 
-export const shapePartner = (row: PartnerRow & { lastLoginAt?: Date | null; kyc?: PartnerKycSummary }) => ({
+export const shapePartner = (row: PartnerRow & { lastLoginAt?: Date | null; userDisplayId?: string | null; kyc?: PartnerKycSummary }) => ({
   id: row.id,
   displayId: row.displayId,
   userId: row.userId,
+  /** 28 Sep 2026: the person's own ADX-… id — the shop's is `displayId` (PRT-…). Null where the read does not carry it. */
+  userDisplayId: row.userDisplayId ?? null,
   name: row.name,
   // QR-3: the verified mark every external party earns the same way.
   verified: isVerifiedParty(row.kycStatus),
@@ -110,6 +114,9 @@ export const shapePartner = (row: PartnerRow & { lastLoginAt?: Date | null; kyc?
   email: row.email,
   address: row.address,
   city: row.city,
+  /** Onboarding addresses (1 Oct 2026): the shop address's state and PIN code. */
+  state: row.state,
+  postalCode: row.postalCode,
   latitude: row.latitude,
   longitude: row.longitude,
   capabilities: row.capabilities,
@@ -118,6 +125,8 @@ export const shapePartner = (row: PartnerRow & { lastLoginAt?: Date | null; kyc?
   isActive: row.isActive,
   notes: row.notes,
   /* Lot H: the account, the rate card, the quote switch. */
+  /** 26 Sep 2026: when the shop applied itself (PP-1); null for a partner the desk created. The app's application screen reads it. */
+  appliedAt: row.appliedAt ?? null,
   activatedAt: row.activatedAt,
   activatedById: row.activatedById,
   acceptsQuoteRequests: row.acceptsQuoteRequests,
@@ -125,6 +134,13 @@ export const shapePartner = (row: PartnerRow & { lastLoginAt?: Date | null; kyc?
   invoiceUploadFileId: row.invoiceUploadFileId,
   /** G13-B: when the account behind the partner last signed in; null until they do (or when the row was not looked up). */
   lastLoginAt: row.lastLoginAt ?? null,
+  /**
+   * Phase D (1 Oct 2026): the legal form the KYC verifies — null until it is
+   * asked (a shop's has no legacy `type` to read it from); `entityTypeStored`
+   * says whether it was chosen. The four values a shop may take are
+   * `GET /kyc/entity-types`'s PRINT_PARTNER list.
+   */
+  ...entityTypeFacts('PRINT_PARTNER', row),
   /** Lot N: the mirror on the row, and the record's four facts (null before any record, or when the row was not looked up). */
   kycStatus: row.kycStatus,
   kyc: row.kyc ?? null,
@@ -212,6 +228,8 @@ const shapeOrderForPrint = (order: OrderForPrint | null) =>
   order
     ? {
         id: order.id,
+        /** 26 Sep 2026: the booking id (`BKG-…`) the partner is told. */
+        displayId: order.displayId,
         status: order.status,
         campaignName: order.campaignName,
         startDate: order.startDate,
@@ -233,12 +251,14 @@ const shapeOrderForPrint = (order: OrderForPrint | null) =>
     : null;
 
 /** Lot H: what a partner sees of a request — the specs, the deadline, and only their own quote (sealed bids). */
-const shapeRequestForPartner = (request: QuoteRequestWithQuotes, partner: PartnerRow) => {
+const shapeRequestForPartner = (request: QuoteRequestWithQuotes, partner: PartnerRow, displayIds?: ReadonlyMap<string, string | null>) => {
   const envelope = envelopeOf(request);
   const mine = request.quotes.find((quote) => quote.printPartnerId === partner.id) ?? null;
   return {
     id: request.id,
     orderId: request.orderId,
+    /** 26 Sep 2026: the booking id (`BKG-…`); null on an order from before the ids. */
+    orderDisplayId: displayIds?.get(request.orderId) ?? null,
     specs: envelope.specs,
     city: request.city,
     deadlineAt: request.deadlineAt,
@@ -290,9 +310,17 @@ export async function listPartnersHandler(req: Request, res: Response): Promise<
     ...(query.q ? { q: query.q } : {}),
     ...(query.city ? { city: query.city } : {}),
     ...(query.active === undefined ? {} : { active: query.active }),
+    // Account lifecycle (2 Oct 2026): the Status — wins over `active` in the repository when both are sent.
+    ...(query.status ? { status: query.status } : {}),
+    // PP-1: the applications facet the schema always took and the handler never passed on.
+    ...(query.applied === undefined ? {} : { applied: query.applied }),
+    // 29 Sep 2026: the door and the KYC state, the cuts every party desk takes.
+    ...(query.onboardedVia ? { onboardedVia: query.onboardedVia } : {}),
+    ...(query.kycState ? { kycState: query.kycState } : {}),
   });
   // G13-B: when each account last signed in, one lookup for the page; Lot N: the KYC summary the same way.
-  res.json({ success: true, data: { ...page, items: (await withKycSummary(await withLastLogin(page.items))).map(shapePartner) } });
+  // 29 Sep 2026: and the door each shop came through, and its jobs counted — the roster's Onboarded and Activity.
+  res.json({ success: true, data: { ...page, items: (await withKycSummary(await withLastLogin(page.items))).map((row) => ({ ...shapePartner(row), jobCount: row.jobCount, accountState: row.accountState, onboarding: partnerDoorFacts(row) })) } });
 }
 
 export async function createPartnerHandler(req: Request, res: Response): Promise<void> {
@@ -355,7 +383,10 @@ export async function partnerInvoicesHandler(req: Request, res: Response): Promi
 
 export async function updatePartnerHandler(req: Request, res: Response): Promise<void> {
   const body = parse<schema.UpdatePartnerInput>(schema.updatePartnerSchema, req.body);
-  const { before, after } = await updatePartner(partnerId(req), body);
+  // Phase D: the legal form first, on its own rule (`editPrintPartnerEntityType`) — a refusal leaves the rest unwritten.
+  const { entityType, ...rest } = body;
+  if (entityType !== undefined) await editPrintPartnerEntityType(await getPartner(partnerId(req)), entityType, { byUserId: userId(req), req });
+  const { before, after } = await updatePartner(partnerId(req), rest);
   await logActivity(userId(req), 'PRINT_PARTNER_UPDATED', {
     req,
     module: 'print-partners',
@@ -518,7 +549,8 @@ export async function setMyRateCardHandler(req: Request, res: Response): Promise
 export async function myQuoteRequestHandler(req: Request, res: Response): Promise<void> {
   const partner = await me(req);
   const request = await getQuoteRequestForPartner(partner, requestId(req));
-  res.json({ success: true, data: shapeRequestForPartner(request, partner) });
+  const displayIds = await repository.orderDisplayIds([request.orderId]);
+  res.json({ success: true, data: shapeRequestForPartner(request, partner, displayIds) });
 }
 
 export async function myQuoteRequestsHandler(req: Request, res: Response): Promise<void> {
@@ -529,7 +561,8 @@ export async function myQuoteRequestsHandler(req: Request, res: Response): Promi
     pageSize: query.pageSize,
     ...(query.status ? { status: query.status } : {}),
   });
-  res.json({ success: true, data: { ...page, items: page.items.map((request) => shapeRequestForPartner(request, partner)) } });
+  const displayIds = await repository.orderDisplayIds(page.items.map((request) => request.orderId));
+  res.json({ success: true, data: { ...page, items: page.items.map((request) => shapeRequestForPartner(request, partner, displayIds)) } });
 }
 
 export async function submitQuoteHandler(req: Request, res: Response): Promise<void> {
@@ -565,6 +598,8 @@ export async function myJobsHandler(req: Request, res: Response): Promise<void> 
     page: query.page,
     pageSize: query.pageSize,
     ...(query.status ? { status: query.status } : {}),
+    // 26 Sep 2026: `?orderId=` — the job behind an ORDER notice; the partner's own jobs only.
+    ...(query.orderId ? { orderId: query.orderId } : {}),
   });
   res.json({
     success: true,
@@ -668,7 +703,7 @@ export async function myPayoutMethodsHandler(req: Request, res: Response): Promi
 export async function addMyPayoutMethodHandler(req: Request, res: Response): Promise<void> {
   const body = parse<AddMethodInput>(addMethodSchema, req.body);
   const partner = await me(req);
-  const method = await addPartnerPayoutMethod(partner, body);
+  const { method, check } = await addPartnerPayoutMethod(partner, body);
   await logActivity(userId(req), 'PAYOUT_METHOD_ADDED', {
     req,
     module: 'print-partners',
@@ -676,7 +711,7 @@ export async function addMyPayoutMethodHandler(req: Request, res: Response): Pro
     targetId: method.id,
     metadata: { type: method.type, printPartnerId: partner.id },
   });
-  res.status(201).json({ success: true, data: shapeMethod(method) });
+  res.status(201).json({ success: true, data: { ...shapeMethod(method), check } });
 }
 
 export async function myInvoiceHandler(req: Request, res: Response): Promise<void> {

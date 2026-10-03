@@ -1,14 +1,25 @@
 import { Prisma, prisma } from '../../shared/database';
 import { KYC_QUEUE_STATES, kycPartyStateWhere, type KycQueueState } from '../../shared/kyc-state';
+import {
+  AGENT_DEAD_END_STAGES,
+  workingAdvertiserWhere,
+  workingAgentAccountWhere,
+  workingEmployeeWhere,
+  workingPrintPartnerWhere,
+  workingPublisherWhere,
+} from '../../shared/party-status';
 import { Decimal, money, type Money } from '../../shared/money';
 import type {
+  CampaignsOverviewRepository,
   CityCount,
   CityGroup,
+  CostSide,
   DayCount,
   DaySum,
   GroupCount,
   KycStateCountMap,
   LeadsOverviewRepository,
+  ListingsOverviewRepository,
   Scope,
   SectionOverviewsRepository,
   Window,
@@ -50,6 +61,12 @@ const cityOf = (scope: Scope): CityWhere => {
 /** The same narrowing through a relation — omitted entirely without a city, so a nullable relation is not asked to exist. */
 const viaCity = (scope: Scope) => (scope.city ? cityOf(scope) : undefined);
 const notNull = { not: null } as const;
+/**
+ * CP-2: the provenance that means an agent brought the account — the QR-14
+ * stamp. `DESK`, `IMPORT` and `SELF` are the platform's own doors and cost
+ * no agent money, so they land in the self-serve half.
+ */
+const AGENT_LED_SOURCES: ('AGENT' | 'QR')[] = ['AGENT', 'QR'];
 
 /**
  * Lot X-B: the city groups of one party table — the keyed rows grouped by
@@ -247,7 +264,242 @@ const leadsOverviewRepository: LeadsOverviewRepository = {
   },
 };
 
+/* ── The Listings overview (2 Oct 2026) ──────────────────────────────── */
+
+/** A spot booked in the window: its campaign paid then, neither of the two cancelled. */
+const bookedSpotWhere = (window: Window, scope: Scope): Prisma.CampaignSpotWhereInput => ({
+  status: { not: 'CANCELLED' },
+  campaign: { paidAt: between(window), status: { not: 'CANCELLED' } },
+  ...(scope.city ? { listing: cityOf(scope) } : {}),
+});
+/** The statuses the renewals queue reads (`supply.rightsDue`) — a spot that is, or is about to be, on the marketplace. */
+const RIGHTS_QUEUE_STATUSES = ['ACTIVE', 'SUSPENDED', 'PENDING_REVIEW', 'AWAITING_DOCUMENTS', 'AWAITING_SITE_VERIFICATION'] as const;
+
+const listingsOverviewRepository: ListingsOverviewRepository = {
+  listingsAsAt(at, scope) {
+    return prisma.listing.count({ where: { createdAt: before(at), ...cityOf(scope) } });
+  },
+  listingsCreated(window, scope) {
+    return prisma.listing.count({ where: { createdAt: between(window), ...cityOf(scope) } });
+  },
+  async listingsCreatedByDay(window, scope) {
+    const rows = await prisma.listing.groupBy({ by: ['createdAt'], where: { createdAt: between(window), ...cityOf(scope) }, _count: { _all: true } });
+    return foldDays(rows.map((row) => ({ at: row.createdAt, count: row._count._all })));
+  },
+  async listingsPublishedByDay(window, scope) {
+    const rows = await prisma.listing.groupBy({ by: ['publishedAt'], where: { publishedAt: between(window), ...cityOf(scope) }, _count: { _all: true } });
+    return foldDays(rows.map((row) => ({ at: row.publishedAt, count: row._count._all })));
+  },
+  async listingsByStatus(scope) {
+    const rows = await prisma.listing.groupBy({ by: ['status'], where: cityOf(scope), _count: { _all: true } });
+    return groups(rows.map((row) => ({ key: row.status, count: row._count._all })));
+  },
+  listingsSuspended(scope) {
+    return prisma.listing.count({ where: { AND: [cityOf(scope), { OR: [{ status: 'SUSPENDED' }, { suspensionScopes: { isEmpty: false } }] }] } });
+  },
+  listingBookings(window, scope) {
+    return prisma.campaignSpot.count({ where: bookedSpotWhere(window, scope) });
+  },
+  async listingGmv(window, scope) {
+    const result = await prisma.earningAccrual.aggregate({ where: { forDate: between(window), ...(scope.city ? { listing: cityOf(scope) } : {}) }, _sum: { gross: true } });
+    return sum(result._sum.gross);
+  },
+  async listingsByCity(window, scope) {
+    const [keyed, typed] = await Promise.all([
+      prisma.listing.groupBy({ by: ['cityId'], where: { cityId: notNull, ...cityOf(scope) }, _count: { _all: true } }),
+      prisma.listing.groupBy({ by: ['city'], where: { cityId: null, city: notNull, ...cityOf(scope) }, _count: { _all: true } }),
+    ]);
+    const cities = await cityGroups(keyed, typed);
+    return Promise.all(
+      cities.map(async (group) => {
+        const listing = groupWhere(group);
+        const [live, gross] = await Promise.all([
+          prisma.listing.count({ where: { status: 'ACTIVE', ...listing } }),
+          prisma.earningAccrual.aggregate({ where: { forDate: between(window), listing }, _sum: { gross: true } }),
+        ]);
+        return { ...group, live, gmv: sum(gross._sum.gross) };
+      }),
+    );
+  },
+  async listingsByCategory(window, scope) {
+    const [all, live] = await Promise.all([
+      prisma.listing.groupBy({ by: ['category'], where: cityOf(scope), _count: { _all: true } }),
+      prisma.listing.groupBy({ by: ['category'], where: { status: 'ACTIVE', ...cityOf(scope) }, _count: { _all: true } }),
+    ]);
+    const liveBy = new Map(live.map((row) => [row.category, row._count._all]));
+    const rows = await Promise.all(
+      all.map(async (row) => {
+        const gross = await prisma.earningAccrual.aggregate({ where: { forDate: between(window), listing: { category: row.category, ...cityOf(scope) } }, _sum: { gross: true } });
+        return { key: row.category as string, count: row._count._all, live: liveBy.get(row.category) ?? 0, gmv: sum(gross._sum.gross) };
+      }),
+    );
+    return rows.sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
+  },
+  async topPublishersByListings(scope, limit) {
+    const rows = await prisma.listing.groupBy({
+      by: ['publisherId'],
+      where: { publisherId: notNull, ...cityOf(scope) },
+      _count: { _all: true },
+      orderBy: [{ _count: { publisherId: 'desc' } }, { publisherId: 'asc' }],
+      take: limit,
+    });
+    const ids = rows.map((row) => row.publisherId).filter((id): id is string => id !== null);
+    const live = ids.length
+      ? await prisma.listing.groupBy({ by: ['publisherId'], where: { publisherId: { in: ids }, status: 'ACTIVE', ...cityOf(scope) }, _count: { _all: true } })
+      : [];
+    const liveBy = new Map(live.map((row) => [row.publisherId, row._count._all]));
+    return rows
+      .filter((row): row is typeof row & { publisherId: string } => row.publisherId !== null)
+      .map((row) => ({ key: row.publisherId, count: row._count._all, live: liveBy.get(row.publisherId) ?? 0 }));
+  },
+  async listingRenewalsDue(now, horizonDays, scope) {
+    const where = (until: Date): Prisma.ListingWhereInput => ({
+      rightsBasis: { not: 'OWNED' },
+      rightsValidUntil: { not: null, lte: until },
+      status: { in: [...RIGHTS_QUEUE_STATUSES] },
+      ...cityOf(scope),
+    });
+    const [due, lapsed] = await Promise.all([
+      prisma.listing.count({ where: where(new Date(now.getTime() + horizonDays * DAY_MS)) }),
+      prisma.listing.count({ where: where(now) }),
+    ]);
+    return { due, lapsed };
+  },
+  listingClaimsOpen(scope) {
+    return prisma.listingClaim.count({ where: { status: 'PENDING', ...(scope.city ? { listing: cityOf(scope) } : {}) } });
+  },
+  async listingVerificationsDue(now, horizonDays, scope) {
+    const where = (until: Date): Prisma.ListingWhereInput => ({
+      verificationExpiresAt: { not: null, lte: until },
+      status: { in: ['ACTIVE', 'SUSPENDED'] },
+      ...cityOf(scope),
+    });
+    const [due, lapsed] = await Promise.all([
+      prisma.listing.count({ where: where(new Date(now.getTime() + horizonDays * DAY_MS)) }),
+      prisma.listing.count({ where: where(now) }),
+    ]);
+    return { due, lapsed };
+  },
+};
+
+/* ── The Campaigns overview (2 Oct 2026) ─────────────────────────────── */
+
+/**
+ * Lot X-B on a campaign: the market it targets — `targetMarketCityId`, the
+ * typed `targetMarket` for a row with no key — narrowed like `cityOf`.
+ */
+const campaignCityOf = (scope: Scope): Prisma.CampaignWhereInput => {
+  if (!scope.city) return {};
+  const spelling = { equals: scope.city.trim(), mode: 'insensitive' as const };
+  return scope.cityId
+    ? { OR: [{ targetMarketCityId: scope.cityId }, { targetMarketCityId: null, targetMarket: spelling }] }
+    : { targetMarketCityId: null, targetMarket: spelling };
+};
+/** A campaign paid in the window and not cancelled since — the booked value's rows. */
+const paidCampaignWhere = (window: Window, scope: Scope): Prisma.CampaignWhereInput => ({
+  paidAt: between(window),
+  status: { not: 'CANCELLED' },
+  ...campaignCityOf(scope),
+});
+/** The landing page's and the code's events, through the campaign's city. */
+const ENGAGEMENT_TYPES = ['SCAN', 'VIEW', 'CTA_CLICK', 'FORM_SUBMIT'] as const;
+const eventWhere = (window: Window, scope: Scope): Prisma.TrackingEventWhereInput => ({
+  occurredAt: between(window),
+  ...(scope.city ? { code: { campaign: campaignCityOf(scope) } } : {}),
+});
+/** A city group's own campaigns — the key, or the typed markets for the null bucket. */
+const campaignGroupWhere = (group: CityGroup): Prisma.CampaignWhereInput =>
+  group.cityId ? { targetMarketCityId: group.cityId } : { targetMarketCityId: null, targetMarket: { in: group.typed, mode: 'insensitive' } };
+
+const campaignsOverviewRepository: CampaignsOverviewRepository = {
+  async campaignsByStatus(scope) {
+    const rows = await prisma.campaign.groupBy({ by: ['status'], where: campaignCityOf(scope), _count: { _all: true } });
+    return groups(rows.map((row) => ({ key: row.status, count: row._count._all })));
+  },
+  campaignsCompleted(window, scope) {
+    return prisma.campaign.count({ where: { completedAt: between(window), ...campaignCityOf(scope) } });
+  },
+  campaignsCancelled(window, scope) {
+    return prisma.campaign.count({ where: { cancelledAt: between(window), ...campaignCityOf(scope) } });
+  },
+  campaignsPaid(window, scope) {
+    return prisma.campaign.count({ where: paidCampaignWhere(window, scope) });
+  },
+  async campaignBookedValue(window, scope) {
+    const result = await prisma.campaign.aggregate({ where: paidCampaignWhere(window, scope), _sum: { total: true } });
+    return sum(result._sum.total);
+  },
+  async campaignBookedValueByDay(window, scope) {
+    const rows = await prisma.campaign.groupBy({ by: ['paidAt'], where: paidCampaignWhere(window, scope), _sum: { total: true } });
+    return foldSums(rows.map((row) => ({ at: row.paidAt, sum: row._sum.total })));
+  },
+  async campaignEngagement(window, scope) {
+    const rows = await prisma.trackingEvent.groupBy({
+      by: ['type'],
+      where: { ...eventWhere(window, scope), type: { in: [...ENGAGEMENT_TYPES] } },
+      _count: { _all: true },
+    });
+    const of = (type: (typeof ENGAGEMENT_TYPES)[number]) => rows.find((row) => row.type === type)?._count._all ?? 0;
+    return { scans: of('SCAN'), views: of('VIEW'), ctaClicks: of('CTA_CLICK'), enquiries: of('FORM_SUBMIT') };
+  },
+  async campaignScansByDay(window, scope) {
+    const rows = await prisma.trackingEvent.groupBy({ by: ['occurredAt'], where: { ...eventWhere(window, scope), type: 'SCAN' }, _count: { _all: true } });
+    return foldDays(rows.map((row) => ({ at: row.occurredAt, count: row._count._all })));
+  },
+  async campaignsByCity(window, scope) {
+    const [keyed, typed] = await Promise.all([
+      prisma.campaign.groupBy({ by: ['targetMarketCityId'], where: { targetMarketCityId: notNull, ...campaignCityOf(scope) }, _count: { _all: true } }),
+      prisma.campaign.groupBy({ by: ['targetMarket'], where: { targetMarketCityId: null, targetMarket: notNull, ...campaignCityOf(scope) }, _count: { _all: true } }),
+    ]);
+    const cities = await cityGroups(
+      keyed.map((row) => ({ cityId: row.targetMarketCityId, _count: row._count })),
+      typed.map((row) => ({ city: row.targetMarket, _count: row._count })),
+    );
+    return Promise.all(
+      cities.map(async (group) => {
+        const campaign = campaignGroupWhere(group);
+        const [live, value] = await Promise.all([
+          prisma.campaign.count({ where: { status: 'LIVE', ...campaign } }),
+          prisma.campaign.aggregate({ where: { paidAt: between(window), status: { not: 'CANCELLED' }, ...campaign }, _sum: { total: true } }),
+        ]);
+        return { ...group, live, bookedValue: sum(value._sum.total) };
+      }),
+    );
+  },
+  async campaignsByGoal(scope) {
+    const [all, live] = await Promise.all([
+      prisma.campaign.groupBy({ by: ['goal'], where: { goal: notNull, ...campaignCityOf(scope) }, _count: { _all: true } }),
+      prisma.campaign.groupBy({ by: ['goal'], where: { goal: notNull, status: 'LIVE', ...campaignCityOf(scope) }, _count: { _all: true } }),
+    ]);
+    const liveBy = new Map(live.map((row) => [row.goal, row._count._all]));
+    return all
+      .filter((row): row is typeof row & { goal: NonNullable<typeof row.goal> } => row.goal !== null)
+      .map((row) => ({ key: row.goal as string, count: row._count._all, live: liveBy.get(row.goal) ?? 0 }))
+      .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
+  },
+  async topAdvertisersByBookedValue(window, scope, limit) {
+    const rows = await prisma.campaign.groupBy({ by: ['advertiserId'], where: paidCampaignWhere(window, scope), _sum: { total: true }, _count: { _all: true } });
+    return rows
+      .map((row) => ({ key: row.advertiserId, total: new Decimal(row._sum.total ?? 0), count: row._count._all }))
+      .sort((a, b) => b.total.comparedTo(a.total) || a.key.localeCompare(b.key))
+      .slice(0, limit)
+      .map((row) => ({ key: row.key, sum: money(row.total), count: row.count }));
+  },
+  campaignsLaunchingIn(range, scope) {
+    return prisma.campaign.count({ where: { status: 'SCHEDULED', startDate: { lt: range.end }, endDate: { gte: range.start }, ...campaignCityOf(scope) } });
+  },
+  campaignsEndingIn(range, scope) {
+    return prisma.campaign.count({ where: { status: 'LIVE', endDate: { gte: range.start, lt: range.end }, ...campaignCityOf(scope) } });
+  },
+};
+
 export const prismaSectionOverviewsRepository: SectionOverviewsRepository = {
+  /* ── campaigns (the Campaigns lot, 2 Oct 2026) ──────────────────────── */
+  ...campaignsOverviewRepository,
+
+  /* ── listings (2 Oct 2026) ──────────────────────────────────────────── */
+  ...listingsOverviewRepository,
+
   /* ── publishers ──────────────────────────────────────────────────────── */
 
   publishersAsAt(at, scope) {
@@ -264,7 +516,7 @@ export const prismaSectionOverviewsRepository: SectionOverviewsRepository = {
     return prisma.publisher.count({ where: { ...cityOf(scope), listings: { some: { status: 'ACTIVE' } } } });
   },
   publishersKycByState(scope) {
-    return kycByState((state) => prisma.publisher.count({ where: { AND: [cityOf(scope), kycPartyStateWhere(state, true)] } }));
+    return kycByState((state) => prisma.publisher.count({ where: { AND: [cityOf(scope), workingPublisherWhere(), kycPartyStateWhere(state, true)] } }));
   },
   publishersSuspended(scope) {
     return prisma.publisher.count({ where: { ...cityOf(scope), suspendedAt: notNull } });
@@ -372,7 +624,7 @@ export const prismaSectionOverviewsRepository: SectionOverviewsRepository = {
     });
   },
   advertisersKycByState(scope) {
-    return kycByState((state) => prisma.advertiser.count({ where: { AND: [cityOf(scope), kycPartyStateWhere(state, true)] } }));
+    return kycByState((state) => prisma.advertiser.count({ where: { AND: [cityOf(scope), workingAdvertiserWhere(), kycPartyStateWhere(state, true)] } }));
   },
   async advertisersByIndustry(scope) {
     const rows = await prisma.advertiser.groupBy({ by: ['industry'], where: { industry: notNull, ...cityOf(scope) }, _count: { _all: true } });
@@ -494,7 +746,7 @@ export const prismaSectionOverviewsRepository: SectionOverviewsRepository = {
     return groups(rows.map((row) => ({ key: row.tier, count: row._count._all })));
   },
   agentsKycByState(scope) {
-    return kycByState((state) => prisma.agentProfile.count({ where: { AND: [cityOf(scope), kycPartyStateWhere(state, false)] } }));
+    return kycByState((state) => prisma.agentProfile.count({ where: { AND: [cityOf(scope), workingAgentAccountWhere(), { stage: { notIn: [...AGENT_DEAD_END_STAGES] } }, kycPartyStateWhere(state, false)] } }));
   },
   agentsSuspended(scope) {
     return prisma.agentProfile.count({ where: { AND: [cityOf(scope), { OR: [{ status: 'SUSPENDED' }, { suspendedAt: notNull }] }] } });
@@ -550,6 +802,43 @@ export const prismaSectionOverviewsRepository: SectionOverviewsRepository = {
     return sum(result._sum.netAmount);
   },
 
+  /* ── CP-2: what an onboarding cost ──────────────────────────────────────── */
+
+  async onboardingsByProvenance(window, scope, side) {
+    /* A publisher finished onboarding at `onboardingCompletedAt` (CP-1 added
+       it; `onboardedAt` is the door they came in by). An advertiser finished
+       when they activated. Agent-led is the QR-14 provenance: AGENT, or the
+       QR an agent held out for the account to claim. */
+    const agentLed = { onboardedVia: { in: AGENT_LED_SOURCES } };
+    const publisherWhere = { onboardingCompletedAt: between(window), ...cityOf(scope) };
+    const advertiserWhere = { activatedAt: between(window), ...cityOf(scope) };
+    const wants = (want: CostSide) => side === 'ALL' || side === want;
+    const [pubAgent, pubAll, advAgent, advAll] = await Promise.all([
+      wants('PUBLISHER') ? prisma.publisher.count({ where: { ...publisherWhere, ...agentLed } }) : 0,
+      wants('PUBLISHER') ? prisma.publisher.count({ where: publisherWhere }) : 0,
+      wants('ADVERTISER') ? prisma.advertiser.count({ where: { ...advertiserWhere, ...agentLed } }) : 0,
+      wants('ADVERTISER') ? prisma.advertiser.count({ where: advertiserWhere }) : 0,
+    ]);
+    const byAgent = pubAgent + advAgent;
+    const selfServe = pubAll + advAll - byAgent;
+    const lists: CityCount[][] = [];
+    if (wants('PUBLISHER')) {
+      const [keyed, typed] = await Promise.all([
+        prisma.publisher.groupBy({ by: ['cityId'], where: { ...publisherWhere, ...agentLed, cityId: notNull }, _count: { _all: true } }),
+        prisma.publisher.groupBy({ by: ['city'], where: { ...publisherWhere, ...agentLed, cityId: null, city: notNull }, _count: { _all: true } }),
+      ]);
+      lists.push(await cityGroups(keyed, typed));
+    }
+    if (wants('ADVERTISER')) {
+      const [keyed, typed] = await Promise.all([
+        prisma.advertiser.groupBy({ by: ['cityId'], where: { ...advertiserWhere, ...agentLed, cityId: notNull }, _count: { _all: true } }),
+        prisma.advertiser.groupBy({ by: ['city'], where: { ...advertiserWhere, ...agentLed, cityId: null, city: notNull }, _count: { _all: true } }),
+      ]);
+      lists.push(await cityGroups(keyed, typed));
+    }
+    return { byAgent, selfServe, byCity: mergeCityGroups(lists) };
+  },
+
   /* ── print partners ──────────────────────────────────────────────────── */
 
   printPartnersAsAt(at, scope) {
@@ -565,7 +854,7 @@ export const prismaSectionOverviewsRepository: SectionOverviewsRepository = {
     return prisma.printPartner.count({ where: { ...cityOf(scope), isActive: true, acceptsQuoteRequests: true } });
   },
   printPartnersKycByState(scope) {
-    return kycByState((state) => prisma.printPartner.count({ where: { AND: [cityOf(scope), kycPartyStateWhere(state, true)] } }));
+    return kycByState((state) => prisma.printPartner.count({ where: { AND: [cityOf(scope), workingPrintPartnerWhere(), kycPartyStateWhere(state, true)] } }));
   },
   async printPartnersByCity(scope) {
     const [keyed, typed] = await Promise.all([
@@ -671,7 +960,7 @@ export const prismaSectionOverviewsRepository: SectionOverviewsRepository = {
     return groups(rows.map((row) => ({ key: row.region, count: row._count._all })));
   },
   employeesKycByState() {
-    return kycByState((state) => prisma.employee.count({ where: kycPartyStateWhere(state, false) }));
+    return kycByState((state) => prisma.employee.count({ where: { AND: [workingEmployeeWhere(), kycPartyStateWhere(state, false)] } }));
   },
   async employeesTenure(now) {
     const oneYearAgo = new Date(now.getTime() - 365 * DAY_MS);

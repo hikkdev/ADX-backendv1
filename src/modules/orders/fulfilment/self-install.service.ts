@@ -23,6 +23,23 @@ import { printJobPort } from '../print-job.port';
  * who photographed every step opened Proof of Work and was told nothing had
  * been filed against the booking.
  */
+/**
+ * SI-N (26 Sep 2026): what the publisher writes beside their photos lands on
+ * `selfInstallNotes`. The condition note and the installation note are both
+ * kept — a later note is added under the earlier one, never over it — and a
+ * note already on the order is not written twice.
+ */
+export function joinSelfInstallNote(existing: string | null | undefined, note: string | undefined): string | undefined {
+  const next = note?.trim();
+  if (!next) return undefined;
+  const before = existing?.trim();
+  if (!before) return next;
+  if (before.split(PARAGRAPH).includes(next)) return undefined;
+  return `${before}${PARAGRAPH}${next}`;
+}
+
+const PARAGRAPH = '\n\n';
+
 async function requireSelfInstallOrder(orderId: string, publisherUserId: string) {
   const order = await repository.findWithPublisher(orderId);
   if (!order) throw new Error('ORDER_NOT_FOUND');
@@ -56,8 +73,14 @@ export async function selfInstallCaptureCondition(
   orderId: string,
   publisherUserId: string,
   photoUrls: string[],
+  note?: string,
 ) {
-  await requireSelfInstallOrder(orderId, publisherUserId);
+  const order = await requireSelfInstallOrder(orderId, publisherUserId);
+  const notes = joinSelfInstallNote((order as { selfInstallNotes?: string | null }).selfInstallNotes, note);
+  // SI-N: a note with no new photographs is kept; the photographs on file stay.
+  if (photoUrls.length === 0) {
+    return notes === undefined ? order : repository.update(orderId, { selfInstallNotes: notes });
+  }
   // Unnamed, like the agent lane's extra shots: this screen asks for
   // photographs of the spot without naming each one, and inventing a caption
   // would say more than the publisher did.
@@ -67,7 +90,7 @@ export async function selfInstallCaptureCondition(
     photoUrls.map((url) => ({ url, label: null })),
     publisherUserId,
   );
-  return repository.update(orderId, { selfInstallConditionPhotoUrls: photoUrls });
+  return repository.update(orderId, { selfInstallConditionPhotoUrls: photoUrls, ...(notes !== undefined ? { selfInstallNotes: notes } : {}) });
 }
 
 /**
@@ -117,8 +140,11 @@ export async function selfInstallCaptureInstallation(
   orderId: string,
   publisherUserId: string,
   photoUrl: string,
+  note?: string,
 ) {
-  await requireSelfInstallOrder(orderId, publisherUserId);
+  const order = await requireSelfInstallOrder(orderId, publisherUserId);
+  // SI-N: the note was parsed and then dropped; it now lands beside the condition note.
+  const notes = joinSelfInstallNote((order as { selfInstallNotes?: string | null }).selfInstallNotes, note);
 
   await repository.addPhotos(
     orderId,
@@ -130,6 +156,7 @@ export async function selfInstallCaptureInstallation(
   const updated = await repository.update(orderId, {
     status: 'PENDING_APPROVAL',
     selfInstallInstallPhotoUrl: photoUrl,
+    ...(notes !== undefined ? { selfInstallNotes: notes } : {}),
   });
 
   notifyAdmins(

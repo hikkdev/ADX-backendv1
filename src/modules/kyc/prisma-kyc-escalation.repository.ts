@@ -1,4 +1,5 @@
 import { prisma } from '../../shared/database';
+import { workingAdvertiserWhere, workingPrintPartnerWhere, workingPublisherWhere } from '../../shared/party-status';
 import type { AdvertiserKyc, PrintPartnerKyc, PublisherKyc } from '../../shared/database';
 import type { EscalatableCase, EscalationStamp, KycEscalationParty, KycEscalationRepository } from './escalation.repository';
 
@@ -125,16 +126,22 @@ export const prismaKycEscalationRepository: KycEscalationRepository = {
   },
 
   async findAgedPending(party, cutoff, limit) {
+    // Account lifecycle (2 Oct 2026): a suspended, deactivated or closed party's case is not escalated — nobody is waiting on it.
     const where = { status: 'PENDING' as const, escalatedAt: null, submittedAt: { not: null, lt: cutoff } };
     if (party === 'PUBLISHER') {
-      const rows = await prisma.publisherKyc.findMany({ where, include: publisherJoin, orderBy: { submittedAt: 'asc' }, take: limit });
+      const rows = await prisma.publisherKyc.findMany({ where: { ...where, publisher: workingPublisherWhere() }, include: publisherJoin, orderBy: { submittedAt: 'asc' }, take: limit });
       return rows.map(fromPublisher);
     }
     if (party === 'PRINT_PARTNER') {
-      const rows = await prisma.printPartnerKyc.findMany({ where, include: printPartnerJoin, orderBy: { submittedAt: 'asc' }, take: limit });
+      const rows = await prisma.printPartnerKyc.findMany({ where: { ...where, printPartner: workingPrintPartnerWhere() }, include: printPartnerJoin, orderBy: { submittedAt: 'asc' }, take: limit });
       return rows.map(fromPrintPartner);
     }
-    const rows = await prisma.advertiserKyc.findMany({ where, include: advertiserJoin, orderBy: { submittedAt: 'asc' }, take: limit });
+    const rows = await prisma.advertiserKyc.findMany({
+      where: { ...where, OR: [{ profile: { is: workingAdvertiserWhere() } }, { advertiserProfileId: null, advertiser: { is: { isActive: true, closedAt: null } } }] },
+      include: advertiserJoin,
+      orderBy: { submittedAt: 'asc' },
+      take: limit,
+    });
     return rows.map(fromAdvertiser);
   },
 

@@ -86,6 +86,6 @@ export const campaignRefundRouter = Router();
 campaignRefundRouter.use(authenticate);
 campaignRefundRouter.use(requireRole('ADMIN'));
 
-campaignRefundRouter.get('/', asyncHandler(listCampaignRefundsHandler));
+campaignRefundRouter.get('/', requirePermission('finance.view'), asyncHandler(listCampaignRefundsHandler));
 campaignRefundRouter.post('/:id/release', requirePermission('finance.approve'), asyncHandler(releaseCampaignRefundHandler));
 campaignRefundRouter.post('/:id/reject', requirePermission('finance.approve'), asyncHandler(rejectCampaignRefundHandler));

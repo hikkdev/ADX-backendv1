@@ -7,7 +7,10 @@ import { prismaListingsRepository as repository } from './prisma-listings.reposi
 import type { BrowseFilter, BrowseListing, BrowsePlace, CategoryTileListing, VenueTypeRow } from './listings.repository';
 import { LISTING_CATEGORIES } from './listings.schema';
 import { carriesLoop, slotsHeldFor, slotsLeft, windowFor, type SlotWindow } from './slots.service';
+import { similarAnchor } from './prisma-listings.repository';
+import { dailyHolds } from './slot-holds';
 import { publicPhotoUrl } from './spot-page.service';
+import { liveSponsored, shuffled, type SponsoredPlacement } from './sponsored.port';
 
 /**
  * DR 01's advertiser discovery — "Find your space" (4189:2057), the browse
@@ -57,9 +60,26 @@ export type BrowseCard = {
   availableHoursFrom: string | null;
   availableHoursTo: string | null;
   peakPeriodNote: string | null;
+  /** WG-1: the website wizard's extra claims, shown on the space's page. */
+  maxBookingDays: number | null;
+  advanceBookingDays: number | null;
+  cancellationNoticeDays: number | null;
+  /** LF-2: FLEXIBLE, NOTICE (with the days above) or NONE. */
+  cancellationPolicy: string | null;
+  /** LF-2: the publisher's "Available year-round?" — a statement, not the live `availableNow`. */
+  availableYearRound: boolean | null;
+  broadcastLanguage: string | null;
+  contentFormat: string | null;
+  vehicleType: string | null;
+  vehicleModel: string | null;
+  widthPx: number | null;
+  heightPx: number | null;
+  installationByAdx: boolean | null;
   targetAudience: string | null;
   uniqueSellingPoint: string | null;
   publisherName: string | null;
+  /** W1: the publisher's id, for "other spaces by this publisher" through `?publisherId=` on the browse. */
+  publisherId: string | null;
   /**
    * QR-5: whether the publisher's identity check is verified. An advertiser
    * sees the mark on the card; the list puts verified publishers' spots
@@ -100,6 +120,20 @@ export type BrowseCard = {
    * slot per day, so a 6-slot screen at ₹1,000 costs each advertiser ₹1,000.
    */
   slotsLeft: number;
+  /**
+   * AV-1: of the window's days, how many have at least one slot free, and
+   * how many days the window has — so a card can say "Partly booked · 21
+   * of 31 days free" instead of "Booked" when only some dates are taken.
+   */
+  freeDays: number;
+  windowDays: number;
+  /**
+   * LM-1: a sponsored listing — the publisher paid to have it shown first
+   * (`promotions`' boosts). The card must say "Sponsored"; `boostId` is what
+   * its impression and click events name. Absent on every organic card.
+   */
+  sponsored?: boolean;
+  boostId?: string;
 };
 
 /**
@@ -125,6 +159,8 @@ export type BrowsePage = {
   total: number;
   page: number;
   pageSize: number;
+  /** SIM-1: when the page is "spaces like" one listing, which one — for the heading. */
+  similarTo?: { id: string; displayId: string | null; title: string };
   /**
    * Lot V: the city filter named a catalogued city whose stage has demand
    * off — SEEDING, PAUSED, WITHDRAWN or PLANNED. The page is empty and says
@@ -183,8 +219,21 @@ export function toBrowseCard(
     availableHoursFrom: listing.availableHoursFrom,
     availableHoursTo: listing.availableHoursTo,
     peakPeriodNote: listing.peakPeriodNote,
+    maxBookingDays: listing.maxBookingDays ?? null,
+    advanceBookingDays: listing.advanceBookingDays ?? null,
+    cancellationNoticeDays: listing.cancellationNoticeDays ?? null,
+    cancellationPolicy: listing.cancellationPolicy ?? null,
+    availableYearRound: listing.availableYearRound ?? null,
+    broadcastLanguage: listing.broadcastLanguage ?? null,
+    contentFormat: listing.contentFormat ?? null,
+    vehicleType: listing.vehicleType ?? null,
+    vehicleModel: listing.vehicleModel ?? null,
+    widthPx: listing.widthPx ?? null,
+    heightPx: listing.heightPx ?? null,
+    installationByAdx: listing.installationByAdx ?? null,
     targetAudience: listing.targetAudience,
     uniqueSellingPoint: listing.uniqueSellingPoint,
+    publisherId: listing.publisherId ?? null,
     publisherName: listing.publisher?.name ?? null,
     publisherVerified: listing.publisher === null || listing.publisher.kycStatus === 'VERIFIED',
     publisherAvatarUrl: listing.publisher?.user?.avatarUrl ?? null,
@@ -203,6 +252,8 @@ export function toBrowseCard(
     slotsTotal: listing.slotsTotal ?? 1,
     // Stamped by `withSlots` once the page is known; a card built alone reads full.
     slotsLeft: listing.slotsTotal ?? 1,
+    freeDays: 1,
+    windowDays: 1,
   };
 }
 
@@ -211,10 +262,16 @@ export function toBrowseCard(
  * count for the page. The window is the caller's `from`/`to`; today when
  * neither was given.
  */
-async function withSlots<T extends { id: string; slotsTotal: number }>(cards: T[], window: SlotWindow): Promise<T[]> {
-  if (cards.length === 0) return cards;
-  const held = await slotsHeldFor(cards.map((card) => card.id), window);
-  return cards.map((card) => ({ ...card, slotsLeft: slotsLeft(card.slotsTotal, held.get(card.id)) }));
+async function withSlots<T extends { id: string; slotsTotal: number }>(cards: T[], window: SlotWindow): Promise<(T & { slotsLeft: number; freeDays: number; windowDays: number })[]> {
+  if (cards.length === 0) return [];
+  // AV-1: one read of the page's holds with their days; the busiest day is
+  // the slots left, and the days with room are counted beside it.
+  const holds = await repository.datedHolds(cards.map((card) => card.id), window);
+  return cards.map((card) => {
+    const days = dailyHolds(holds.filter((hold) => hold.listingId === card.id), window);
+    const peak = days.length ? Math.max(...days) : 0;
+    return { ...card, slotsLeft: slotsLeft(card.slotsTotal, peak), freeDays: days.filter((held) => held < card.slotsTotal).length, windowDays: days.length };
+  });
 }
 
 /**
@@ -264,13 +321,39 @@ export async function browseListings(
   viewer?: BrowseViewer,
 ): Promise<BrowsePage> {
   const window = windowFor(input.from, input.to);
+  // SIM-1: "View all similar listings" — the anchor listing resolves to the rule the row reads.
+  let similarTo: BrowsePage['similarTo'] = undefined;
+  if (input.similarToId) {
+    const anchor = (await repository.findById(input.similarToId)) ?? (/^LST-/i.test(input.similarToId) ? await repository.findActiveByDisplayId(input.similarToId) : null);
+    if (!anchor) throw new ApiError(404, 'NOT_FOUND', 'Listing not found');
+    const { similarToId: _drop, ...rest } = input;
+    input = { ...rest, similar: similarAnchor(anchor as never) };
+    similarTo = { id: anchor.id, displayId: (anchor as { displayId?: string | null }).displayId ?? null, title: anchor.title };
+  }
+  const answer = await browseListingsResolved(input, page, pageSize, window, viewer);
+  return similarTo ? { ...answer, similarTo } : answer;
+}
+
+async function browseListingsResolved(input: BrowseFilter, page: number, pageSize: number, window: SlotWindow, viewer?: BrowseViewer): Promise<BrowsePage> {
   const closed = await comingSoonFor(input.city);
   if (closed) return { items: [], total: 0, page, pageSize, comingSoon: closed };
   const filter = await placeWithKey(input);
   if (!filter.near) {
+    // LM-1: page one of the default order carries today's sponsored listings
+    // first — only those in the filtered set, each lifted out of its organic
+    // place on the page. A chosen sort or a later page is left organic.
+    const sponsored = page === 1 && filter.sort === 'NEWEST' ? await sponsoredListings(filter, filter.similar ? 'SIMILAR_TOP' : 'SEARCH_TOP') : [];
+    const lifted = new Set(sponsored.map((entry) => entry.listing.id));
     const { items, total } = await repository.findActive(filter, page, pageSize);
-    const saved = await savedSet(viewer, items.map((listing) => listing.id));
-    const cards = await withSlots(items.map((listing) => toBrowseCard(listing, null, saved.has(listing.id))), window);
+    const organic = items.filter((listing) => !lifted.has(listing.id));
+    const saved = await savedSet(viewer, [...sponsored.map((entry) => entry.listing.id), ...organic.map((listing) => listing.id)]);
+    const cards = await withSlots(
+      [
+        ...sponsored.map((entry) => ({ ...toBrowseCard(entry.listing, null, saved.has(entry.listing.id)), sponsored: true, boostId: entry.boostId })),
+        ...organic.map((listing) => toBrowseCard(listing, null, saved.has(listing.id))),
+      ],
+      window,
+    );
     return { items: cards, total, page, pageSize };
   }
   // Around a point the whole box is read once — a box is a few hundred
@@ -294,11 +377,58 @@ export async function browseListings(
  * the slots left are counted over it, else over today.
  */
 export async function getBrowseListing(listingId: string, viewer?: BrowseViewer, window?: Partial<SlotWindow>): Promise<BrowseCard> {
-  const listing = await repository.findActiveById(listingId);
+  /* W1: the website addresses a spot by its display id (`/spaces/LST-1709-2663`), the apps by its id; both land here. */
+  const listing = (await repository.findActiveById(listingId)) ?? (/^LST-/i.test(listingId) ? await repository.findActiveByDisplayId(listingId) : null);
   if (!listing) throw new ApiError(404, 'NOT_FOUND', 'That spot is not available');
   const saved = await savedSet(viewer, [listing.id]);
   const [card] = await withSlots([toBrowseCard(listing, null, saved.has(listing.id))], windowFor(window?.from, window?.to));
   return card!;
+}
+
+/**
+ * 26 Sep 2026: `GET /listings/:id/similar` — up to five live spots of the
+ * same category in the same city within ±30% of the price, as the browse
+ * cards `GET /listings/browse` answers (photos, publisher, slots left) —
+ * not the raw rows it used to answer on a public route. `:id` is the
+ * spot's id or (W1) its display id. Nothing per viewer: no saved mark.
+ */
+export async function similarListings(listingId: string, limit = 5): Promise<BrowseCard[]> {
+  const listing = (await repository.findById(listingId)) ?? (/^LST-/i.test(listingId) ? await repository.findActiveByDisplayId(listingId) : null);
+  if (!listing) throw new ApiError(404, 'NOT_FOUND', 'Listing not found');
+  // SIM-1: more than five for the website's scrolling row; the app keeps its five.
+  // LM-1: today's SIMILAR_TOP boosts from the similar set go first, the rest follow in the row's own order.
+  const sponsored = (await sponsoredListings(() => ({ sort: 'NEWEST', similar: similarAnchor(listing as never) }), 'SIMILAR_TOP')).slice(0, limit);
+  const lifted = new Set(sponsored.map((entry) => entry.listing.id));
+  const rows = (await repository.findSimilar(listing as never, limit)).filter((row) => !lifted.has(row.id)).slice(0, limit - sponsored.length);
+  return withSlots(
+    [...sponsored.map((entry) => ({ ...toBrowseCard(entry.listing), sponsored: true, boostId: entry.boostId })), ...rows.map((row) => toBrowseCard(row))],
+    windowFor(),
+  );
+}
+
+/**
+ * LM-1: the sponsored listings a page may carry — today's boosts for the
+ * placement whose listing is in the filtered set (the same `findActive`
+ * with every facet the page has, narrowed to the boosted ids), in a shuffled
+ * order so boosts sharing the placement take turns, at most the placement's
+ * `maxConcurrent`. A listing boosted twice shows once.
+ */
+async function sponsoredListings(filter: BrowseFilter | (() => BrowseFilter), placement: SponsoredPlacement): Promise<{ boostId: string; listing: BrowseListing }[]> {
+  const { max, boosts } = await liveSponsored(placement);
+  if (max <= 0 || boosts.length === 0) return [];
+  const ids = [...new Set(boosts.map((boost) => boost.listingId))];
+  const { items } = await repository.findActive({ ...(typeof filter === 'function' ? filter() : filter), onlyIds: ids }, 1, ids.length);
+  const byId = new Map(items.map((listing) => [listing.id, listing]));
+  const out: { boostId: string; listing: BrowseListing }[] = [];
+  const taken = new Set<string>();
+  for (const boost of shuffled(boosts)) {
+    const listing = byId.get(boost.listingId);
+    if (!listing || taken.has(listing.id)) continue;
+    taken.add(listing.id);
+    out.push({ boostId: boost.boostId, listing });
+    if (out.length >= max) break;
+  }
+  return out;
 }
 
 /* ── Browse by category — G12-B ───────────────────────────────────────── */

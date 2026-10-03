@@ -91,7 +91,25 @@ export type { CreativeCheck } from './moderation.service';
  * sweeps lapsed 24-hour reservations with `expireSpotReservations`.
  */
 export { campaignPaymentQuote, authorizeCampaignById, expireSpotReservations, RESERVATION_HOURS } from './checkout.service';
+/**
+ * RF-1: `payments` prices and settles the reservation fee through these two;
+ * the lifecycle job runs the two sweeps (the unpaid hour, the lapsed day).
+ */
+export { reservationFeePaymentQuote, settleReservationFeeById, lapseUnpaidReservationFees, abandonLapsedReservations } from './reservation.service';
+export type { ReservationView } from './reservation.service';
+/** WS-1: the Monday digest — the job runs it once a week. */
+export { runWeeklySummaries, isMondayMorningIST, weekKeyIST, weekLabel } from './weekly-summary.service';
+export type { ReservationFeeOffer } from './checkout.service';
 export type { CampaignPaymentQuote, AuthorizeResult } from './checkout.service';
+
+/**
+ * The Campaigns lot (2 Oct 2026): the launch queue counted, for the
+ * `section-overviews` Campaigns overview — the same population and gates as
+ * `GET /campaigns/launch-queue`, so the tile and the queue agree.
+ */
+export { launchQueueSummary } from './console.service';
+export { WAITING_REASONS } from './campaigns.schema';
+export type { WaitingReason } from './campaigns.schema';
 
 /** Used by the console's campaign screens and by the apps. */
 export type { CampaignAnalytics, PortfolioAnalytics } from './analytics.service';

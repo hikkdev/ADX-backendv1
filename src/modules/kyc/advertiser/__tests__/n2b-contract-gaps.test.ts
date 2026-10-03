@@ -38,7 +38,7 @@ const { repository, advertisers, notifications, audit, digio, settings, labels, 
   advertisers: { applyKycDecision: vi.fn(), applyKycDecisionByUserId: vi.fn(), getAdvertiserForUser: vi.fn(), findAdvertiser: vi.fn() },
   notifications: { createNotification: vi.fn(), notify: vi.fn() },
   audit: { logActivity: vi.fn(), auditDiff: vi.fn(() => ({})) },
-  digio: { initiateAdvertiserDigioKyc: vi.fn(), restartAdvertiserDigioKyc: vi.fn(), advertiserDigioStatus: vi.fn(), handleAdvertiserDigioWebhook: vi.fn() },
+  digio: { initiateAdvertiserDigioKyc: vi.fn(), noteEntityTypeForManualRequest: vi.fn(), restartAdvertiserDigioKyc: vi.fn(), advertiserDigioStatus: vi.fn(), handleAdvertiserDigioWebhook: vi.fn() },
   settings: { getPlatformSettings: vi.fn(async () => ({ kyc: { reviewSlaHours: 48 } })), getFlow: vi.fn(async () => ({ version: 7 })), ONBOARDING_FLOW_KEY: 'onboarding' },
   labels: {
     kycUserLabels: vi.fn(async () => new Map()),

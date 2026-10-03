@@ -1,14 +1,29 @@
+import crypto from 'crypto';
 import { env } from '../../config/env';
 import {
   DEFAULT_AUDIENCE_CATCHMENT_RADIUS_M,
   GEOIQ_DEFAULT_BASE_URL,
+  digioWorkflows,
   effectiveEmailMode,
   legacyAudienceProvider,
   resolveAudiencePolicy,
   resolveAudienceProviders,
   resolveOsmConfig,
+  resolveSecureIdPublicKey,
+  resolveHolidayCalendarConfig,
   type IntegrationsConfig,
 } from '../../shared/integrations';
+import {
+  CHECK_TYPES,
+  COMPOSITE_STEP_KINDS,
+  SECURE_ID_LIVE_BASE,
+  SECURE_ID_SANDBOX_BASE,
+  UPI_CHECK_MODES,
+  VERIFICATION_PROVIDER_LABELS,
+  VERIFICATION_PROVIDER_NAMES,
+  providerCapabilities,
+  resolveVerificationSettings,
+} from '../../shared/verification';
 import { readServiceAccount } from '../../shared/push';
 import { DEFAULT_CONSENT_LINE, DEFAULT_IVR } from '../../shared/integrations';
 import { describeGoogleBusiness, describeMetaDm, describeTelephony, describeWhatsApp } from '../../shared/outreach';
@@ -50,6 +65,54 @@ function maskDatabaseUrl(url: string): string {
 function pushConfiguration(): { configured: boolean; reason?: 'FCM_NOT_CONFIGURED' | 'FCM_MISCONFIGURED' } {
   const read = readServiceAccount();
   return read.account ? { configured: true } : { configured: false, reason: read.reason ?? 'FCM_NOT_CONFIGURED' };
+}
+
+/**
+ * Cashfree Phase 1: the Secure ID card. The client id is drawn as it is (it
+ * is the name of the key pair, as the gateway's app id is); the secret is
+ * masked; the public key never leaves — only whether one is loaded and a
+ * short fingerprint of it, so the owner can tell which of Cashfree's keys
+ * the server is signing with (Cashfree lets it be downloaded once).
+ */
+function secureIdView(cfg: IntegrationsConfig) {
+  const clientId = cfg.secureId?.clientId || env.CASHFREE_VERIFICATION_CLIENT_ID || env.CASHFREE_PAYOUT_CLIENT_ID;
+  const clientSecret = cfg.secureId?.clientSecret || env.CASHFREE_VERIFICATION_CLIENT_SECRET || env.CASHFREE_PAYOUT_CLIENT_SECRET;
+  const publicKey = resolveSecureIdPublicKey(cfg.secureId?.publicKey || env.CASHFREE_VERIFICATION_PUBLIC_KEY);
+  const testModeRaw = env.CASHFREE_VERIFICATION_TEST_MODE ?? env.CASHFREE_PAYOUT_TEST_MODE ?? 'true';
+  const testMode = cfg.secureId?.testMode ?? testModeRaw.toLowerCase() !== 'false';
+  return {
+    clientId: clientId ?? null,
+    clientSecret: maskSecret(clientSecret),
+    publicKey: publicKey ? '••••' : null,
+    publicKeyFingerprint: publicKey ? crypto.createHash('sha256').update(publicKey.replace(/\s+/g, '')).digest('hex').slice(0, 16) : null,
+    testMode,
+    // Not secrets — what the card says about the wire: whether calls can be made at all, how they are authenticated, where they go.
+    configured: Boolean(clientId && clientSecret),
+    signing: publicKey ? ('PUBLIC_KEY' as const) : ('IP_WHITELIST' as const),
+    baseUrl: testMode ? SECURE_ID_SANDBOX_BASE : SECURE_ID_LIVE_BASE,
+    source: cfg.secureId?.clientId ? ('SETTINGS' as const) : clientId ? ('ENV' as const) : null,
+  };
+}
+
+/**
+ * Cashfree Phase 1: the routing card — the settings in force (the row laid
+ * over the defaults, the way the router sees them) and the catalogue the
+ * screen draws its grid from. Nothing here is a secret.
+ */
+function verificationRoutingView(cfg: IntegrationsConfig) {
+  const settings = resolveVerificationSettings(cfg.verificationRouting);
+  const defaults = resolveVerificationSettings(null);
+  return {
+    ...settings,
+    // What a "Reset" restores — so the card can show which rows are overridden and what they go back to.
+    defaults: { checks: defaults.checks, breaker: defaults.breaker, composites: defaults.composites, nameMatchMin: defaults.nameMatchMin },
+    catalogue: {
+      checks: CHECK_TYPES,
+      providers: VERIFICATION_PROVIDER_NAMES.map((name) => ({ name, label: VERIFICATION_PROVIDER_LABELS[name], capabilities: providerCapabilities(name, settings) })),
+      steps: COMPOSITE_STEP_KINDS,
+      upiChecks: UPI_CHECK_MODES,
+    },
+  };
 }
 
 function osmView(cfg: IntegrationsConfig) {
@@ -111,6 +174,14 @@ export function toIntegrationsResponse(cfg: IntegrationsConfig, extras: Integrat
         baseUrl: cfg.kyc?.baseUrl ?? env.DIGIO_BASE_URL,
         // Lot D (Q129): not a secret — the switch the KYC screen draws.
         kycProvider: cfg.kyc?.kycProvider ?? 'DIGIO',
+        // DR-2: the document door's reader for identity papers, and Digio's OCR path when it is not the default.
+        documentReader: cfg.kyc?.documentReader ?? 'MODEL',
+        ocrPath: cfg.kyc?.ocrPath ?? null,
+        // Phase D (1 Oct 2026): the twenty-five KYC workflows — the template id
+        // in force for each and whether it is the owner's default or an override.
+        workflows: digioWorkflows(cfg.kyc?.workflowTemplates),
+        // 30 Sep 2026: the page a person verifies on.
+        gatewayUrl: cfg.kyc?.gatewayUrl || cfg.esign?.gatewayUrl || env.DIGIO_ESIGN_GATEWAY_URL,
       },
       // LH3 (D4): the directory feeds — an endpoint per partner, the key masked, and whether each is usable.
       leadFeeds: Object.fromEntries(
@@ -256,6 +327,25 @@ export function toIntegrationsResponse(cfg: IntegrationsConfig, extras: Integrat
         siteTitle: cfg.branding?.siteTitle ?? null,
         siteDescription: cfg.branding?.siteDescription ?? null,
       },
+      // BT-1: the receiving account — the payer sees it, so nothing here is masked.
+      bankTransfer: {
+        beneficiary: cfg.bankTransfer?.beneficiary ?? null,
+        accountNumber: cfg.bankTransfer?.accountNumber ?? null,
+        ifsc: cfg.bankTransfer?.ifsc ?? null,
+        bank: cfg.bankTransfer?.bank ?? null,
+        branch: cfg.bankTransfer?.branch ?? null,
+        instructions: cfg.bankTransfer?.instructions ?? null,
+      },
+      // FB-1: the app id is what the website's button carries; the secret stays masked.
+      facebook: {
+        appId: cfg.facebook?.appId ?? env.FACEBOOK_APP_ID ?? null,
+        appSecret: maskSecret(cfg.facebook?.appSecret ?? env.FACEBOOK_APP_SECRET),
+      },
+      // SL-1: NONE until ops pick a provider; the token is masked.
+      geoIp: {
+        provider: cfg.geoIp?.provider ?? 'NONE',
+        token: maskSecret(cfg.geoIp?.token),
+      },
       ai: {
         provider: cfg.ai?.provider ?? env.AI_PROVIDER ?? 'anthropic',
         apiKey: maskSecret(cfg.ai?.apiKey ?? env.AI_API_KEY),
@@ -344,6 +434,14 @@ export function toIntegrationsResponse(cfg: IntegrationsConfig, extras: Integrat
           (cfg.qrEngine?.provider ?? 'LOCAL') === 'GENQR' &&
           Boolean((cfg.qrEngine?.baseUrl || env.GENQR_BASE_URL) && (cfg.qrEngine?.apiKey || env.GENQR_API_KEY)),
       },
+      // Cashfree Phase 1: Secure ID (Digio's backup and the single checks) and the routing between the two.
+      secureId: secureIdView(cfg),
+      verificationRouting: verificationRoutingView(cfg),
+      // HC-1: the public holiday calendar — the switch, the address and the
+      // observances choice, defaults filled in so the screen shows what the
+      // weekly sync would do. No secret in it. The last run is `hr`'s to
+      // tell (GET /hr/holidays/calendar).
+      holidayCalendar: resolveHolidayCalendarConfig(cfg.holidayCalendar),
       // G11-2: read-only — the key comes from the environment, never from
       // this screen; the section says whether the rail can send.
       push: pushConfiguration(),

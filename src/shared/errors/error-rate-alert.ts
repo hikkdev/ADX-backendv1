@@ -1,5 +1,6 @@
 import { redis } from '../cache/redis';
 import { logger } from '../logging/logger';
+import { warnThrottled } from '../logging/throttled';
 
 /**
  * The 5xx-rate alert.
@@ -59,7 +60,7 @@ async function countServerErrorDay(now: Date): Promise<void> {
   try {
     await redis.hincrby(DAILY_5XX_KEY, istDayKey(now), 1);
   } catch (cause) {
-    logger.warn('Daily 5xx count not recorded', { cause: cause instanceof Error ? cause.message : String(cause) });
+    warnThrottled('Daily 5xx count not recorded', { cause: cause instanceof Error ? cause.message : String(cause) });
   }
 }
 
@@ -116,6 +117,6 @@ export async function recordServerError(sample: ServerErrorSample): Promise<void
     logger.error('Server error rate above threshold', { count, threshold: alert.threshold, sample });
     if (port) await port.alertAdmins(alert);
   } catch (cause) {
-    logger.warn('Server error rate alert failed', { cause: cause instanceof Error ? cause.message : String(cause) });
+    warnThrottled('Server error rate alert failed', { cause: cause instanceof Error ? cause.message : String(cause) });
   }
 }

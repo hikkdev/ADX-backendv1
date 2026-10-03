@@ -39,6 +39,8 @@ export type NewSubmission = {
 /** A user provisioned inline while creating a submission. */
 export type InlineUser = {
   mobile: string;
+  /** 28 Sep 2026: the person's own ADX-… id, minted by the service for the account this submission opens. */
+  displayId?: string;
   name?: string;
   email?: string;
   roles: Role[];

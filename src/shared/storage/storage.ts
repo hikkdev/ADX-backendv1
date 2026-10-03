@@ -252,6 +252,12 @@ export async function probeStorage(timeoutMs = 5_000): Promise<StorageProbe> {
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error(`storage probe exceeded ${timeoutMs}ms`)), timeoutMs);
   });
+  /* The timer is armed here, before the config and the client are awaited
+     below. If those take longer than the timeout, this promise rejects before
+     `Promise.race` has attached a handler to it — an unhandled rejection,
+     which ends the process. It took the dev server down once on 25 September.
+     A no-op catch makes it never unhandled; the race still sees it. */
+  timeout.catch(() => undefined);
   try {
     const cfg = await getEffectiveStorageConfig();
     provider = getActiveProvider(cfg);
@@ -266,6 +272,9 @@ export async function probeStorage(timeoutMs = 5_000): Promise<StorageProbe> {
       const client = await r2Client(cfg);
       await client.send(new HeadBucketCommand({ Bucket: cfg.bucketName! }));
     })();
+    /* The mirror case: when the timeout wins, the probe is still running and
+       may reject later with nobody listening. Same fix. */
+    probe.catch(() => undefined);
     await Promise.race([probe, timeout]);
     return { ok: true, provider, latencyMs: Date.now() - startedAt };
   } catch (cause) {

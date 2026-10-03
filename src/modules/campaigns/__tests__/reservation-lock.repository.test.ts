@@ -19,7 +19,9 @@ const { prisma, tx } = vi.hoisted(() => {
   const tx = {
     $executeRaw: vi.fn(),
     campaign: { findUnique: vi.fn() },
-    campaignSpot: { findMany: vi.fn(), groupBy: vi.fn(), updateMany: vi.fn() },
+    campaignSpot: { findMany: vi.fn(), updateMany: vi.fn() },
+    // BD-1: the third hold the count reads.
+    listingBlockedDate: { findMany: vi.fn(async () => []) },
     order: { findMany: vi.fn() },
   };
   return {
@@ -28,7 +30,8 @@ const { prisma, tx } = vi.hoisted(() => {
       $transaction: vi.fn(async (fn: (client: typeof tx) => unknown) => fn(tx)),
       listing: { findMany: vi.fn() },
       order: { findMany: vi.fn() },
-      campaignSpot: { groupBy: vi.fn() },
+      campaignSpot: { findMany: vi.fn() },
+      listingBlockedDate: { findMany: vi.fn(async () => []) },
     },
   };
 });
@@ -45,16 +48,21 @@ const from = new Date('2026-04-01T00:00:00Z');
 const to = new Date('2026-04-14T00:00:00Z');
 const until = new Date('2026-03-21T10:00:00Z');
 
+let ownSpots: unknown[] = [];
+let otherReservations: unknown[] = [];
+
 beforeEach(() => {
   vi.clearAllMocks();
   tx.$executeRaw.mockResolvedValue(1);
   tx.campaign.findUnique.mockResolvedValue({ startDate: from, endDate: to });
-  tx.campaignSpot.findMany.mockResolvedValue([
+  ownSpots = [
     { id: 'spt_1', listingId: 'lst_b', quantity: 3, startDate: null, endDate: null, listing: { slotsTotal: 6 } },
     { id: 'spt_2', listingId: 'lst_a', quantity: 1, startDate: null, endDate: null, listing: { slotsTotal: 1 } },
-  ]);
+  ];
+  otherReservations = [{ listingId: 'lst_b', quantity: 1, startDate: null, endDate: null }];
+  // AV-1: the same table answers two reads — the campaign's own spots (their select carries `id`) and the count's live reservations.
+  tx.campaignSpot.findMany.mockImplementation(async (args: { select?: { id?: boolean } }) => (args?.select?.id ? ownSpots : otherReservations));
   tx.order.findMany.mockResolvedValue([{ listingId: 'lst_b', campaignSpot: { quantity: 2 } }]);
-  tx.campaignSpot.groupBy.mockResolvedValue([{ listingId: 'lst_b', _sum: { quantity: 1 } }]);
   tx.campaignSpot.updateMany.mockResolvedValue({ count: 2 });
 });
 
@@ -75,7 +83,8 @@ describe('holdReservations', () => {
     expect(tx.campaignSpot.updateMany.mock.invocationCallOrder[0]!).toBeGreaterThan(tx.order.findMany.mock.invocationCallOrder[0]!);
 
     // The count leaves this campaign's own reservations out, over the campaign's flight.
-    expect(tx.campaignSpot.groupBy.mock.calls[0]![0].where).toMatchObject({ campaignId: { not: 'cmp_1' } });
+    const countCall = tx.campaignSpot.findMany.mock.calls.find(([args]) => !(args as { select?: { id?: boolean } }).select?.id)!;
+    expect((countCall[0] as { where: unknown }).where).toMatchObject({ campaignId: { not: 'cmp_1' } });
     expect(tx.campaignSpot.updateMany).toHaveBeenCalledWith({ where: { campaignId: 'cmp_1', status: 'RESERVED' }, data: { reservedUntil: until } });
   });
 
@@ -88,7 +97,7 @@ describe('holdReservations', () => {
   });
 
   it('holds nothing, and locks nothing, for a campaign with no reserved spot', async () => {
-    tx.campaignSpot.findMany.mockResolvedValue([]);
+    ownSpots = [];
     await expect(repository.holdReservations('cmp_1', until)).resolves.toBe(0);
     expect(tx.$executeRaw).not.toHaveBeenCalled();
     expect(tx.campaignSpot.updateMany).not.toHaveBeenCalled();
@@ -102,7 +111,7 @@ describe('clashingListingIds', () => {
       { id: 'lst_b', slotsTotal: 6 },
     ]);
     prisma.order.findMany.mockResolvedValue([{ listingId: 'lst_b', campaignSpot: { quantity: 4 } }]);
-    prisma.campaignSpot.groupBy.mockResolvedValue([]);
+    prisma.campaignSpot.findMany.mockResolvedValue([]);
   });
 
   it('answers by quantity: three wanted on a loop with two left clashes, one wanted does not', async () => {

@@ -18,6 +18,25 @@ export { advertiserKycRouter } from './advertiser/advertiser-kyc.routes';
 export { userKycRouter } from './user/user-kyc.routes';
 export { agentKycRouter } from './agent/agent-kyc.routes';
 export { employeeKycRouter } from './employee/employee-kyc.routes';
+/** Phase D (1 Oct 2026): `GET /kyc/entity-types` — the legal forms each party may verify as. */
+export { kycEntityTypeRouter } from './entity-types.routes';
+/** Phase D: registered by bootstrap on the advertisers module's port — the Edit-details PATCH's upgrade. */
+export { upgradeAdvertiserKyc } from './advertiser/advertiser-digio.service';
+
+/**
+ * Cashfree Phase 1 (the owner, 1 Oct 2026): `/verification` — the Cashfree
+ * session a person walks when Digio could not be asked, the desk's attempt
+ * list, health read and "Resend on backup", Cashfree Secure ID's webhook,
+ * and the sweep the job runs. Bootstrap registers the hosted-decision road
+ * and each party's case on it (`kyc` may import neither `publishers` nor
+ * `print-partners`).
+ */
+export { verificationRouter, secureIdWebhookRouter } from './verification/verification.routes';
+export { registerBackupCase, registerHostedOutcomeHandler, sweepVerification } from './verification/verification.service';
+export type { SweepReport } from './verification/verification.service';
+export { advertiserBackupCase } from './advertiser/advertiser-digio.service';
+export { agentBackupCase } from './agent/agent-digio.service';
+export { employeeBackupCase } from './employee/employee-digio.service';
 
 /** Used by bootstrap: claims a Digio webhook whose request id is an advertiser's. */
 export { handleAdvertiserDigioWebhook } from './advertiser/advertiser-digio.service';
@@ -103,7 +122,7 @@ export { kycEscalateSchema, escalatedFilterSchema } from './kyc.schema';
 export type { KycEscalateInput } from './kyc.schema';
 
 /** Lot N: the desk's request body and facet, shared with the publisher twin. */
-export { kycRequestSchema, requestedFilterSchema, KYC_REQUEST_CHANNELS, KYC_DEEP_LINK, kycChannelLabel } from './kyc.schema';
-export type { KycRequestInput, KycRequestChannel } from './kyc.schema';
+export { kycRequestSchema, kycEntityRequestSchema, requestedFilterSchema, KYC_REQUEST_CHANNELS, KYC_DEEP_LINK, kycChannelLabel } from './kyc.schema';
+export type { KycRequestInput, KycEntityRequestInput, KycRequestChannel } from './kyc.schema';
 // AG-1: the applicant's identity papers, mirrored onto the desk's KYC record (registered on agents' application port by bootstrap).
 export { mirrorAgentIdentityDocument } from './agent/agent-kyc.service';

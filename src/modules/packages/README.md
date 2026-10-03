@@ -161,3 +161,13 @@ keeps two ticks off the sweep meanwhile.
   field visit a sale was made on), `shared/email`, `shared/sms`.
 - `invoices` reaches back through `invoicing.port.ts` (Lot B, Q13) for the
   receipt; unregistered, the sale still activates.
+
+## 26 Sep 2026 — the catalogue answers the parties
+
+`GET /packages/catalogue` carried a bare `requirePermission('marketplace.view')`,
+which is strict without a role guard in front, so every advertiser and every
+advertiser-side agent got 403 (the app too). The party roles are now admitted
+by `requireRole('ADVERTISER', 'AGENT_ADVERTISER', 'ADMIN')` ahead of the
+permission — the RP-2 pattern; an ADMIN still needs `marketplace.view`. No other
+`/packages/*` read the apps call carried the same mistake. Pinned in
+`__tests__/packages.quote.routes.test.ts`.

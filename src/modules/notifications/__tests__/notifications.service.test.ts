@@ -78,8 +78,8 @@ describe('relatedType and payload', () => {
     ]);
   });
 
-  it('names the eleven records a push can open', () => {
-    expect([...RELATED_TYPES]).toEqual(['ORDER', 'PUBLISHER', 'ADVERTISER', 'CAMPAIGN', 'STATEMENT', 'WITHDRAWAL', 'TICKET', 'DISPUTE', 'ANNOUNCEMENT', 'LISTING', 'WORK', 'LEAD']);
+  it('names the records a push can open', () => {
+    expect([...RELATED_TYPES]).toEqual(['ORDER', 'PUBLISHER', 'ADVERTISER', 'CAMPAIGN', 'STATEMENT', 'WITHDRAWAL', 'TICKET', 'DISPUTE', 'ANNOUNCEMENT', 'LISTING', 'WORK', 'LEAD', 'VERIFICATION_SESSION']);
   });
 });
 
@@ -94,7 +94,7 @@ describe('preference defaulting', () => {
     repository.findPreferences.mockResolvedValue([{ type: 'PAYOUT', channel: 'IN_APP', enabled: false }]);
 
     const rows = await getPreferences('user-1');
-    expect(rows).toHaveLength(36);
+    expect(rows).toHaveLength(40);
     const at = (type: string, channel: string) => rows.find((row) => row.type === type && row.channel === channel);
 
     // Saved wins.

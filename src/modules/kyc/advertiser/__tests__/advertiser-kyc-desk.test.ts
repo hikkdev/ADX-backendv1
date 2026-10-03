@@ -121,9 +121,9 @@ describe('asking for a re-upload', () => {
     const needsInfo = {
       ...row,
       status: 'NEEDS_INFO',
-      govIdFrontUrl: 'https://adx.local/api/v1/files/old-front',
-      govIdBackUrl: 'https://adx.local/api/v1/files/old-back',
-      selfieUrl: 'https://adx.local/api/v1/files/old-selfie',
+      govIdFrontUrl: 'https://adx.in/api/v1/files/old-front',
+      govIdBackUrl: 'https://adx.in/api/v1/files/old-back',
+      selfieUrl: 'https://adx.in/api/v1/files/old-selfie',
       panNumber: 'ABCDE1234F',
       manifestVersion: 3,
     };
@@ -143,7 +143,7 @@ describe('asking for a re-upload', () => {
     expect(asked.flagged.map((f) => f.field)).toEqual(['govIdFrontUrl', 'selfieUrl']);
 
     // The phone sends only those two — nothing else was collected.
-    const partial = { govIdFrontUrl: 'https://adx.local/api/v1/files/new-front', selfieUrl: 'https://adx.local/api/v1/files/new-selfie' };
+    const partial = { govIdFrontUrl: 'https://adx.in/api/v1/files/new-front', selfieUrl: 'https://adx.in/api/v1/files/new-selfie' };
     const resubmitted = await resubmitAdvertiserKyc('usr_adv', partial);
 
     // Only the columns sent are written; the repository keeps the rest.
@@ -151,9 +151,9 @@ describe('asking for a re-upload', () => {
     expect(resubmitted).toMatchObject({
       status: 'PENDING',
       rejectionReason: null,
-      govIdFrontUrl: 'https://adx.local/api/v1/files/new-front',
-      selfieUrl: 'https://adx.local/api/v1/files/new-selfie',
-      govIdBackUrl: 'https://adx.local/api/v1/files/old-back',
+      govIdFrontUrl: 'https://adx.in/api/v1/files/new-front',
+      selfieUrl: 'https://adx.in/api/v1/files/new-selfie',
+      govIdBackUrl: 'https://adx.in/api/v1/files/old-back',
       panNumber: 'ABCDE1234F',
     });
     // Exactly the fields sent start clean; a decision on govIdBackUrl would stand.

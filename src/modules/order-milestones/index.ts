@@ -35,6 +35,13 @@ export { releaseAgentMilestones } from './agent/agent-execution.service';
 export { countDispatchedMilestones } from './agent/agent-execution.service';
 
 /**
+ * ST-2 (28 Sep 2026): whether an agent is sent to a listing — a visit of
+ * theirs on it, open or recent, or its order's own agent — for bootstrap's
+ * answer to `uploads`' private-file door on a listing's venue papers.
+ */
+export { agentSentToListing, LISTING_VISIT_WINDOW_DAYS } from './agent/agent-execution.service';
+
+/**
  * Used by `disputes` (Lot D, Q54/Q92): a REINSTALL resolution raises an
  * INSTALLATION visit on the order, and the case reads the visit's status back
  * to say "resolved — re-install pending" until it completes.

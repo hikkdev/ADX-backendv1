@@ -33,19 +33,19 @@ advertiserKycRouter.post('/me/digio/initiate', asyncHandler(initiateMyAdvertiser
 advertiserKycRouter.get('/me/digio/status', asyncHandler(myAdvertiserDigioStatusHandler));
 
 // Admin review
-advertiserKycRouter.get('/', requireRole('ADMIN'), asyncHandler(getAllAdvertiserKycsHandler));
-advertiserKycRouter.get('/:id', requireRole('ADMIN'), asyncHandler(getAdvertiserKycByIdHandler));
-advertiserKycRouter.put('/:id', requireRole('ADMIN'), asyncHandler(updateAdvertiserKycByIdHandler));
-advertiserKycRouter.patch('/:id/review', requireRole('ADMIN'), asyncHandler(reviewAdvertiserKycHandler));
+advertiserKycRouter.get('/', requireRole('ADMIN'), requirePermission('kyc.view'), asyncHandler(getAllAdvertiserKycsHandler));
+advertiserKycRouter.get('/:id', requireRole('ADMIN'), requirePermission('kyc.view'), asyncHandler(getAdvertiserKycByIdHandler));
+advertiserKycRouter.put('/:id', requireRole('ADMIN'), requirePermission('kyc.edit'), asyncHandler(updateAdvertiserKycByIdHandler));
+advertiserKycRouter.patch('/:id/review', requireRole('ADMIN'), requirePermission('kyc.approve'), asyncHandler(reviewAdvertiserKycHandler));
 // Lot D (Q42/Q119): the per-document desk — one tile, the re-upload ask, who is working it.
-advertiserKycRouter.patch('/:id/documents/:field', requireRole('ADMIN'), asyncHandler(reviewAdvertiserDocumentHandler));
-advertiserKycRouter.post('/:id/request-reupload', requireRole('ADMIN'), asyncHandler(requestAdvertiserReuploadHandler));
-advertiserKycRouter.patch('/:id/assign', requireRole('ADMIN'), asyncHandler(assignAdvertiserCaseHandler));
+advertiserKycRouter.patch('/:id/documents/:field', requireRole('ADMIN'), requirePermission('kyc.edit'), asyncHandler(reviewAdvertiserDocumentHandler));
+advertiserKycRouter.post('/:id/request-reupload', requireRole('ADMIN'), requirePermission('kyc.edit'), asyncHandler(requestAdvertiserReuploadHandler));
+advertiserKycRouter.patch('/:id/assign', requireRole('ADMIN'), requirePermission('kyc.edit'), asyncHandler(assignAdvertiserCaseHandler));
 // Lot G (Q127/142): the reviewer hands the case to Compliance.
-advertiserKycRouter.post('/:id/escalate', requireRole('ADMIN'), asyncHandler(escalateAdvertiserCaseHandler));
-advertiserKycRouter.post('/:id/digio/restart', requireRole('ADMIN'), asyncHandler(restartAdvertiserDigioHandler));
+advertiserKycRouter.post('/:id/escalate', requireRole('ADMIN'), requirePermission('kyc.edit'), asyncHandler(escalateAdvertiserCaseHandler));
+advertiserKycRouter.post('/:id/digio/restart', requireRole('ADMIN'), requirePermission('kyc.edit'), asyncHandler(restartAdvertiserDigioHandler));
 // Lot N: the desk asks for the KYC — by the row id, the profile id or the advertiser's user id.
 // N3-B: the one click is the catalogue's KYC edit tier — a role config granted `kyc.edit` may send it;
 // the super admin and an admin with no role config pass under the launch rule.
 advertiserKycRouter.post('/:id/request', requireRole('ADMIN'), requirePermission('kyc.edit'), asyncHandler(requestAdvertiserKycHandler));
-advertiserKycRouter.delete('/:id', requireRole('ADMIN'), asyncHandler(deleteAdvertiserKycHandler));
+advertiserKycRouter.delete('/:id', requireRole('ADMIN'), requirePermission('kyc.delete'), asyncHandler(deleteAdvertiserKycHandler));

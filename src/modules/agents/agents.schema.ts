@@ -1,11 +1,31 @@
 import { z } from 'zod';
 import { upperEnum } from '../../shared/validation';
 import { AGENT_TIERS } from './tier-ladder';
+import { kycQueueStateSchema } from '../../shared/kyc-state';
+import { agentRosterStatusSchema } from '../../shared/party-status';
+import { AGENT_SIDES, AGENT_SOURCE_KINDS } from './application/application.schema';
 
 export const listAgentsQuerySchema = z.object({
   city: z.string().optional(),
   tier: upperEnum(AGENT_TIERS).optional(),
-  search: z.string().optional(), // matches against user name or mobile
+  // The person's name or mobile; 29 Sep 2026: and the email, the AGT- id, the city, and the phone as the console prints it.
+  search: z.string().optional(),
+  /**
+   * 29 Sep 2026 (the party rosters, made uniform): the cuts every party desk
+   * takes. The agent's door is where the profile came from (`sourceKind` —
+   * the app, a fleet partner, a referral, a walk-in, a job portal, the desk,
+   * an import), sent under the one name every roster uses; the type is the
+   * side the agent works; the KYC state is the queue's.
+   */
+  onboardedVia: upperEnum(AGENT_SOURCE_KINDS).optional(),
+  type: upperEnum(AGENT_SIDES).optional(),
+  kycState: kycQueueStateSchema,
+  /**
+   * Account lifecycle (2 Oct 2026): ACTIVE (the default), SUSPENDED,
+   * DEACTIVATED, CLOSED, EXITED (the engagement ended) or ALL;
+   * `meta.statusCounts` counts each with this facet removed.
+   */
+  status: agentRosterStatusSchema,
   limit: z.coerce.number().min(1).max(200).default(50),
   offset: z.coerce.number().min(0).default(0),
 });
@@ -77,6 +97,13 @@ export const updateAgentSchema = z
     state: z.string().trim().min(1).max(80).nullable().optional(),
     businessName: z.string().trim().min(1).max(120).nullable().optional(),
     territory: z.string().trim().min(1).max(120).nullable().optional(),
+    /**
+     * Account lifecycle (2 Oct 2026): ACTIVE ↔ ON_LEAVE only. SUSPENDED — and
+     * any status on a suspended agent — is refused 400 with a sentence
+     * pointing to Suspend / Reinstate (`updateAgent`): a suspension is one act
+     * with a reason and scopes, never a field edit. Parsed here so the refusal
+     * can say that rather than a bare enum error.
+     */
     status: z.enum(AGENT_PROFILE_STATUSES).optional(),
   })
   .refine(hoursInOrder, { message: 'Hours must start before they end', path: ['hoursTo'] });

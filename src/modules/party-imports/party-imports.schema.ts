@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { dateOfBirthSchema, genderSchema, upperEnum } from '../../shared/validation';
+import { PIN_CODE_MESSAGE, PIN_CODE_PATTERN, dateOfBirthSchema, genderSchema, upperEnum } from '../../shared/validation';
 import type { ImportParty } from '../../shared/database';
 import { advertiserTypeSchema, ADVERTISER_INDUSTRIES } from '../advertisers';
 import { WORK_MODES, EMPLOYMENT_TYPES } from '../employees';
@@ -61,7 +61,7 @@ const requiredMobile = z.preprocess(blankToUndefined, z.string().trim().min(10, 
 /** QR-15: the four person columns at the end — given a first name, the row opens the sign-in account up front, as the desk does. */
 export const ADVERTISER_COLUMNS = ['name', 'mobile', 'email', 'type', 'companyName', 'industry', 'gstin', 'panNumber', 'address', 'city', 'state', 'contactName', 'firstName', 'lastName', 'dateOfBirth', 'gender'] as const;
 export const AGENT_COLUMNS = ['name', 'mobile', 'email', 'side', 'city', 'state'] as const;
-export const PRINT_PARTNER_COLUMNS = ['name', 'mobile', 'legalName', 'gstin', 'panNumber', 'contactName', 'email', 'address', 'city', 'capabilities', 'maxWidthFt', 'turnaroundDays'] as const;
+export const PRINT_PARTNER_COLUMNS = ['name', 'mobile', 'legalName', 'gstin', 'panNumber', 'contactName', 'email', 'address', 'city', 'state', 'postalCode', 'capabilities', 'maxWidthFt', 'turnaroundDays'] as const;
 export const EMPLOYEE_COLUMNS = ['name', 'mobile', 'email', 'department', 'designation', 'region', 'workMode', 'employmentType'] as const;
 /** LH3: the lead sheet — `side` and `businessName` beside the mobile; the rest the format guide's lead row lists. */
 export const LEAD_COLUMNS = ['businessName', 'mobile', 'side', 'category', 'contactName', 'email', 'address', 'locality', 'city', 'latitude', 'longitude', 'interest', 'source', 'bestTimeFrom', 'bestTimeTo', 'estimatedCommission', 'importance'] as const;
@@ -135,6 +135,9 @@ export const printPartnerRowSchema = z.object({
   email: optionalEmail,
   address: optionalText(500),
   city: optionalText(80),
+  /** Onboarding addresses (1 Oct 2026): the shop address's state and PIN code. */
+  state: optionalText(80),
+  postalCode: z.preprocess(blankToUndefined, z.string().trim().regex(PIN_CODE_PATTERN, PIN_CODE_MESSAGE).optional()),
   /** Pipe-separated in the file (`flex|vinyl|backlit`); kept as typed in the row, split at create. */
   capabilities: z.preprocess(
     blankToUndefined,

@@ -8,6 +8,7 @@ export interface PasswordRepository {
     tokenHash: string;
     expiresAt: Date;
   }): Promise<unknown>;
-  findUsableResetToken(tokenHash: string): Promise<PasswordResetToken | null>;
+  /** Matches on the hash; the row comes back without it (the global omit). */
+  findUsableResetToken(tokenHash: string): Promise<Omit<PasswordResetToken, 'tokenHash'> | null>;
   markResetTokenUsed(id: string): Promise<unknown>;
 }

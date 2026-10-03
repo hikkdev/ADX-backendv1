@@ -88,7 +88,8 @@ describe('GET /agent-kyc — every agent', () => {
 describe('POST /agent-kyc/:agentId/request — the one click', () => {
   it('DIGIO (the default): opens the session with the agent’s own contact and the adx-agt- reference, stamps the request, tells the agent, audits', async () => {
     const result = await requestAgentKyc('agt_1', { channel: 'DIGIO', note: 'Before payday' }, 'usr_admin', undefined, NOW);
-    expect(digio.requestDigioKyc).toHaveBeenCalledWith({ referenceId: `adx-agt-agt_1-${NOW.getTime()}`, customerName: 'Rahul', customerEmail: 'rahul@example.in', customerMobile: '+919812340001' });
+    // Phase D (the owner, 1 Oct 2026): field and sales agents alike run the one AGENT workflow; no entity type is asked.
+    expect(digio.requestDigioKyc).toHaveBeenCalledWith({ party: 'AGENT', workflowKey: 'AGENT', referenceId: `adx-agt-agt_1-${NOW.getTime()}`, customerName: 'Rahul', customerEmail: 'rahul@example.in', customerMobile: '+919812340001' });
     // The session on the agent's row; submittedAt waits for the webhook, so the queue reads REQUESTED.
     expect(repository.upsertDigio).toHaveBeenCalledWith('agt_1', { method: 'DIGIO', digioRequestId: 'dg_agt_1', digioReferenceId: `adx-agt-agt_1-${NOW.getTime()}`, digioStatus: 'pending' });
     expect(repository.requestKyc).toHaveBeenCalledWith('agt_1', { requestedById: 'usr_admin', requestedChannel: 'DIGIO', at: NOW });
@@ -131,6 +132,8 @@ describe('Digio’s answer on the agent’s record', () => {
     repository.applyDigioWebhook.mockResolvedValue({ id: 'akyc_1' });
     expect(await handleAgentDigioWebhook({ id: 'dg_agt_1', customer_identifier: 'rahul@example.in', status: 'approved', completed_at: '2026-09-15T08:00:00.000Z' }, NOW)).toBe(true);
     expect(repository.applyDigioWebhook).toHaveBeenCalledWith('akyc_1', {
+      // Cashfree Phase 1: who answered — Digio, by the request id it minted.
+      via: 'DIGIO',
       digioStatus: 'approved',
       digioPayload: expect.objectContaining({ id: 'dg_agt_1' }),
       digioVerifiedAt: new Date('2026-09-15T08:00:00.000Z'),
@@ -150,5 +153,18 @@ describe('Digio’s answer on the agent’s record', () => {
 
     repository.findByDigioRequestId.mockResolvedValue(null);
     expect(await handleAgentDigioWebhook({ id: 'dg_pub', customer_identifier: 'x', status: 'approved' })).toBe(false);
+  });
+
+  it('Phase D: a pending or unknown status never moves a decided record back; on an open one it is kept raw', async () => {
+    for (const status of ['VERIFIED', 'REJECTED']) {
+      repository.findByDigioRequestId.mockResolvedValue({ id: 'akyc_1', agentId: 'agt_1', status, submittedAt: NOW, agent: slice });
+      for (const sent of ['pending', 'approval_pending']) expect(await handleAgentDigioWebhook({ id: 'dg_agt_1', status: sent }, NOW)).toBe(true);
+    }
+    expect(repository.applyDigioWebhook).not.toHaveBeenCalled();
+    expect(notifications.notify).not.toHaveBeenCalled();
+
+    repository.findByDigioRequestId.mockResolvedValue({ id: 'akyc_1', agentId: 'agt_1', status: 'PENDING', submittedAt: null, agent: slice });
+    await handleAgentDigioWebhook({ id: 'dg_agt_1', status: 'approval_pending' }, NOW);
+    expect(repository.applyDigioWebhook).toHaveBeenCalledWith('akyc_1', expect.objectContaining({ digioStatus: 'approval_pending', status: 'PENDING' }));
   });
 });

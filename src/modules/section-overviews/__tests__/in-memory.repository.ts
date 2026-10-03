@@ -51,7 +51,20 @@ export type Kind =
   | 'leadLoss'
   | 'leadIncentive'
   | 'leadTopUp'
-  | 'leadRecycle';
+  | 'leadRecycle'
+  // The Listings overview: a listing created, published, a spot booked on one, a day's accrual gross on one (`key` the publisher).
+  | 'listing'
+  | 'listingPublished'
+  | 'listingBooking'
+  | 'listingEarning'
+  // The Campaigns overview: a campaign paid (`key` the advertiser, `amount` its total), completed, cancelled; the engagement events.
+  | 'campaignPaid'
+  | 'campaignCompleted'
+  | 'campaignCancelled'
+  | 'campaignScan'
+  | 'campaignView'
+  | 'campaignCta'
+  | 'campaignEnquiry';
 
 export type Seed = Partial<Record<Kind, Fact[]>> & {
   kyc?: Partial<KycStateCountMap>;
@@ -64,9 +77,19 @@ export type Seed = Partial<Record<Kind, Fact[]>> & {
     printPartnersAccepting: number;
     erasureRequestsOpen: number;
     usersWithoutRole: number;
+    /** CP-2: accounts that onboarded themselves in the window — no agent, no agent money. */
+    onboardingsSelfServe: number;
     turnaroundDays: Record<string, number | null>;
     /** LH9 */
     leadsOpen: number;
+    /** The Listings overview's states. */
+    listingsSuspended: number;
+    listingClaimsOpen: number;
+    listingRenewals: { due: number; lapsed: number };
+    listingVerifications: { due: number; lapsed: number };
+    /** The Campaigns overview's work lists. */
+    campaignsLaunching: number;
+    campaignsEnding: number;
   }>;
   groups?: Partial<Record<string, GroupCount[]>>;
   /**
@@ -135,6 +158,7 @@ export function inMemoryRepository(seed: Seed): SectionOverviewsRepository & { c
     const typedInScope = typed && (!wanted || (!scope.cityId && typed.strings.some((s) => s.toLowerCase() === wanted)));
     return [...keyed, ...(typedInScope ? [{ cityId: null, slug: null, name: null, typed: [...typed.strings].sort(), count: typed.count }] : [])].sort((a, b) => b.count - a.count);
   };
+  const dueOf = (name: 'listingRenewals' | 'listingVerifications') => seed.states?.[name] ?? { due: 0, lapsed: 0 };
   const state = (name: keyof NonNullable<Seed['states']>): number => {
     const value = seed.states?.[name];
     return typeof value === 'number' ? value : 0;
@@ -156,6 +180,22 @@ export function inMemoryRepository(seed: Seed): SectionOverviewsRepository & { c
 
   return track({
     calls,
+
+    /* CP-2: the `onboarding` facts are the agent-led ones (the same facts the
+       agents overview's series counts); the self-serve half is a seeded state,
+       because nothing about it is per-day. */
+    onboardingsByProvenance: async (window, scope) => {
+      const rows = pick('onboarding', window, scope);
+      const perCity = new Map<string, number>();
+      for (const fact of rows) if (fact.city) perCity.set(fact.city, (perCity.get(fact.city) ?? 0) + 1);
+      return {
+        byAgent: rows.length,
+        selfServe: state('onboardingsSelfServe'),
+        byCity: [...perCity.entries()]
+          .map(([name, n]) => ({ cityId: `city_${slugOf(name)}`, slug: slugOf(name), name, typed: [], count: n }))
+          .sort((a, b) => b.count - a.count),
+      };
+    },
 
     publishersAsAt: async (at, scope) => asAt('publisher', at, scope),
     publishersCreated: async (window, scope) => count('publisher', window, scope),
@@ -246,6 +286,48 @@ export function inMemoryRepository(seed: Seed): SectionOverviewsRepository & { c
     contactsVerified: async () => ({ verified: 30, total: 40 }),
     usersByLanguage: async () => [{ key: 'en', count: 9 }, { key: 'kn', count: 3 }],
     usersByPartyCity: async (scope) => cityGroups(scope),
+
+    /* ── listings (2 Oct 2026) ───────────────────────────────────────── */
+    listingsAsAt: async (at, scope) => asAt('listing', at, scope),
+    listingsCreated: async (window, scope) => count('listing', window, scope),
+    listingsCreatedByDay: async (window, scope) => byDay('listing', window, scope),
+    listingsPublishedByDay: async (window, scope) => byDay('listingPublished', window, scope),
+    listingsByStatus: async () => seed.groups?.['listingStatus'] ?? [],
+    listingsSuspended: async () => state('listingsSuspended'),
+    listingBookings: async (window, scope) => count('listingBooking', window, scope),
+    listingGmv: async (window, scope) => total('listingEarning', window, scope),
+    listingsByCity: async (window, scope) =>
+      cityGroups(scope).map((row) => ({ ...row, live: Math.floor(row.count / 2), gmv: row.name ? total('listingEarning', window, { city: row.name }) : money(0) })),
+    listingsByCategory: async () => [
+      { key: 'OUTDOOR', count: 6, live: 4, gmv: '2500.00' },
+      { key: 'INDOOR', count: 3, live: 1, gmv: '0.00' },
+    ],
+    topPublishersByListings: async (scope, limit) => group('publisher', scope).slice(0, limit).map((row) => ({ ...row, live: Math.min(row.count, 1) })),
+    listingRenewalsDue: async () => dueOf('listingRenewals'),
+    listingClaimsOpen: async () => state('listingClaimsOpen'),
+    listingVerificationsDue: async () => dueOf('listingVerifications'),
+
+    /* ── campaigns (2 Oct 2026) ─────────────────────────────────────── */
+    campaignsByStatus: async () => seed.groups?.['campaignStatus'] ?? [],
+    campaignsCompleted: async (window, scope) => count('campaignCompleted', window, scope),
+    campaignsCancelled: async (window, scope) => count('campaignCancelled', window, scope),
+    campaignsPaid: async (window, scope) => count('campaignPaid', window, scope),
+    campaignBookedValue: async (window, scope) => total('campaignPaid', window, scope),
+    campaignBookedValueByDay: async (window, scope) => sumByDay('campaignPaid', window, scope),
+    campaignEngagement: async (window, scope) => ({
+      scans: count('campaignScan', window, scope),
+      views: count('campaignView', window, scope),
+      ctaClicks: count('campaignCta', window, scope),
+      enquiries: count('campaignEnquiry', window, scope),
+    }),
+    campaignScansByDay: async (window, scope) => byDay('campaignScan', window, scope),
+    campaignsByCity: async (window, scope) =>
+      cityGroups(scope).map((row) => ({ ...row, live: Math.floor(row.count / 2), bookedValue: row.name ? total('campaignPaid', window, { city: row.name }) : money(0) })),
+    campaignsByGoal: async () => (seed.groups?.['campaignGoal'] ?? []).map((row) => ({ ...row, live: Math.floor(row.count / 2) })),
+    topAdvertisersByBookedValue: async (window, scope, limit) =>
+      top('campaignPaid', window, scope, limit).map((row) => ({ ...row, count: pick('campaignPaid', window, scope).filter((fact) => fact.key === row.key).length })),
+    campaignsLaunchingIn: async () => state('campaignsLaunching'),
+    campaignsEndingIn: async () => state('campaignsEnding'),
 
     /* ── leads (LH9) ─────────────────────────────────────────────────── */
     leadsOpen: async () => state('leadsOpen'),

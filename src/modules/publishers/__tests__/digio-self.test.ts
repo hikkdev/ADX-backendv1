@@ -14,7 +14,7 @@ const { repository, digio, grants } = vi.hoisted(() => ({
     findByUserId: vi.fn(),
     findByUserIdWithKyc: vi.fn(),
   },
-  digio: { initiateDigioKyc: vi.fn(), getDigioKycStatus: vi.fn() },
+  digio: { startPublisherKyc: vi.fn(), getDigioKycStatus: vi.fn() },
   grants: {
     accessLogFor: vi.fn(),
     openOnboardingGrant: vi.fn(),
@@ -50,7 +50,7 @@ const publisher = { id: 'pub_1', userId: 'usr_1', name: 'Asha Rao', email: null,
 beforeEach(() => {
   vi.clearAllMocks();
   repository.findByUserId.mockResolvedValue(publisher);
-  digio.initiateDigioKyc.mockResolvedValue({ kycId: 'kyc_1', accessToken: 'tok', validTill: '2026-09-11T00:00:00.000Z', sdkUrl: 'https://digio/#kyc_1?token=tok' });
+  digio.startPublisherKyc.mockResolvedValue({ kycId: 'kyc_1', accessToken: 'tok', validTill: '2026-09-11T00:00:00.000Z', sdkUrl: 'https://digio/#kyc_1?token=tok' });
   digio.getDigioKycStatus.mockResolvedValue({ method: 'DIGIO', digioStatus: 'pending', kycStatus: 'PENDING', digioVerifiedAt: null });
   grants.accessLogFor.mockResolvedValue({ scans: [], grants: [], changes: [] });
 });
@@ -58,8 +58,12 @@ beforeEach(() => {
 describe('Digio, chosen by the publisher', () => {
   it('asks Digio with the caller\\u2019s own identity', async () => {
     const started = await initiateMyDigioKyc('usr_1');
-    expect(digio.initiateDigioKyc).toHaveBeenCalledWith('pub_1', 'Asha Rao', '', '+919876543210');
-    expect(started.sdkUrl).toBe('https://digio/#kyc_1?token=tok');
+    // Phase D: the caller's own row goes in, the caller as the one who chose any entity type.
+    // Cashfree Phase 1: it is the publisher's OWN start (`self`), with whatever the client says it can draw.
+    expect(digio.startPublisherKyc).toHaveBeenCalledWith(publisher, { byUserId: 'usr_1', entityType: undefined, req: undefined, self: true, supports: undefined });
+    await initiateMyDigioKyc('usr_1', { entityType: 'SOLE_PROPRIETOR', supports: ['CASHFREE'] });
+    expect(digio.startPublisherKyc).toHaveBeenLastCalledWith(publisher, { byUserId: 'usr_1', entityType: 'SOLE_PROPRIETOR', req: undefined, self: true, supports: ['CASHFREE'] });
+    expect(started).toMatchObject({ sdkUrl: 'https://digio/#kyc_1?token=tok' });
   });
 
   it('reads the caller\\u2019s own status', async () => {
@@ -71,7 +75,7 @@ describe('Digio, chosen by the publisher', () => {
   it('refuses a user with no publisher profile', async () => {
     repository.findByUserId.mockResolvedValue(null);
     await expect(initiateMyDigioKyc('usr_x')).rejects.toMatchObject({ statusCode: 404 });
-    expect(digio.initiateDigioKyc).not.toHaveBeenCalled();
+    expect(digio.startPublisherKyc).not.toHaveBeenCalled();
   });
 });
 

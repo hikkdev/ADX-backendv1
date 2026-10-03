@@ -18,8 +18,11 @@ const { prisma } = vi.hoisted(() => {
     advertiser: { update: vi.fn().mockResolvedValue({}) },
     agentProfile: { update: vi.fn().mockResolvedValue({}) },
     publisherKyc: { findUnique: vi.fn().mockResolvedValue(null), update: vi.fn() },
-    advertiserKyc: { findUnique: vi.fn().mockResolvedValue(null), update: vi.fn() },
+    advertiserKyc: { findUnique: vi.fn().mockResolvedValue(null), findFirst: vi.fn().mockResolvedValue(null), update: vi.fn() },
     agentKyc: { findUnique: vi.fn().mockResolvedValue(null), update: vi.fn() },
+    // Account lifecycle (2 Oct 2026): the contacts and the application's papers go too.
+    userContact: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    agentDocument: { findMany: vi.fn().mockResolvedValue([]), deleteMany: vi.fn() },
     userKyc: { findUnique: vi.fn().mockResolvedValue(null), update: vi.fn() },
     uploadedFile: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
     mobileTombstone: { upsert: vi.fn().mockResolvedValue({}) },

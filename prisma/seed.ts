@@ -3,6 +3,7 @@ import { Pool } from 'pg';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '../src/generated/prisma';
 import crypto from 'crypto';
+import { DEFAULT_AD_SLOTS, DEFAULT_BOOST_PLACEMENTS } from '../src/modules/promotions/defaults';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
@@ -678,6 +679,18 @@ async function main() {
   });
 
   console.log('✅ Payout method created');
+
+  // ─── LM-1: the paid placements ADX sells ──────────────────────────────────
+  // Defaults only — ADX edits every figure in the console (Growth ›
+  // Promotions), so an existing row is never overwritten.
+  for (const slot of DEFAULT_AD_SLOTS) {
+    await prisma.adSlot.upsert({ where: { key: slot.key }, update: {}, create: { ...slot, surfaces: [...slot.surfaces] } });
+  }
+  for (const placement of DEFAULT_BOOST_PLACEMENTS) {
+    await prisma.boostPlacementConfig.upsert({ where: { placement: placement.placement }, update: {}, create: placement });
+  }
+
+  console.log('✅ Ad slots and sponsored-listing placements seeded');
 
   console.log('\n✅ Seed complete!');
   console.log(`   Agent mobile: +919876543210`);

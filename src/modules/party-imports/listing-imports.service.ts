@@ -410,10 +410,12 @@ export async function commitListingImport(id: string, actor: ListingActor, byUse
   const found = await getImport('listings', id);
   const publisherId = found.publisherId;
   if (!publisherId) throw new ApiError(409, 'CONFLICT', 'This import names no publisher');
-  await requirePublisher(publisherId, actor);
+  const publisher = await requirePublisher(publisherId, actor);
   if (found.status !== 'VALIDATED') {
     throw new ApiError(409, 'CONFLICT', found.status === 'COMMITTED' ? 'This import has already been committed' : 'This import was revoked');
   }
+  // 26 Sep 2026: who opened the attempt — ADX, the publisher themselves, or their agent.
+  const origin = actor.isAdmin ? 'ADMIN_BULK' : publisher.userId !== null && publisher.userId === byUserId ? 'PUBLISHER_BULK' : 'AGENT';
 
   const actionable = found.rows.filter((row) => {
     const data = row.data as RowData;
@@ -425,7 +427,7 @@ export async function commitListingImport(id: string, actor: ListingActor, byUse
   if (!attemptId && actionable.some((row) => (row.data as RowData).plan?.action === 'CREATE')) {
     const attempt = await createAttempt({
       publisherId,
-      origin: actor.isAdmin ? 'ADMIN_BULK' : 'AGENT',
+      origin,
       createdByUserId: byUserId,
       sourceFilename: found.fileName,
       note: `Listing import ${id}`,

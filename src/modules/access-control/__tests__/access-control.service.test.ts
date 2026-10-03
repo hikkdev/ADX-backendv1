@@ -6,8 +6,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  * What is pinned: a role may only name ids the catalogue has; the system role
  * cannot be deleted, renamed or emptied; a role with members cannot be
  * deleted; membership is admin-only, moves rather than accumulates, keeps at
- * least one super admin, and ends the person's sessions; and the launch rule —
- * an ADMIN with no role config holds everything.
+ * least one super admin, and ends the person's sessions; and RP-1 — only
+ * Super admin holds every permission, an ADMIN with no role holds none, and
+ * the chair is seated deterministically when nobody holds it.
  */
 const { repository, auth, audit } = vi.hoisted(() => ({
   repository: {
@@ -25,6 +26,7 @@ const { repository, auth, audit } = vi.hoisted(() => ({
     clearMembership: vi.fn(),
     isAdmin: vi.fn(),
     userExists: vi.fn(),
+    findBootstrapAdmin: vi.fn(),
   },
   auth: { revokeSessions: vi.fn() },
   audit: { logActivity: vi.fn(), auditDiff: vi.fn(() => ({})) },
@@ -41,6 +43,7 @@ import {
   consoleStandingFor,
   createRoleConfig,
   deleteRoleConfig,
+  ensureSuperAdminHolder,
   ensureSystemRoles,
   findRoleMemberUserIds,
   getRoleConfig,
@@ -278,7 +281,7 @@ describe('membership', () => {
     expect(repository.setMembership).not.toHaveBeenCalled();
   });
 
-  it('grants the system role only when the actor is a super admin — a member of it, or an admin under the launch rule', async () => {
+  it('grants the system role only when the actor is a member of it — an admin with no role config no longer counts (RP-1)', async () => {
     const system = role({ id: 'rc_sys', name: SUPER_ADMIN_ROLE, isSystem: true });
     repository.findById.mockResolvedValue(system);
     const membership = (userId: string, roleConfig: ReturnType<typeof role>) => ({
@@ -299,9 +302,9 @@ describe('membership', () => {
     repository.findMembership.mockImplementation(async (userId: string) => (userId === 'adm_super' ? membership('adm_super', system) : null));
     await expect(assignRoleConfig('usr_1', 'adm_super', { roleConfigId: 'rc_sys' })).resolves.toMatchObject({ roleConfig: { id: 'rc_sys' } });
 
-    // An admin with no role config at all (the launch rule) — how the first super admin is made.
+    // An admin with no role config at all: refused too (RP-1) — the chair is seated at boot, not by a grant.
     repository.findMembership.mockResolvedValue(null);
-    await expect(assignRoleConfig('usr_1', 'adm_first', { roleConfigId: 'rc_sys' })).resolves.toMatchObject({ roleConfig: { id: 'rc_sys' } });
+    await expect(assignRoleConfig('usr_1', 'adm_first', { roleConfigId: 'rc_sys' })).rejects.toMatchObject({ statusCode: 403, code: 'SUPER_ADMIN_ONLY' });
 
     // An ordinary role is granted by any admin.
     repository.findById.mockResolvedValue(role({ id: 'rc_fin', name: 'Finance' }));
@@ -345,9 +348,27 @@ describe('assertNotLastSuperAdmin', () => {
   });
 });
 
-describe('the launch rule', () => {
-  it('gives an ADMIN with no role config every permission', async () => {
+describe('the role rule (RP-1)', () => {
+  const system = () => role({ id: 'rc_sys', name: SUPER_ADMIN_ROLE, isSystem: true, permissions: [...PERMISSIONS] });
+
+  it('gives an ADMIN with no role config nothing while anyone holds the super admin chair', async () => {
+    repository.findByName.mockResolvedValue(system());
+    repository.countMembers.mockResolvedValue(1);
+    await expect(permissionsFor('adm_1', ['ADMIN'])).resolves.toEqual([]);
+    expect(repository.setMembership).not.toHaveBeenCalled();
+  });
+
+  it('seats the first ADMIN to sign in when the system role has no member at all, and answers every permission', async () => {
+    repository.findByName.mockResolvedValue(system());
+    repository.countMembers.mockResolvedValue(0);
     await expect(permissionsFor('adm_1', ['ADMIN'])).resolves.toEqual([...PERMISSIONS]);
+    expect(repository.setMembership).toHaveBeenCalledWith('adm_1', 'rc_sys', 'adm_1');
+    expect(audit.logActivity).toHaveBeenCalledWith('adm_1', 'SUPER_ADMIN_SEATED', expect.objectContaining({ targetId: 'rc_sys' }));
+  });
+
+  it('gives nothing, and seats nobody, while the system role is not there yet', async () => {
+    await expect(permissionsFor('adm_1', ['ADMIN'])).resolves.toEqual([]);
+    expect(repository.setMembership).not.toHaveBeenCalled();
   });
 
   it('gives an ADMIN with a role exactly that role’s list', async () => {
@@ -365,6 +386,48 @@ describe('the launch rule', () => {
   it('gives everyone else nothing, without a lookup', async () => {
     await expect(permissionsFor('pub_1', ['PUBLISHER'])).resolves.toEqual([]);
     expect(repository.findMembership).not.toHaveBeenCalled();
+  });
+});
+
+describe('the super admin chair at boot (RP-1)', () => {
+  const system = () => role({ id: 'rc_sys', name: SUPER_ADMIN_ROLE, isSystem: true });
+
+  it('does nothing while an open account holds the chair', async () => {
+    repository.findByName.mockResolvedValue(system());
+    repository.listMemberUserIds.mockResolvedValue(['adm_super']);
+    await ensureSuperAdminHolder(null);
+    expect(repository.listMemberUserIds).toHaveBeenCalledWith('rc_sys', { activeOnly: true });
+    expect(repository.findBootstrapAdmin).not.toHaveBeenCalled();
+    expect(repository.setMembership).not.toHaveBeenCalled();
+  });
+
+  it('seats the oldest open ADMIN when nobody holds it and no account is named', async () => {
+    repository.findByName.mockResolvedValue(system());
+    repository.findBootstrapAdmin.mockResolvedValue({ id: 'adm_oldest', mobile: '+919000000001', email: null });
+    await ensureSuperAdminHolder(null);
+    expect(repository.findBootstrapAdmin).toHaveBeenCalledWith(null);
+    expect(repository.setMembership).toHaveBeenCalledWith('adm_oldest', 'rc_sys', 'adm_oldest');
+    expect(audit.logActivity).toHaveBeenCalledWith('adm_oldest', 'SUPER_ADMIN_SEATED', expect.objectContaining({ metadata: { how: 'oldest open ADMIN at boot' } }));
+  });
+
+  it('seats the account BOOTSTRAP_SUPER_ADMIN names, and nobody when it names no open ADMIN', async () => {
+    repository.findByName.mockResolvedValue(system());
+    repository.findBootstrapAdmin.mockResolvedValue({ id: 'adm_named', mobile: '+919111111111', email: 'kk@adx.in' });
+    await ensureSuperAdminHolder('kk@adx.in');
+    expect(repository.findBootstrapAdmin).toHaveBeenCalledWith('kk@adx.in');
+    expect(repository.setMembership).toHaveBeenCalledWith('adm_named', 'rc_sys', 'adm_named');
+
+    vi.clearAllMocks();
+    repository.findByName.mockResolvedValue(system());
+    repository.listMemberUserIds.mockResolvedValue([]);
+    repository.findBootstrapAdmin.mockResolvedValue(null);
+    await ensureSuperAdminHolder('nobody@adx.in');
+    expect(repository.setMembership).not.toHaveBeenCalled();
+  });
+
+  it('does nothing before the system role exists', async () => {
+    await ensureSuperAdminHolder(null);
+    expect(repository.findBootstrapAdmin).not.toHaveBeenCalled();
   });
 });
 
@@ -418,8 +481,8 @@ describe('consoleStandingFor', () => {
     expect(repository.findMembership).not.toHaveBeenCalled();
   });
 
-  it('an ADMIN with no role config is a super admin under the launch rule', async () => {
-    await expect(consoleStandingFor('adm_1', ['ADMIN'])).resolves.toEqual({ roleConfig: null, isSuperAdmin: true });
+  it('an ADMIN with no role config is not a super admin (RP-1)', async () => {
+    await expect(consoleStandingFor('adm_1', ['ADMIN'])).resolves.toEqual({ roleConfig: null, isSuperAdmin: false });
   });
 
   it('a member reads the role with isSystem, and is a super admin only when the role is the system one', async () => {

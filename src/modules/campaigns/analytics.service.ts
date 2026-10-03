@@ -744,6 +744,69 @@ export async function campaignAnalytics(
 }
 
 /* ------------------------------------------------------------------ */
+/* The campaign page's Performance card (the Campaigns lot, 2 Oct 2026) */
+/* ------------------------------------------------------------------ */
+
+export type CampaignPerformanceDay = { day: string; scans: number; views: number; ctaClicks: number; enquiries: number };
+
+/**
+ * `GET /campaigns/:id/performance` — the four numbers the console's
+ * Performance and Landing page cards draw: QR scans, landing-page views,
+ * CTA presses and enquiries (form submissions). Every one MEASURED — a
+ * TrackingEvent or a code's counter ADX wrote itself.
+ *
+ * `lifetime` is the campaign's whole life (the scans from the codes'
+ * counters, the figure the analytics page's `scans` tile prints; the rest
+ * from the landing page's events). `series` is one point per day of the
+ * flight that has run — the same days, the same event read (`eventTotalsByDay`)
+ * and the same zero-filling the analytics chart uses, so a quiet day is a
+ * zero, not a gap; empty before the flight starts or with no dates. Days are
+ * UTC, the way the flight is stored.
+ */
+export type CampaignPerformance = {
+  campaignId: string;
+  reference: string;
+  status: CampaignAggregate['status'];
+  startDate: string | null;
+  endDate: string | null;
+  lifetime: { scans: number; views: number; ctaClicks: number; enquiries: number };
+  series: CampaignPerformanceDay[];
+};
+
+export async function campaignPerformance(campaign: CampaignAggregate, now = new Date()): Promise<CampaignPerformance> {
+  const start = campaign.startDate;
+  const end = campaign.endDate;
+  const elapsedEnd = end && end < now ? end : now;
+  const [totals, events] = await Promise.all([
+    repository.performanceTotals([campaign.id]),
+    start && end && start <= now ? repository.eventTotalsByDay(campaign.id, start, addDays(elapsedEnd, 1)) : Promise.resolve([]),
+  ]);
+  const byDay = new Map<string, CampaignPerformanceDay>();
+  for (const row of events) {
+    const point = byDay.get(row.day) ?? { day: row.day, scans: 0, views: 0, ctaClicks: 0, enquiries: 0 };
+    if (row.type === 'SCAN') point.scans += row.count;
+    else if (row.type === 'VIEW') point.views += row.count;
+    else if (row.type === 'CTA_CLICK') point.ctaClicks += row.count;
+    else if (row.type === 'FORM_SUBMIT') point.enquiries += row.count;
+    byDay.set(row.day, point);
+  }
+  const series =
+    start && end && start <= now
+      ? daysBetween(start, elapsedEnd).map((day) => byDay.get(dayKey(day)) ?? { day: dayKey(day), scans: 0, views: 0, ctaClicks: 0, enquiries: 0 })
+      : [];
+  const lifetime = totals[campaign.id] ?? { scans: 0, views: 0, ctaClicks: 0, enquiries: 0 };
+  return {
+    campaignId: campaign.id,
+    reference: campaign.reference,
+    status: campaign.status,
+    startDate: start ? dayKey(start) : null,
+    endDate: end ? dayKey(end) : null,
+    lifetime: { scans: lifetime.scans, views: lifetime.views, ctaClicks: lifetime.ctaClicks, enquiries: lifetime.enquiries },
+    series,
+  };
+}
+
+/* ------------------------------------------------------------------ */
 /* Across campaigns                                                    */
 /* ------------------------------------------------------------------ */
 

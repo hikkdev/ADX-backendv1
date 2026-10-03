@@ -1,15 +1,18 @@
 import { prisma } from '../../../shared/database';
-import type { AdminInvite, AdminInviteMethod, Role, User } from '../../../shared/database';
+import type { AdminInvite, AdminInviteMethod, Role, UserRead } from '../../../shared/database';
+
+/** An invite as every read returns it: the token hash stays behind the global omit — lookups match on it in `where`, nothing reads it back. */
+export type InviteRecord = Omit<AdminInvite, 'tokenHash'>;
 
 /** An invite with the person who sent it, for the console list. */
-export type InviteRow = AdminInvite & {
+export type InviteRow = InviteRecord & {
   invitedBy: { id: string; name: string | null; email: string | null };
 };
 
 export interface InvitesRepository {
-  findOpenByEmail(email: string, now: Date): Promise<AdminInvite | null>;
-  findById(id: string): Promise<AdminInvite | null>;
-  findByTokenHash(tokenHash: string): Promise<AdminInvite | null>;
+  findOpenByEmail(email: string, now: Date): Promise<InviteRecord | null>;
+  findById(id: string): Promise<InviteRecord | null>;
+  findByTokenHash(tokenHash: string): Promise<InviteRecord | null>;
   list(): Promise<InviteRow[]>;
   create(data: {
     email: string;
@@ -18,13 +21,13 @@ export interface InvitesRepository {
     tokenHash: string;
     invitedByUserId: string;
     expiresAt: Date;
-  }): Promise<AdminInvite>;
+  }): Promise<InviteRecord>;
   /** A resend re-rolls the token and pushes the expiry out; the row stays the same. */
-  refresh(id: string, tokenHash: string, expiresAt: Date): Promise<AdminInvite>;
-  revoke(id: string): Promise<AdminInvite>;
+  refresh(id: string, tokenHash: string, expiresAt: Date): Promise<InviteRecord>;
+  revoke(id: string): Promise<InviteRecord>;
   roleConfigExists(roleConfigId: string): Promise<boolean>;
-  findUserByEmail(email: string): Promise<User | null>;
-  findUserById(userId: string): Promise<User | null>;
+  findUserByEmail(email: string): Promise<UserRead | null>;
+  findUserById(userId: string): Promise<UserRead | null>;
   /**
    * Turns the placeholder row the OTP send created into the admin account,
    * and closes the invite — in one transaction, because an account promoted
@@ -37,7 +40,7 @@ export interface InvitesRepository {
     name: string;
     passwordHash: string | null;
     roleConfigId: string | null;
-  }): Promise<User & { roles: { role: Role }[] }>;
+  }): Promise<UserRead & { roles: { role: Role }[] }>;
 }
 
 export const prismaInvitesRepository: InvitesRepository = {

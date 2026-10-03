@@ -1,5 +1,6 @@
 import { randomBytes, randomInt } from 'crypto';
 import { env } from '../../config/env';
+import { assertPartyAdultForOrders } from '../../shared/age-gate';
 import { ApiError } from '../../shared/errors';
 import { toListPage } from '../../shared/pagination';
 import { EXPIRING_WITHIN_DAYS, type ListSalesQuery } from './packages.schema';
@@ -1072,6 +1073,8 @@ export async function setActivePackageAutoRenew(advertiserId: string, autoRenew:
   // Lot K (B2): a trial is not a term that renews — the plan is bought, not extended.
   if (autoRenew && running.paidMethod === 'TRIAL') throw new ApiError(409, 'AUTO_RENEW_NOT_OFFERED', 'A trial does not renew - buy the plan');
   if (running.autoRenew === autoRenew) return running;
+  // AGE-1: switching auto-renew on buys the next term — an order. Switching it off asks nothing.
+  if (autoRenew) await assertPartyAdultForOrders({ kind: 'ADVERTISER', id: advertiserId });
   return repository.updateSale(running.id, { autoRenew });
 }
 

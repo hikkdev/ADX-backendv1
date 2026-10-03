@@ -78,12 +78,14 @@ beforeEach(() => {
 });
 
 describe('the schema', () => {
-  it('takes a date of birth as YYYY-MM-DD, eighteen or over, and a gender in any casing', () => {
+  it('takes a date of birth as YYYY-MM-DD — any real day (AGE-1: under 18 too), not the future — and a gender in any casing', () => {
     expect(updateMyProfileSchema.safeParse({ dateOfBirth: '1990-04-12', gender: 'female' }).data).toEqual({ dateOfBirth: '1990-04-12', gender: 'FEMALE' });
     expect(updateMyProfileSchema.safeParse({ dateOfBirth: '12/04/1990' }).success).toBe(false);
     expect(updateMyProfileSchema.safeParse({ dateOfBirth: '1990-13-40' }).success).toBe(false);
     const lastYear = new Date(Date.now() - 365 * 24 * 3600 * 1000).toISOString().slice(0, 10);
-    expect(updateMyProfileSchema.safeParse({ dateOfBirth: lastYear }).success).toBe(false);
+    expect(updateMyProfileSchema.safeParse({ dateOfBirth: lastYear }).success).toBe(true);
+    const nextYear = new Date(Date.now() + 365 * 24 * 3600 * 1000).toISOString().slice(0, 10);
+    expect(updateMyProfileSchema.safeParse({ dateOfBirth: nextYear }).success).toBe(false);
     expect(updateMyProfileSchema.safeParse({ dateOfBirth: '1850-01-01' }).success).toBe(false);
     expect(updateMyProfileSchema.safeParse({ gender: 'UNSAID' }).success).toBe(false);
     expect(updateMyProfileSchema.safeParse({ gender: 'prefer_not_to_say' }).data).toEqual({ gender: 'PREFER_NOT_TO_SAY' });
@@ -123,10 +125,10 @@ describe('PATCH /publishers/me', () => {
 });
 
 describe('GET /publishers/me', () => {
-  it('carries the date of birth as YYYY-MM-DD and the gender, and counts the date among the basics', async () => {
+  it('carries the date of birth as YYYY-MM-DD and the gender — and (AGE-1) no longer counts the date among the basics', async () => {
     const without = await getMyProfile('usr_1');
     expect(without).toMatchObject({ dateOfBirth: null, gender: null, verified: false });
-    expect(without.readiness).toMatchObject({ profile: { missing: ['dateOfBirth'], percent: 75 }, canList: false, canGoLive: false });
+    expect(without.readiness).toMatchObject({ profile: { missing: [], percent: 100 }, canList: true, canGoLive: true });
     expect(without).not.toHaveProperty('user');
 
     repository.findByUserIdWithKyc.mockResolvedValue(publisher({ user: { dateOfBirth: new Date('1990-04-12T00:00:00Z'), gender: 'FEMALE' } }));

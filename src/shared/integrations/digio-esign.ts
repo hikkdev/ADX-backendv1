@@ -16,12 +16,16 @@ import { getEffectiveEsignConfig, type EsignConfig } from './integration-config'
  * `file` (the PDF) and `request` (the JSON with the signer sequence) — and
  * the answer carries the document id, `agreement_status`, the
  * `signing_parties` with their `status` / `expire_on`, and an
- * `access_token` for the gateway; `GET /v2/client/document/{id}` reads it
+ * `access_token` for the gateway — and, asked with `include_authentication_url`,
+ * each signing party's own `authentication_url` (Digio's short signing link,
+ * `<host>/#/s/<code>`, the one its onboarding shows and emails out);
+ * `GET /v2/client/document/{id}` reads it
  * back; `POST /v2/client/document/{id}/cancel` voids it (the sandbox
  * reports it `expired`); the signed PDF comes from
  * `GET /v2/client/document/download?document_id=` once it is signed. Each
- * signer opens the gateway page built from the document id, their
- * identifier and the access token; Digio calls the account's webhook when
+ * signer opens Digio's own `authentication_url`; only when Digio hands none
+ * back is the gateway page built from the document id, their identifier and
+ * the access token (30 Sep 2026, Digio's onboarding recording). Digio calls the account's webhook when
  * the agreement is acted on. No reminder or audit-certificate route
  * answered on this account — ADX re-sends its own message, and the
  * certificate download is tolerant of a 404 until Digio names the path.
@@ -145,9 +149,11 @@ type DigioSigningParty = {
   signature_type?: string;
   updated_at?: string;
   signed_at?: string;
+  /** Asked for with `include_authentication_url`: this signer's own link. */
+  authentication_url?: string;
 };
 
-type DigioDocument = {
+export type DigioDocument = {
   id: string;
   agreement_status?: string;
   signing_parties?: DigioSigningParty[];
@@ -257,7 +263,18 @@ function mockDocument(input: EsignUploadInput, cfg: EffectiveEsignConfig): Esign
   return normaliseDigioDocument(doc, urls);
 }
 
-/** Upload the PDF with its signers; the answer carries each signer's gateway page. */
+/**
+ * Each signer's link: Digio's own `authentication_url` from the signing
+ * party with that identifier (matched without regard to case — Digio may
+ * lower-case an email), else the gateway page built from the access token.
+ */
+export function signingLinks(cfg: Pick<EffectiveEsignConfig, 'gatewayUrl'>, doc: DigioDocument, identifiers: readonly string[]): Record<string, string> {
+  const token = doc.access_token?.id ?? null;
+  const own = new Map((doc.signing_parties ?? []).filter((p) => p.identifier && p.authentication_url).map((p) => [p.identifier!.trim().toLowerCase(), p.authentication_url!]));
+  return Object.fromEntries(identifiers.map((identifier) => [identifier, own.get(identifier.trim().toLowerCase()) ?? esignGatewayUrl(cfg, doc.id, identifier, token)]));
+}
+
+/** Upload the PDF with its signers; the answer carries each signer's link. */
 export async function createEsignRequest(input: EsignUploadInput): Promise<EsignDocument> {
   const cfg = await getEffectiveEsignConfig();
   assertEsignUsable(cfg);
@@ -276,6 +293,8 @@ export async function createEsignRequest(input: EsignUploadInput): Promise<Esign
     send_sign_link: input.notifySigners,
     sequential: input.sequential,
     generate_access_token: true,
+    // Digio's own signing link per signer, on the answer (its onboarding's recommended door).
+    include_authentication_url: true,
     file_name: input.fileName,
     reference_id: input.referenceId,
     ...(input.stamp
@@ -295,9 +314,7 @@ export async function createEsignRequest(input: EsignUploadInput): Promise<Esign
   form.append('request', JSON.stringify(request));
   const response = await digioFetch(cfg, ENDPOINTS.upload, { method: 'POST', body: form });
   const doc = (await response.json()) as DigioDocument;
-  const token = doc.access_token?.id ?? null;
-  const urls = Object.fromEntries(input.signers.map((s) => [s.identifier, esignGatewayUrl(cfg, doc.id, s.identifier, token)]));
-  return normaliseDigioDocument(doc, urls);
+  return normaliseDigioDocument(doc, signingLinks(cfg, doc, input.signers.map((s) => s.identifier)));
 }
 
 /** What the provider says about a document now — the refresh behind the poll and the desk's sync. */

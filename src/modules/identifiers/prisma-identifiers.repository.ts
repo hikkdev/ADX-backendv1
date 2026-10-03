@@ -1,10 +1,28 @@
 import { prisma } from '../../shared/database';
 import type { PartyType } from '../../shared/database';
 import type {
+  IdentifiedParty,
   IdentifierFormatPatch,
   IdentifiersRepository,
+  MissingIdentifierSummary,
   NewIdentifierFormat,
 } from './identifiers.repository';
+
+/** One aggregate per table: how many rows lack an identifier, and when the oldest and newest of them were made. */
+const MISSING = {
+  where: { displayId: null },
+  _count: { _all: true },
+  _min: { createdAt: true },
+  _max: { createdAt: true },
+} as const;
+
+function summaryOf(row: {
+  _count: { _all: number };
+  _min: { createdAt: Date | null };
+  _max: { createdAt: Date | null };
+}): MissingIdentifierSummary {
+  return { count: row._count._all, oldest: row._min.createdAt, newest: row._max.createdAt };
+}
 
 export const prismaIdentifiersRepository: IdentifiersRepository = {
   findFormat(party: PartyType) {
@@ -68,7 +86,49 @@ export const prismaIdentifiersRepository: IdentifiersRepository = {
     await prisma.user.update({ where: { id: userId }, data: { displayId } });
   },
 
+  ordersMissingIdentifier(limit: number) {
+    return prisma.order.findMany({ where: { displayId: null }, orderBy: { createdAt: 'asc' }, take: limit, select: { id: true, createdAt: true } });
+  },
+
+  async setOrderIdentifier(orderId: string, displayId: string) {
+    await prisma.order.update({ where: { id: orderId }, data: { displayId } });
+  },
+
   async setPublisherIdentifier(publisherId: string, displayId: string) {
     await prisma.publisher.update({ where: { id: publisherId }, data: { displayId } });
+  },
+
+  advertisersMissingIdentifier(limit: number) {
+    return prisma.advertiser.findMany({ where: { displayId: null }, orderBy: { createdAt: 'asc' }, take: limit, select: { id: true, createdAt: true } });
+  },
+
+  async setAdvertiserIdentifier(advertiserId: string, displayId: string) {
+    await prisma.advertiser.update({ where: { id: advertiserId }, data: { displayId } });
+  },
+
+  printPartnersMissingIdentifier(limit: number) {
+    return prisma.printPartner.findMany({ where: { displayId: null }, orderBy: { createdAt: 'asc' }, take: limit, select: { id: true, createdAt: true } });
+  },
+
+  async setPrintPartnerIdentifier(printPartnerId: string, displayId: string) {
+    await prisma.printPartner.update({ where: { id: printPartnerId }, data: { displayId } });
+  },
+
+  agentsMissingIdentifier(limit: number) {
+    return prisma.agentProfile.findMany({ where: { displayId: null }, orderBy: { createdAt: 'asc' }, take: limit, select: { id: true, createdAt: true } });
+  },
+
+  async setAgentIdentifier(agentProfileId: string, displayId: string) {
+    await prisma.agentProfile.update({ where: { id: agentProfileId }, data: { displayId } });
+  },
+
+  async missingIdentifierSummary(party: IdentifiedParty) {
+    switch (party) {
+      case 'PUBLISHER': return summaryOf(await prisma.publisher.aggregate(MISSING));
+      case 'ADVERTISER': return summaryOf(await prisma.advertiser.aggregate(MISSING));
+      case 'PARTNER': return summaryOf(await prisma.printPartner.aggregate(MISSING));
+      case 'AGENT': return summaryOf(await prisma.agentProfile.aggregate(MISSING));
+      case 'USER': return summaryOf(await prisma.user.aggregate(MISSING));
+    }
   },
 };

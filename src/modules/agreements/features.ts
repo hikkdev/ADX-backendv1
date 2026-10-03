@@ -17,8 +17,8 @@ feature('legal.agreements', {
   kind: 'FEATURE',
   launch: 'on',
   description:
-    'Agreement templates (draft / live / superseded), acceptances per party and per transaction, the stale-terms report.',
-  routes: ['/api/v1/agreements', '/api/v1/advertisers/:id/agreements'],
+    'Agreement templates (draft / live / superseded), acceptances per party and per transaction, the stale-terms report, the account’s own platform agreements and the public text of the live platform terms.',
+  routes: ['/api/v1/agreements', '/api/v1/advertisers/:id/agreements', '/api/v1/legal/agreements'],
 });
 
 /**

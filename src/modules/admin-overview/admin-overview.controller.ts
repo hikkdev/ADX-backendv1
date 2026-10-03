@@ -1,7 +1,16 @@
 import type { Request, Response } from 'express';
 import { logActivity } from '../../shared/audit';
 import { ApiError } from '../../shared/errors';
-import { breakdownQuerySchema, insightIdParamSchema, overviewQuerySchema, seriesQuerySchema, tilesQuerySchema } from './admin-overview.schema';
+import {
+  breakdownQuerySchema,
+  insightIdParamSchema,
+  metricsSeriesQuerySchema,
+  overviewQuerySchema,
+  seriesQuerySchema,
+  tilesQuerySchema,
+} from './admin-overview.schema';
+import { loadMetricsSeries } from './metrics/metrics.service';
+import { allMetrics } from './metrics/registry';
 import { monthOverview, overviewSeries } from './admin-overview.service';
 import { analyticsBreakdown, analyticsSeries, analyticsTiles, seriesCsvLines } from './analytics.service';
 import { dashboardInsights, dismissInsight } from './insights.service';
@@ -25,6 +34,22 @@ export async function seriesHandler(req: Request, res: Response): Promise<void> 
   const parsed = seriesQuerySchema.safeParse(req.query);
   if (!parsed.success) throw invalid(parsed.error);
   res.json({ success: true, data: await analyticsSeries(parsed.data) });
+}
+
+// GET /admin/analytics/catalogue — AN-1: every metric the registry declares,
+// with its kind, its roll-up rule, the cuts it supports and its caveat. The
+// console's metric picker is drawn from this and knows nothing else.
+export async function metricsCatalogueHandler(_req: Request, res: Response): Promise<void> {
+  res.json({ success: true, data: { metrics: allMetrics() } });
+}
+
+// GET /admin/analytics/series — AN-1: any set of registry metrics, at day,
+// week or month, with the previous window beside it. An unknown metric or an
+// unsupported grain is refused by name.
+export async function metricsSeriesHandler(req: Request, res: Response): Promise<void> {
+  const parsed = metricsSeriesQuerySchema.safeParse(req.query);
+  if (!parsed.success) throw invalid(parsed.error);
+  res.json({ success: true, data: await loadMetricsSeries(parsed.data) });
 }
 
 // GET /admin/overview/breakdown — GMV, bookings and earnings by a dimension, on the list contract.

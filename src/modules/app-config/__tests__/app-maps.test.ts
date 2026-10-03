@@ -81,7 +81,7 @@ describe('GET /app/maps', () => {
       googleServerKey: 'AIza-SERVER',
       mapboxPublicToken: 'pk.public',
       mapboxSecretToken: 'sk.secret',
-      osm: resolveOsmConfig({ contactEmail: 'maps@adx.example' }),
+      osm: resolveOsmConfig({ contactEmail: 'maps@adx.in' }),
     });
     const res = await request(app()).get('/api/v1/app/maps').set('Authorization', `Bearer ${agent}`);
     expect(res.status).toBe(200);
@@ -97,7 +97,7 @@ describe('GET /app/maps', () => {
     expect(res.body.data).not.toHaveProperty('mapboxSecretToken');
     expect(res.text).not.toContain('sk.secret');
     expect(res.text).not.toContain('AIza-SERVER');
-    expect(res.text).not.toContain('maps@adx.example');
+    expect(res.text).not.toContain('maps@adx.in');
   });
 
   it('AC-B1: answers OSM with a null token and engineReady false while no Mapbox public token is stored — the secret is not a fallback', async () => {
@@ -105,7 +105,7 @@ describe('GET /app/maps', () => {
       provider: 'OSM',
       googleServerKey: 'AIza-SERVER',
       mapboxSecretToken: 'sk.secret',
-      osm: resolveOsmConfig({ contactEmail: 'maps@adx.example' }),
+      osm: resolveOsmConfig({ contactEmail: 'maps@adx.in' }),
     });
     const res = await request(app()).get('/api/v1/app/maps').set('Authorization', `Bearer ${agent}`);
     expect(res.status).toBe(200);

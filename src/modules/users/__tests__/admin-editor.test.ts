@@ -59,6 +59,8 @@ vi.mock('../prisma-users.repository', async (importActual) => {
   return { prismaUsersRepository: repository, adminListWhere: actual.adminListWhere };
 });
 vi.mock('../../auth', () => auth);
+// 28 Sep 2026: createUser mints the person's ADX-… id — never off the real counter in a test.
+vi.mock('../../identifiers', () => ({ allocateIdentifier: vi.fn(async () => 'ADX-2809-2699') }));
 vi.mock('../../access-control', () => accessControl);
 vi.mock('../../../shared/audit', () => audit);
 vi.mock('../../publishers', () => ({ registerPublisher: vi.fn() }));
@@ -76,7 +78,7 @@ const NOW = new Date('2026-09-14T10:00:00Z');
 const target = (over: Record<string, unknown> = {}) => ({
   id: 'usr_1',
   mobile: '+919845012210',
-  email: 'asha@adx.co',
+  email: 'asha@adx.in',
   name: 'Asha',
   language: 'en',
   avatarUrl: null,
@@ -144,35 +146,35 @@ beforeEach(() => {
 
 describe('PATCH /users/:id', () => {
   it('takes language and avatarUrl beside the rest', () => {
-    const parsed = updateUserByAdminSchema.safeParse({ language: 'hi', avatarUrl: 'https://cdn.adx.co/a.png', name: 'Asha Rao' });
+    const parsed = updateUserByAdminSchema.safeParse({ language: 'hi', avatarUrl: 'https://cdn.adx.in/a.png', name: 'Asha Rao' });
     expect(parsed.success).toBe(true);
     expect(updateUserByAdminSchema.safeParse({ avatarUrl: null }).success).toBe(true);
     expect(updateUserByAdminSchema.safeParse({ avatarUrl: 'not a url' }).success).toBe(false);
   });
 
   it('writes them through and answers the diff of what changed', async () => {
-    const { user, diff, movedIdentity } = await updateUserByAdmin('usr_1', 'adm_1', { language: 'hi', avatarUrl: 'https://cdn.adx.co/a.png' });
-    expect(repository.updateByAdmin).toHaveBeenCalledWith('usr_1', { language: 'hi', avatarUrl: 'https://cdn.adx.co/a.png' });
+    const { user, diff, movedIdentity } = await updateUserByAdmin('usr_1', 'adm_1', { language: 'hi', avatarUrl: 'https://cdn.adx.in/a.png' });
+    expect(repository.updateByAdmin).toHaveBeenCalledWith('usr_1', { language: 'hi', avatarUrl: 'https://cdn.adx.in/a.png' });
     expect(user.id).toBe('usr_1');
-    expect(diff).toEqual({ language: { before: 'en', after: 'hi' }, avatarUrl: { before: null, after: 'https://cdn.adx.co/a.png' } });
+    expect(diff).toEqual({ language: { before: 'en', after: 'hi' }, avatarUrl: { before: null, after: 'https://cdn.adx.in/a.png' } });
     expect(movedIdentity).toEqual([]);
   });
 
   it('moving the email needs a reason, lower-cases it, and reports it as a moved identity', async () => {
-    await expect(updateUserByAdmin('usr_1', 'adm_1', { email: 'New@ADX.co' })).rejects.toMatchObject({ statusCode: 400 });
-    const { movedIdentity } = await updateUserByAdmin('usr_1', 'adm_1', { email: 'New@ADX.co', reason: 'changed employer, asked on a call' });
-    expect(repository.updateByAdmin).toHaveBeenCalledWith('usr_1', { email: 'new@adx.co' });
+    await expect(updateUserByAdmin('usr_1', 'adm_1', { email: 'New@ADX.in' })).rejects.toMatchObject({ statusCode: 400 });
+    const { movedIdentity } = await updateUserByAdmin('usr_1', 'adm_1', { email: 'New@ADX.in', reason: 'changed employer, asked on a call' });
+    expect(repository.updateByAdmin).toHaveBeenCalledWith('usr_1', { email: 'new@adx.in' });
     expect(movedIdentity).toEqual(['email']);
   });
 
   it('an unchanged email is no change at all, so no reason is asked', async () => {
-    await expect(updateUserByAdmin('usr_1', 'adm_1', { email: 'asha@adx.co', name: 'Asha R' })).resolves.toBeTruthy();
+    await expect(updateUserByAdmin('usr_1', 'adm_1', { email: 'asha@adx.in', name: 'Asha R' })).resolves.toBeTruthy();
     expect(repository.findByEmail).not.toHaveBeenCalled();
   });
 
   it("409 CONTACT_TAKEN with which — another account's primary email", async () => {
     repository.findByEmail.mockResolvedValue(target({ id: 'usr_2' }));
-    await expect(updateUserByAdmin('usr_1', 'adm_1', { email: 'taken@adx.co', reason: 'a good reason here' })).rejects.toMatchObject({
+    await expect(updateUserByAdmin('usr_1', 'adm_1', { email: 'taken@adx.in', reason: 'a good reason here' })).rejects.toMatchObject({
       statusCode: 409,
       code: 'CONTACT_TAKEN',
       details: { which: 'PRIMARY', userId: 'usr_2', kind: 'EMAIL' },
@@ -207,7 +209,7 @@ describe('PATCH /users/:id', () => {
   });
 
   it('carries the reason and the moved identity on the row when an identity moved', async () => {
-    await updateUserByAdminHandler(request({ body: { email: 'new@adx.co', reason: 'changed employer, asked on a call' } }), response() as never);
+    await updateUserByAdminHandler(request({ body: { email: 'new@adx.in', reason: 'changed employer, asked on a call' } }), response() as never);
     expect(audit.logActivity).toHaveBeenCalledWith(
       'usr_1',
       'USER_UPDATED_BY_ADMIN',
@@ -279,8 +281,8 @@ describe('POST /users', () => {
     repository.findByMobile.mockResolvedValue(target({ id: 'usr_2' }));
     await expect(createUserService({ mobile: '+919845012210', roles: ['PUBLISHER'] })).rejects.toMatchObject({ statusCode: 409, code: 'CONTACT_TAKEN' });
     repository.findByMobile.mockResolvedValue(null);
-    repository.findContactByValue.mockResolvedValue({ id: 'ct_1', userId: 'usr_9', kind: 'EMAIL', value: 'x@adx.co' });
-    await expect(createUserService({ mobile: '+919000000000', email: 'x@adx.co', roles: ['PUBLISHER'] })).rejects.toMatchObject({
+    repository.findContactByValue.mockResolvedValue({ id: 'ct_1', userId: 'usr_9', kind: 'EMAIL', value: 'x@adx.in' });
+    await expect(createUserService({ mobile: '+919000000000', email: 'x@adx.in', roles: ['PUBLISHER'] })).rejects.toMatchObject({
       statusCode: 409,
       code: 'CONTACT_TAKEN',
       details: { which: 'CONTACT', userId: 'usr_9' },
@@ -290,8 +292,9 @@ describe('POST /users', () => {
 
   it('creates the person and audits USER_CREATED_BY_ADMIN against the new account', async () => {
     const res = response();
-    await createUser(request({ method: 'POST', body: { mobile: '+919000000000', name: 'Ravi', email: 'Ravi@ADX.co', roles: ['publisher'] } }), res as never);
-    expect(repository.createWithRoles).toHaveBeenCalledWith(expect.objectContaining({ mobile: '+919000000000', email: 'ravi@adx.co', roles: ['PUBLISHER'] }));
+    await createUser(request({ method: 'POST', body: { mobile: '+919000000000', name: 'Ravi', email: 'Ravi@ADX.in', roles: ['publisher'] } }), res as never);
+    // 28 Sep 2026: with the person's own ADX-… id, as every other door gives one.
+    expect(repository.createWithRoles).toHaveBeenCalledWith(expect.objectContaining({ mobile: '+919000000000', displayId: 'ADX-2809-2699', email: 'ravi@adx.in', roles: ['PUBLISHER'] }));
     expect(audit.logActivity).toHaveBeenCalledWith(
       'usr_new',
       'USER_CREATED_BY_ADMIN',
@@ -431,7 +434,9 @@ describe('GET /users', () => {
     expect(where.OR).toContainEqual({ contacts: { some: { value: { contains: 'work.co', mode: 'insensitive' } } } });
     expect(where.OR).toContainEqual({ email: { contains: 'work.co', mode: 'insensitive' } });
     expect(where).toMatchObject({ closedAt: null, isActive: false });
-    expect(adminListWhere({ state: 'CLOSED' })).toEqual({ closedAt: { not: null } });
+    // Account lifecycle (2 Oct 2026): CLOSED leaves the erased out; ERASED is its own state.
+    expect(adminListWhere({ state: 'CLOSED' })).toEqual({ closedAt: { not: null }, erasedAt: null });
+    expect(adminListWhere({ state: 'ERASED' })).toEqual({ erasedAt: { not: null } });
     expect(adminListWhere({ state: 'ACTIVE' })).toEqual({ closedAt: null, isActive: true });
     expect(adminListWhere({})).toEqual({});
   });
@@ -440,8 +445,9 @@ describe('GET /users', () => {
 /* K-B1 (verifier): the person's own profile write runs the same one-value-one-account rule as the desk's. */
 describe('PATCH /users/me — the email', () => {
   it('lower-cases the address before it is written', async () => {
-    await updateProfile('usr_1', { email: 'New@ADX.co', name: 'Asha R' });
-    expect(repository.updateProfile).toHaveBeenCalledWith('usr_1', { email: 'new@adx.co', name: 'Asha R' });
+    await updateProfile('usr_1', { email: 'New@ADX.in', name: 'Asha R' });
+    // ED-1: an address that moves is unproven until a code is answered at it.
+    expect(repository.updateProfile).toHaveBeenCalledWith('usr_1', { email: 'new@adx.in', name: 'Asha R', emailVerifiedAt: null });
   });
 
   it("409 CONTACT_TAKEN when the address is another account's contact row", async () => {
@@ -456,14 +462,14 @@ describe('PATCH /users/me — the email', () => {
 
   it("409 CONTACT_TAKEN when the address is another account's primary", async () => {
     repository.findByEmail.mockResolvedValue(target({ id: 'usr_2' }));
-    await expect(updateProfile('usr_1', { email: 'taken@adx.co' })).rejects.toMatchObject({ statusCode: 409, code: 'CONTACT_TAKEN', details: { which: 'PRIMARY', userId: 'usr_2' } });
+    await expect(updateProfile('usr_1', { email: 'taken@adx.in' })).rejects.toMatchObject({ statusCode: 409, code: 'CONTACT_TAKEN', details: { which: 'PRIMARY', userId: 'usr_2' } });
   });
 
   it('the address already on the row is no change, so nothing is looked up', async () => {
-    await updateProfile('usr_1', { email: 'Asha@ADX.co' });
+    await updateProfile('usr_1', { email: 'Asha@ADX.in' });
     expect(repository.findByEmail).not.toHaveBeenCalled();
     expect(repository.findContactByValue).not.toHaveBeenCalled();
-    expect(repository.updateProfile).toHaveBeenCalledWith('usr_1', { email: 'asha@adx.co' });
+    expect(repository.updateProfile).toHaveBeenCalledWith('usr_1', { email: 'asha@adx.in' });
   });
 
   it('a write with no email asks nothing', async () => {

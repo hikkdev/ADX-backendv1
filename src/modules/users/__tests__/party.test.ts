@@ -13,7 +13,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  */
 
 const { repository, publishers, advertisers } = vi.hoisted(() => ({
-  repository: { findProfile: vi.fn(), grantRole: vi.fn() },
+  repository: { findProfile: vi.fn(), grantRole: vi.fn(), updateProfile: vi.fn() },
   publishers: { registerPublisher: vi.fn() },
   advertisers: { registerAdvertiser: vi.fn() },
 }));
@@ -135,6 +135,36 @@ describe('opening the advertiser side', () => {
     const choice = await chooseParty('usr_1', { party: 'ADVERTISER', accountType: 'INDIVIDUAL' });
     expect(advertisers.registerAdvertiser).toHaveBeenCalled();
     expect(choice).toMatchObject({ party: 'ADVERTISER', created: true });
+  });
+
+  /*
+   * 28 Sep 2026: "Your name" on an individual's side form is the person's
+   * own — kept on the account (the publisher door already did), so the
+   * basics that follow open with it instead of asking it again. A business
+   * name never lands on the person, and a person with a name keeps it.
+   */
+  it("keeps an individual's name on an account that has none, and never a business name", async () => {
+    await chooseParty('usr_1', { party: 'ADVERTISER', accountType: 'INDIVIDUAL', name: 'Satya Raj' });
+    expect(advertisers.registerAdvertiser).toHaveBeenLastCalledWith(expect.objectContaining({ name: 'Satya Raj', type: 'INDIVIDUAL' }));
+    expect(repository.updateProfile).toHaveBeenCalledWith('usr_1', { name: 'Satya Raj' });
+
+    repository.updateProfile.mockClear();
+    await chooseParty('usr_1', { party: 'ADVERTISER', accountType: 'BUSINESS', name: 'Raj Traders' });
+    expect(repository.updateProfile).not.toHaveBeenCalled();
+    // The business name is the registered name the billing step asks for: carried there too.
+    expect(advertisers.registerAdvertiser).toHaveBeenLastCalledWith(expect.objectContaining({ name: 'Raj Traders', companyName: 'Raj Traders', type: 'COMMERCIAL' }));
+
+    repository.findProfile.mockResolvedValue(user({ name: 'Satya Raj' }));
+    await chooseParty('usr_1', { party: 'ADVERTISER', accountType: 'INDIVIDUAL', name: 'S. Raj' });
+    expect(repository.updateProfile).not.toHaveBeenCalled();
+  });
+
+  it("carries the account's email onto the row it opens (the website proves it before the side)", async () => {
+    repository.findProfile.mockResolvedValue(user({ email: 'raj@example.com' }));
+    await chooseParty('usr_1', { party: 'ADVERTISER', accountType: 'INDIVIDUAL' });
+    expect(advertisers.registerAdvertiser).toHaveBeenLastCalledWith(expect.objectContaining({ email: 'raj@example.com' }));
+    await chooseParty('usr_1', { party: 'PUBLISHER', accountType: 'BUSINESS', name: 'Acme Outdoor' });
+    expect(publishers.registerPublisher).toHaveBeenLastCalledWith('usr_1', expect.objectContaining({ email: 'raj@example.com', name: 'Acme Outdoor' }));
   });
 
   it('answers with the existing side rather than opening it twice', async () => {

@@ -42,7 +42,22 @@ function submissionWhere(filter: SubmissionFilter): Prisma.OnboardingSubmissionW
 
 const submissionInclude = {
   flowTemplate: true,
-  user: { include: { roles: true } },
+  // 2 Oct 2026: the person a submission provisions, named — not the whole
+  // User row. The desk is ADMIN-only; the service reads mobile, name and email.
+  user: {
+    select: {
+      id: true,
+      displayId: true,
+      name: true,
+      firstName: true,
+      lastName: true,
+      mobile: true,
+      email: true,
+      avatarUrl: true,
+      isActive: true,
+      roles: true,
+    },
+  },
 } as const;
 
 export const prismaOnboardingRepository: OnboardingRepository = {
@@ -130,7 +145,7 @@ export const prismaOnboardingRepository: OnboardingRepository = {
         }
 
         const createdUser = await tx.user.create({
-          data: { mobile: inlineUser.mobile, name: inlineUser.name, email: inlineUser.email },
+          data: { mobile: inlineUser.mobile, ...(inlineUser.displayId ? { displayId: inlineUser.displayId } : {}), name: inlineUser.name, email: inlineUser.email },
         });
         subjectUserId = createdUser.id;
 

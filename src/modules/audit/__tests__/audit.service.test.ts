@@ -34,7 +34,7 @@ const row = (overrides: Partial<ActivityRow> = {}): ActivityRow =>
     requestId: 'req-1',
     diff: null,
     createdAt: new Date('2026-09-11T10:00:00Z'),
-    user: { id: 'u1', name: 'Asha, Admin', email: 'asha@adx.co' },
+    user: { id: 'u1', name: 'Asha, Admin', email: 'asha@adx.in' },
     ...overrides,
   }) as ActivityRow;
 
@@ -62,7 +62,7 @@ describe('GET /audit', () => {
       .set('Authorization', `Bearer ${admin}`);
     expect(res.status).toBe(200);
     expect(res.body.data).toMatchObject({ total: 1, counts: { orders: 1 } });
-    expect(res.body.data.items[0].user).toEqual({ id: 'u1', name: 'Asha, Admin', email: 'asha@adx.co' });
+    expect(res.body.data.items[0].user).toEqual({ id: 'u1', name: 'Asha, Admin', email: 'asha@adx.in' });
 
     expect(shared.findActivity).toHaveBeenCalledWith(
       { q: 'refund', module: 'wallets', from: new Date('2026-09-01'), to: new Date('2026-09-11T23:59:59Z') },
@@ -151,7 +151,7 @@ describe('csv formatting', () => {
 
   it('lays a row out in the column order', () => {
     expect(csvLine(row())).toBe(
-      'a1,2026-09-11T10:00:00.000Z,u1,"Asha, Admin",asha@adx.co,ORDER_APPROVED,orders,Order,o1,req-1,10.0.0.1,"{""orderId"":""o1""}",\r\n',
+      'a1,2026-09-11T10:00:00.000Z,u1,"Asha, Admin",asha@adx.in,ORDER_APPROVED,orders,Order,o1,req-1,10.0.0.1,"{""orderId"":""o1""}",\r\n',
     );
   });
 });

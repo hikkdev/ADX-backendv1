@@ -284,6 +284,8 @@ export async function campaignLines(
       spots: spot.quantity,
       ratePerDay: spot.ratePerDay,
       ...(campaign.startDate ? { at: campaign.startDate } : {}),
+      // PS-1: what the review left off, the invoice leaves off.
+      ...(spot.fulfilment === 'ADVERTISER_SHIPS' ? { excludeFeeKinds: ['PRINTING' as const] } : {}),
     });
     const media = bill.lines.find((line) => line.kind === 'MEDIA');
     const mediaTaxable = new D(media?.taxableValue ?? spot.lineTotal);
@@ -334,8 +336,31 @@ export async function campaignLines(
     });
   }
 
+  // DQ-1: the accepted design quote, taxed as the media is.
+  if (campaign.designFee) {
+    const design = codes.fees.find((fee) => fee.kind === 'DESIGN');
+    const mediaPct = new D(lines.find((line) => line.kind === 'MEDIA')?.gstPct ?? codes.mediaGstPct);
+    const amount = new D(campaign.designFee.amount);
+    lines.push({
+      kind: 'DESIGN',
+      description: campaign.designFee.note ? `Design by ADX — ${campaign.designFee.note}` : 'Design by ADX',
+      sacCode: design?.sacCode ?? null,
+      quantity: new D(1),
+      unitRate: TWO(amount),
+      taxableValue: TWO(amount),
+      gstPct: mediaPct,
+      gstAmount: TWO(amount.times(mediaPct)),
+      campaignSpotId: null,
+    });
+  }
+
+  // GST-D: the discount comes off the taxable value, so it carries its share
+  // of the tax back with it — the same figure the review's `discountGst` is.
   const discount = new D(campaign.discount);
   if (discount.greaterThan(0)) {
+    const base = lines.reduce((sum, line) => sum.plus(line.taxableValue), new D(0));
+    const gst = lines.reduce((sum, line) => sum.plus(line.gstAmount), new D(0));
+    const discountGst = base.greaterThan(0) ? TWO(gst.times(discount).dividedBy(base)) : new D(0);
     lines.push({
       kind: 'DISCOUNT',
       description: 'Campaign discount',
@@ -343,8 +368,8 @@ export async function campaignLines(
       quantity: new D(1),
       unitRate: TWO(discount.negated()),
       taxableValue: TWO(discount.negated()),
-      gstPct: new D(0),
-      gstAmount: new D(0),
+      gstPct: base.greaterThan(0) ? TWO(gst.dividedBy(base).times(100)) : new D(0),
+      gstAmount: TWO(discountGst.negated()),
       campaignSpotId: null,
     });
   }
@@ -536,6 +561,103 @@ export async function issueInvoiceForPackage(
     }
     throw err;
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* LM-1: a paid placement — the generic advertising line               */
+/* ------------------------------------------------------------------ */
+
+/** LM-1: the SAC for selling advertising space on the internet. */
+export const ADVERTISING_SAC_CODE = '998366';
+
+export type AdvertisingInvoiceInput = {
+  advertiserId: string;
+  /** The booking's reference (ADB-…) — printed on the line and how a second issue finds the first. */
+  reference: string;
+  /** "Advertising on ADX — Listing page sidebar, 12 Oct – 18 Oct 2026". */
+  description: string;
+  /** Days, at `unitRate` per day. */
+  quantity: number;
+  unitRate: Money;
+  taxableValue: Money;
+  /** A fraction — 0.18. */
+  gstPct: string;
+  byUserId?: string | null;
+  paymentId?: string | null;
+  now?: Date;
+};
+
+/**
+ * LM-1: a display ad bought in a slot, paid for — one OTHER line, "Advertising
+ * on ADX — {slot}, {dates} ({reference})", SAC 998366, at the rate and the GST
+ * the booking was priced at. Issued PAID (the money moved before this is
+ * asked). Idempotent on the reference. A sponsored listing is paid by a
+ * publisher and is not invoiced here: an Invoice names an advertiser, and a
+ * publisher's receipt is a later lot (the same gap a plan order has).
+ */
+export async function issueInvoiceForAdvertising(input: AdvertisingInvoiceInput): Promise<InvoiceWithLines> {
+  const existing = await repository.findLiveInvoiceForAdvertising(input.advertiserId, input.reference);
+  if (existing) return existing;
+
+  const [entity, recipient] = await Promise.all([repository.getLegalEntity(), recipientFor(input.advertiserId)]);
+  const gstPct = new D(input.gstPct);
+  const taxable = TWO(input.taxableValue);
+  const lines: LineDraft[] = [
+    {
+      kind: 'OTHER',
+      description: `${input.description} (${input.reference})`,
+      sacCode: ADVERTISING_SAC_CODE,
+      quantity: new D(input.quantity),
+      unitRate: TWO(input.unitRate),
+      taxableValue: taxable,
+      gstPct,
+      gstAmount: TWO(taxable.times(gstPct)),
+      campaignSpotId: null,
+    },
+  ];
+  const now = input.now ?? new Date();
+  const supplier = supplierFrom(entity);
+  const kind: InvoiceKind = entity.gstin ? 'TAX_INVOICE' : 'PROFORMA';
+  const totals = totalsFor(lines, supplier.stateCode, recipient.stateCode);
+  const data: NewInvoice = {
+    ...header(kind, 'PAID', supplier, recipient, now),
+    advertiserId: input.advertiserId,
+    campaignId: null,
+    packageSaleId: null,
+    paymentId: input.paymentId ?? null,
+    topUpId: null,
+    voidsInvoiceId: null,
+    dueAt: null,
+    taxableValue: totals.taxableValue,
+    cgst: totals.cgst,
+    sgst: totals.sgst,
+    igst: totals.igst,
+    roundOff: totals.roundOff,
+    total: totals.total,
+    ledgerTransactionId: null,
+    createdById: input.byUserId ?? null,
+    lines: numberLines(lines),
+  };
+  try {
+    return await repository.createNumbered(data, {
+      series: seriesFor(kind, entity.invoicePrefix),
+      financialYear: financialYearLabel(now, entity.financialYearStartMonth),
+    });
+  } catch (err) {
+    if (isUniqueViolation(err)) {
+      const won = await repository.findLiveInvoiceForAdvertising(input.advertiserId, input.reference);
+      if (won) return won;
+    }
+    throw err;
+  }
+}
+
+/** LM-1: a paid placement refunded — its invoice, if one stands, is credited and voided. */
+export async function creditNoteForAdvertising(advertiserId: string, reference: string, reason: string, byUserId: string | null): Promise<InvoiceWithLines | null> {
+  const invoice = await repository.findLiveInvoiceForAdvertising(advertiserId, reference);
+  if (!invoice) return null;
+  const { creditNote } = await voidInvoice(invoice.id, { reason, byUserId });
+  return creditNote;
 }
 
 /* ------------------------------------------------------------------ */

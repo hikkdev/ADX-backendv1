@@ -34,10 +34,13 @@ vi.mock('../../../../shared/database', async (importOriginal) => {
 });
 
 import { prismaAdvertiserKycRepository as repository } from '../prisma-advertiser-kyc.repository';
+import { workingAdvertiserWhere } from '../../../../shared/party-status';
 
 const NOW = new Date('2026-09-14T22:00:00.000Z');
 const ARRIVED = new Date('2026-09-14T10:00:00.000Z');
 const BASE = { OR: [{ kycStatus: { not: 'VERIFIED' } }, { kyc: { isNot: null } }] };
+// Account lifecycle (2 Oct 2026): working accounts only, unless the desk asks for the inactive (or names the advertiser).
+const WORKING = workingAdvertiserWhere();
 
 const advertiser = (over: Record<string, unknown> = {}) => ({
   id: 'adv_swiggy',
@@ -83,8 +86,8 @@ describe('the queue is every advertiser', () => {
     // The query: the base (not yet verified, or with a record), the record left-joined, late submissions first then arrivals.
     expect(prisma.advertiser.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { AND: [BASE] },
-        include: { kyc: true },
+        where: { AND: [BASE, WORKING] },
+        include: { kyc: true, user: { select: { isActive: true, closedAt: true } } },
         skip: 0,
         take: 20,
         orderBy: [{ kyc: { submittedAt: { sort: 'asc', nulls: 'last' } } }, { createdAt: 'asc' }],
@@ -111,15 +114,16 @@ describe('the queue is every advertiser', () => {
     await repository.findPage({ state: 'AWAITING_DOCUMENTS' }, 1, 20);
     expect(prisma.advertiser.findMany.mock.calls[0]![0].where.AND).toEqual([
       BASE,
+      WORKING,
       { OR: [{ kyc: null, kycStatus: { not: 'VERIFIED' } }, { kyc: { is: { status: 'PENDING', submittedAt: null, requestedAt: null } } }] },
     ]);
     await repository.findPage({ status: 'PENDING' }, 1, 20);
-    expect(prisma.advertiser.findMany.mock.calls[1]![0].where.AND).toEqual([BASE, { kyc: { is: { status: 'PENDING', submittedAt: { not: null } } } }]);
+    expect(prisma.advertiser.findMany.mock.calls[1]![0].where.AND).toEqual([BASE, WORKING, { kyc: { is: { status: 'PENDING', submittedAt: { not: null } } } }]);
     await repository.findPage({ requested: true }, 1, 20);
-    expect(prisma.advertiser.findMany.mock.calls[2]![0].where.AND).toEqual([BASE, { kyc: { is: { status: 'PENDING', submittedAt: null, requestedAt: { not: null } } } }]);
+    expect(prisma.advertiser.findMany.mock.calls[2]![0].where.AND).toEqual([BASE, WORKING, { kyc: { is: { status: 'PENDING', submittedAt: null, requestedAt: { not: null } } } }]);
     // `state` wins over the alias.
     await repository.findPage({ state: 'VERIFIED', status: 'PENDING' }, 1, 20);
-    expect(prisma.advertiser.findMany.mock.calls[3]![0].where.AND).toEqual([BASE, { kyc: { is: { status: 'VERIFIED' } } }]);
+    expect(prisma.advertiser.findMany.mock.calls[3]![0].where.AND).toEqual([BASE, WORKING, { kyc: { is: { status: 'VERIFIED' } } }]);
   });
 
   it('`q=` reaches the party — name, company, display id, email, mobile; `advertiserId=` is the profile id or the user id', async () => {
@@ -142,31 +146,32 @@ describe('the queue is every advertiser', () => {
   it('the record-level facets — assignment, escalation — narrow to rows that have a record; `newest` is the party’s arrival order', async () => {
     await repository.findPage({ assignedToId: 'usr_ops', escalated: true }, 2, 10, 'newest');
     const call = prisma.advertiser.findMany.mock.calls[0]![0];
-    expect(call.where.AND).toEqual([BASE, { kyc: { is: { assignedToId: 'usr_ops' } } }, { kyc: { is: { escalatedAt: { not: null } } } }]);
+    expect(call.where.AND).toEqual([BASE, WORKING, { kyc: { is: { assignedToId: 'usr_ops' } } }, { kyc: { is: { escalatedAt: { not: null } } } }]);
     expect(call).toMatchObject({ skip: 10, take: 10, orderBy: [{ createdAt: 'desc' }] });
   });
 });
 
 describe('the chips', () => {
   it('count parties per state with the state facet (and its aliases) removed — awaiting-documents parties counted', async () => {
-    prisma.advertiser.count.mockImplementation(async ({ where }: { where: { AND: unknown[] } }) => (JSON.stringify(where.AND[1]).includes('"kyc":null') ? 2 : 1));
+    prisma.advertiser.count.mockImplementation(async ({ where }: { where: { AND: unknown[] } }) => (JSON.stringify(where.AND[2]).includes('"kyc":null') ? 2 : 1));
     const counts = await repository.countByState({ state: 'PENDING', status: 'PENDING', requested: true, q: 'x' });
     expect(counts).toEqual({ AWAITING_DOCUMENTS: 2, REQUESTED: 1, PENDING: 1, NEEDS_INFO: 1, REJECTED: 1, VERIFIED: 1 });
     expect(prisma.advertiser.count).toHaveBeenCalledTimes(6);
     for (const call of prisma.advertiser.count.mock.calls) {
       // the base, the state, the search — never the facet that was on the page
-      expect(call[0].where.AND).toHaveLength(3);
+      expect(call[0].where.AND).toHaveLength(4);
       expect(call[0].where.AND[0]).toEqual(BASE);
+      expect(call[0].where.AND[1]).toEqual(WORKING);
     }
   });
 
   it('breaches are PENDING records past the cutoff; the requested chip is the REQUESTED state with the facets removed', async () => {
     await repository.countBreached({ state: 'PENDING' }, NOW);
     expect(prisma.advertiser.count).toHaveBeenLastCalledWith({
-      where: { AND: [{ AND: [BASE, { kyc: { is: { status: 'PENDING', submittedAt: { not: null } } } }] }, { kyc: { is: { status: 'PENDING', submittedAt: { not: null, lt: NOW } } } }] },
+      where: { AND: [{ AND: [BASE, WORKING, { kyc: { is: { status: 'PENDING', submittedAt: { not: null } } } }] }, { kyc: { is: { status: 'PENDING', submittedAt: { not: null, lt: NOW } } } }] },
     });
     await repository.countRequested({ state: 'PENDING', status: 'PENDING' });
-    expect(prisma.advertiser.count).toHaveBeenLastCalledWith({ where: { AND: [BASE, { kyc: { is: { status: 'PENDING', submittedAt: null, requestedAt: { not: null } } } }] } });
+    expect(prisma.advertiser.count).toHaveBeenLastCalledWith({ where: { AND: [BASE, WORKING, { kyc: { is: { status: 'PENDING', submittedAt: null, requestedAt: { not: null } } } }] } });
   });
 });
 

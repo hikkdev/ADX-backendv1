@@ -1,5 +1,6 @@
 import { ApiError } from '../../shared/errors';
 import { normalizeMobile } from '../auth';
+import { allocateIdentifier } from '../identifiers';
 import { createAgent } from '../agents';
 import { createEmployee, findEmployeeByUserId, inviteEmployeeToConsole } from '../employees';
 import type { OnboardingSubmissionStatus, Role } from '../../shared/database';
@@ -100,6 +101,8 @@ export async function createSubmission(
   const inlineUser: InlineUser | undefined = input.user
     ? {
         mobile: normalizeMobile(input.user.mobile),
+        // 28 Sep 2026: the account this opens is a person with their own ADX-… id, as every door gives one.
+        displayId: await allocateIdentifier('USER'),
         name: input.user.name,
         email: input.user.email,
         roles: (input.user.roles?.length

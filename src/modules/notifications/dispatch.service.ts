@@ -148,7 +148,10 @@ export async function commsRuling(
 
 export async function notify(event: string, userId: string | null, vars: TemplateVars, opts: NotifyOptions = {}, now = new Date()): Promise<NotifyResult> {
   let notificationId: string | null = null;
-  if (opts.inApp && userId) {
+  // Account lifecycle (2 Oct 2026): a closed account gets no in-app row — nobody
+  // will ever sign in to read it. The person is read once and reused below.
+  const account: Recipient | null | undefined = opts.inApp && userId ? await comms.findRecipient(userId) : undefined;
+  if (opts.inApp && userId && !account?.closedAt) {
     const row = await createNotification({ userId, ...opts.inApp });
     notificationId = row.id;
   }
@@ -157,7 +160,7 @@ export async function notify(event: string, userId: string | null, vars: Templat
   if (!template) return { notificationId, templateKey: null, deliveries: [] };
 
   const type: NotificationType = opts.type ?? opts.inApp?.type ?? 'SYSTEM';
-  const onFile: Recipient | null = opts.recipient ? null : userId ? await comms.findRecipient(userId) : null;
+  const onFile: Recipient | null = opts.recipient ? null : userId ? (account !== undefined ? account : await comms.findRecipient(userId)) : null;
   const recipient = opts.recipient ?? onFile;
   const closed = Boolean(onFile && (onFile.closedAt !== null || !onFile.isActive));
   const unsubscribed = Boolean(onFile?.emailUnsubscribedAt);

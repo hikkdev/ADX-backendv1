@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Decimal } from '../../../shared/money';
 
+/* AGE-1: the order gate, passing unless a test says otherwise (its own tests: shared/age-gate). */
+const ageGate = vi.hoisted(() => ({ assertPartyAdultForOrders: vi.fn(), assertAdultForOrders: vi.fn() }));
+vi.mock('../../../shared/age-gate', async (importOriginal) => ({ ...(await importOriginal<object>()), ...ageGate }));
+
 /**
  * The payments service — Lot C (Q110/Q118).
  *
@@ -77,8 +81,11 @@ vi.mock('../../feature-flags', () => featureFlags);
 vi.mock('../../app-config', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../app-config')>()), ...settings }));
 vi.mock('../../../shared/audit', () => audit);
 vi.mock('../checkout-tokens', () => tokens);
+// BT-1: `listGateways` reads the receiving account off the integrations row; none here.
+vi.mock('../../../shared/integrations', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../../shared/integrations')>()), getIntegrationsConfig: vi.fn(async () => ({})) }));
 
 import { DEFAULT_PLATFORM_SETTINGS } from '../../app-config';
+import { ageRequiredError } from '../../../shared/age-gate';
 import type { GatewayAdapter } from '../gateways/gateway';
 import { setAdapter } from '../gateways/registry';
 import { actorFromCheckoutToken, confirmPayment, createIntent, getPayment, handleWebhook, listGateways, refundPayment, refundableToOriginalMethod } from '../payments.service';
@@ -351,6 +358,29 @@ describe('intents', () => {
 });
 
 /* Lot J (B2): a publisher pays for a plan order through the gateway. */
+describe('AGE-1 — an intent is an order', () => {
+  it("asks the payer's account holder before a gateway order exists, and a refusal writes nothing", async () => {
+    ageGate.assertPartyAdultForOrders.mockRejectedValueOnce(ageRequiredError('MISSING'));
+    await expect(createIntent({ campaignId: 'cmp_1', gateway: 'RAZORPAY' }, owner)).rejects.toMatchObject({ statusCode: 403, code: 'AGE_REQUIRED', details: { reason: 'MISSING', self: true } });
+    expect(ageGate.assertPartyAdultForOrders).toHaveBeenCalledWith({ kind: 'ADVERTISER', id: 'adv_1' }, { actorUserId: 'usr_owner' });
+    expect(repository.createPayment).not.toHaveBeenCalled();
+    expect(adapter.createOrder).not.toHaveBeenCalled();
+  });
+
+  it("a publisher's plan order asks the publisher's account holder", async () => {
+    ageGate.assertPartyAdultForOrders.mockRejectedValueOnce(ageRequiredError('UNDER_18'));
+    await expect(createIntent({ subscriptionOrderId: 'ord_1', gateway: 'RAZORPAY' }, publisher)).rejects.toMatchObject({ code: 'AGE_REQUIRED', details: { reason: 'UNDER_18' } });
+    expect(ageGate.assertPartyAdultForOrders).toHaveBeenCalledWith({ kind: 'PUBLISHER', id: 'pub_1' }, { actorUserId: 'usr_pub' });
+    expect(repository.createPayment).not.toHaveBeenCalled();
+  });
+
+  it('an adult goes on to the gateway', async () => {
+    await createIntent({ campaignId: 'cmp_1', gateway: 'RAZORPAY' }, owner);
+    expect(ageGate.assertPartyAdultForOrders).toHaveBeenCalledTimes(1);
+    expect(adapter.createOrder).toHaveBeenCalled();
+  });
+});
+
 describe('intents for a subscription order (Lot J-B2)', () => {
   it('records a publisher payment for the order — publisherId and subscriptionOrderId set, advertiserId null — naming the plan and the SUB reference', async () => {
     const result = await createIntent({ subscriptionOrderId: 'ord_1', gateway: 'RAZORPAY' }, publisher);

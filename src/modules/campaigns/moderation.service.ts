@@ -8,7 +8,8 @@ import { getContentRules, getListingWithPublisher } from '../listings';
 import { createNotification } from '../notifications';
 import { notifyAdmins } from '../orders';
 import { prismaCampaignsRepository as repository } from './prisma-campaigns.repository';
-import type { CampaignAggregate, CreativeReviewRow, CreativeRow } from './campaigns.repository';
+import { toAnalysisView } from './creative-analysis.service';
+import type { CampaignAggregate, CreativeReviewRow, CreativeRow, DesignRequestCandidate } from './campaigns.repository';
 import type { ReviewQueueQuery } from './campaigns.schema';
 import type { Request } from 'express';
 
@@ -449,18 +450,92 @@ export async function getCreativeForReview(creativeId: string): Promise<Creative
   return creative;
 }
 
+/* ── CR-1: the designs ADX owes ──────────────────────────────────────── */
+
+/** An ADX design that is still in play: delivered and not sent back. */
+const STANDING: readonly CreativeStatus[] = ['AWAITING_ADVERTISER', 'IN_REVIEW', 'APPROVED'];
+
+export type DesignRequest = {
+  campaign: {
+    id: string;
+    reference: string;
+    name: string;
+    status: DesignRequestCandidate['status'];
+    startDate: Date | null;
+    endDate: Date | null;
+    creativeConfig: DesignRequestCandidate['creativeConfig'];
+    advertiser: DesignRequestCandidate['advertiser'];
+    /** DQ-1: the quote as it stands — null until the desk names a price. */
+    designQuote: { amount: string; status: string; note: string | null; quotedAt: Date | null; respondedAt: Date | null } | null;
+  };
+  spots: DesignRequestCandidate['spots'];
+  /** When the ask became current: the campaign's submission, or the last time a design was sent back. */
+  owedSince: Date;
+  /** The last ADX design on the campaign, if one was ever delivered — for "changes requested" context. */
+  lastDelivery: DesignRequestCandidate['creatives'][number] | null;
+};
+
+/**
+ * Which of the candidates ADX still owes a design.
+ *
+ * Owed when no *current* ADX-designed creative is standing. A design the
+ * advertiser sent back (CHANGES_REQUESTED) or ops refused (REJECTED) is not
+ * standing, so the campaign comes back onto the list with that as context.
+ * Pure, so the rule is tested without a database.
+ */
+export function designRequestsOf(candidates: readonly DesignRequestCandidate[]): DesignRequest[] {
+  const out: DesignRequest[] = [];
+  for (const campaign of candidates) {
+    const current = currentCreatives(campaign.creatives);
+    const adxDesigns = current.filter((creative) => creative.designedByAdx);
+    if (adxDesigns.some((creative) => STANDING.includes(creative.status))) continue;
+
+    const lastDelivery = [...adxDesigns].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0] ?? null;
+    const sentBackAt = lastDelivery?.reviewedAt ?? lastDelivery?.createdAt ?? null;
+    out.push({
+      campaign: {
+        id: campaign.id,
+        reference: campaign.reference,
+        name: campaign.name,
+        status: campaign.status,
+        startDate: campaign.startDate,
+        endDate: campaign.endDate,
+        creativeConfig: campaign.creativeConfig,
+        advertiser: campaign.advertiser,
+        designQuote:
+          campaign.designQuoteAmount && campaign.designQuoteStatus
+            ? { amount: campaign.designQuoteAmount.toFixed(2), status: campaign.designQuoteStatus, note: campaign.designQuoteNote, quotedAt: campaign.designQuotedAt, respondedAt: campaign.designQuoteRespondedAt }
+            : null,
+      },
+      spots: campaign.spots,
+      owedSince: sentBackAt ?? campaign.createdAt,
+      lastDelivery,
+    });
+  }
+  return out;
+}
+
+export async function listDesignRequests(): Promise<DesignRequest[]> {
+  return designRequestsOf(await repository.listDesignRequestCandidates());
+}
+
 export async function listReviewQueue(query: ReviewQueueQuery) {
   const { items, total, counts } = await repository.listCreativesPage({
     ...(query.status ? { status: query.status as never } : {}),
     ...(query.kind ? { kind: query.kind } : {}),
     ...(query.flagged !== undefined ? { flagged: query.flagged } : {}),
     ...(query.resubmitted !== undefined ? { resubmitted: query.resubmitted } : {}),
+    ...(query.analysed !== undefined ? { analysed: query.analysed } : {}),
     ...(query.q ? { q: query.q } : {}),
     sort: query.sort,
     page: query.page,
     pageSize: query.pageSize,
   });
-  return toListPage(items, total, counts, query);
+  // VA-4: every row wears its latest reading, so the desk sees the verdicts before opening a creative.
+  const latest = await repository.latestCreativeAnalyses(items.map((item) => item.id));
+  const byCreative = new Map(latest.map((row) => [row.creativeId, toAnalysisView(row)] as const));
+  const withReading = items.map((item) => ({ ...item, analysis: byCreative.get(item.id) ?? null }));
+  return toListPage(withReading, total, counts, query);
 }
 
 /* ------------------------------------------------------------------ */

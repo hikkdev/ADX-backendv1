@@ -62,16 +62,43 @@ describe('a number with nothing yet', () => {
     expect(result).toMatchObject({ created: true, publisher: { id: 'pub_new', displayId: 'PUB-1009-2601' } });
   });
 
-  it('prefers the name the account already has, and writes a supplied one to the User row too', async () => {
+  it('prefers the name the account already has, and keeps it when another is supplied (the email still lands)', async () => {
     repository.findUserMobile.mockResolvedValue({ mobile: '+919876543210', name: 'Asha Rao' });
     await registerProfile('usr_1');
     expect(repository.createSelfRegistered).toHaveBeenLastCalledWith(expect.objectContaining({ name: 'Asha Rao' }));
 
     await registerProfile('usr_1', { name: 'Asha R.', email: 'asha@example.in' });
-    expect(repository.setUserProfile).toHaveBeenCalledWith('usr_1', 'Asha R.', 'asha@example.in');
+    // 28 Sep 2026: a person who already has a name keeps it; the row takes the one supplied.
+    expect(repository.setUserProfile).toHaveBeenCalledWith('usr_1', undefined, 'asha@example.in');
     expect(repository.createSelfRegistered).toHaveBeenLastCalledWith(
       expect.objectContaining({ name: 'Asha R.', email: 'asha@example.in' }),
     );
+  });
+
+  it("does not write back an email that already is the account's", async () => {
+    repository.findUserMobile.mockResolvedValue({ mobile: '+919876543210', name: null, email: 'asha@example.in' });
+    await registerProfile('usr_1', { email: 'asha@example.in', type: 'BUSINESS', name: 'Acme Outdoor' });
+    expect(repository.setUserProfile).not.toHaveBeenCalled();
+    expect(repository.createSelfRegistered).toHaveBeenLastCalledWith(expect.objectContaining({ email: 'asha@example.in', name: 'Acme Outdoor' }));
+  });
+
+  it("writes an individual's name onto an account with none, so the basics open with it", async () => {
+    await registerProfile('usr_1', { name: 'Asha Rao', type: 'INDIVIDUAL' });
+    expect(repository.setUserProfile).toHaveBeenCalledWith('usr_1', 'Asha Rao', undefined);
+    expect(repository.createSelfRegistered).toHaveBeenLastCalledWith(expect.objectContaining({ name: 'Asha Rao', type: 'INDIVIDUAL' }));
+  });
+
+  /*
+   * 28 Sep 2026: a business name written onto the person made the basics
+   * mirror take it for a placeholder and rename the business after the
+   * person. It stays on the publisher row only.
+   */
+  it('never writes a business or organisation name onto the person', async () => {
+    await registerProfile('usr_1', { name: 'Acme Outdoor', type: 'BUSINESS' });
+    await registerProfile('usr_1', { name: 'Seva Trust', type: 'NGO' });
+    expect(repository.setUserProfile).not.toHaveBeenCalled();
+    expect(repository.createSelfRegistered).toHaveBeenCalledWith(expect.objectContaining({ name: 'Acme Outdoor', type: 'BUSINESS' }));
+    expect(repository.createSelfRegistered).toHaveBeenLastCalledWith(expect.objectContaining({ name: 'Seva Trust', type: 'NGO' }));
   });
 });
 
@@ -91,6 +118,14 @@ describe('a number that already has a row', () => {
     expect(identifiers.allocateIdentifier).not.toHaveBeenCalled();
     expect(repository.createSelfRegistered).not.toHaveBeenCalled();
     expect(result).toEqual({ publisher: { id: 'pub_held', userId: 'usr_1' }, created: false });
+  });
+
+  it("returns the caller's own row that a racing request opened, rather than refusing it (a double tap)", async () => {
+    repository.findByMobile.mockResolvedValue({ id: 'pub_raced', userId: 'usr_1', displayId: 'PUB-1009-2601' });
+    const result = await registerProfile('usr_1', { type: 'INDIVIDUAL' });
+    expect(result).toEqual({ publisher: { id: 'pub_raced', userId: 'usr_1', displayId: 'PUB-1009-2601' }, created: false });
+    expect(identifiers.allocateIdentifier).not.toHaveBeenCalled();
+    expect(repository.createSelfRegistered).not.toHaveBeenCalled();
   });
 
   it('refuses a row that belongs to somebody else', async () => {

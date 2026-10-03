@@ -7,6 +7,8 @@
  * argument, because it is read from the `City` table rather than typed.
  */
 
+import { ELEVATIONS, LISTING_VEHICLE_TYPES, TRAFFIC_GRADES, VISIBILITY_RANGES, flowOptionsOf } from '../../shared/listing-vocabulary';
+
 export type CityOption = { id: string; title: string; description?: string };
 
 /**
@@ -42,6 +44,74 @@ const FACING_OPTIONS = [
  * no address to prove. The kinds themselves are `ListingDocumentKind` and are
  * posted to `POST /supply/listings/:listingId/documents` one at a time.
  */
+/*
+ * LF-2 (the owner, 28 Sep 2026): "I don't want any difference between how
+ * website flow works and how app flow works." The website's designed wizard
+ * (DR 12 board 08) asked more than this flow did — installation, the vehicle
+ * model, a broadcast outlet's language, format and slot, the audience
+ * evidence, the booking terms, the rate card's validity and the four photo
+ * angles. They are the flow's now, so every surface asks them. The option
+ * ids are the words stored in the listing's columns (as ILLUMINATION's are),
+ * except where a column is a number of days, where the id is that number.
+ */
+const opts = (words: readonly string[]) => words.map((word) => ({ id: word, title: word }));
+
+const LANGUAGES = ['Hindi', 'English', 'Hindi · English', 'Kannada', 'Tamil', 'Telugu', 'Malayalam', 'Marathi', 'Bengali', 'Gujarati', 'Punjabi', 'Other'];
+const CONTENT_FORMATS = ['Music and entertainment', 'News and current affairs', 'Talk and interviews', 'Sports', 'Regional programming', 'Business', 'Lifestyle', 'Other'];
+const SLOT_DURATIONS = ['10 seconds', '15 seconds', '20 seconds', '30 seconds', '60 seconds', 'Quarter page', 'Half page', 'Full page', 'Other'];
+
+const AGE_BANDS = ['18–24', '25–34', '35–44', '45–54', '55+', 'Mixed'];
+const GENDER_SPLITS = ['Mostly men', 'Mostly women', 'Balanced'];
+const URBAN_RURAL = ['Urban', 'Semi-urban', 'Rural', 'Mixed'];
+const SEC_PROFILES = ['SEC A', 'SEC A / B', 'SEC B', 'SEC B / C', 'SEC C', 'Mixed'];
+const INCOME_BRACKETS = ['Under ₹3 lakh a year', '₹3 – 6 lakh', '₹6 – 12 lakh', '₹12 – 25 lakh', 'Over ₹25 lakh', 'Mixed'];
+const OCCUPATIONS = ['Office workers', 'Students', 'Shoppers', 'Commuters', 'Business owners', 'Families', 'Tourists', 'Mixed'];
+
+/** `availableYearRound` on the listing (LF-2): yes → true, no → false. Never `availableNow`, which LD-1 asks as its own switch. */
+const YEAR_ROUND = [
+  { id: 'yes', title: 'Yes, all year' },
+  { id: 'no', title: 'No — only in some seasons' },
+];
+/** `maxBookingDays` — the id is the number of days. */
+const MAX_BOOKING = [
+  { id: '7', title: '7 days' },
+  { id: '14', title: '14 days' },
+  { id: '30', title: '30 days' },
+  { id: '90', title: '90 days' },
+  { id: '180', title: '180 days' },
+  { id: '365', title: '1 year' },
+];
+/** `advanceBookingDays` — the id is the number of days. */
+const ADVANCE_BOOKING = [
+  { id: '0', title: 'No notice needed' },
+  { id: '3', title: '3 days ahead' },
+  { id: '7', title: '7 days ahead' },
+  { id: '14', title: '14 days ahead' },
+  { id: '30', title: '30 days ahead' },
+];
+/**
+ * `cancellationPolicy` + `cancellationNoticeDays`: flexible → FLEXIBLE; a
+ * number → NOTICE with that many days; none → NONE. A days-only column could
+ * not say "free up to 48 hours before" or "no cancellation once confirmed".
+ */
+const CANCELLATION_NOTICE = [
+  { id: 'flexible', title: 'Flexible · free up to 48 hours before' },
+  { id: '7', title: "7 days' notice" },
+  { id: '14', title: "14 days' notice" },
+  { id: '30', title: "30 days' notice" },
+  { id: 'none', title: 'No cancellation once confirmed' },
+];
+/** `seasonalVariationNote` — stored as the words chosen. */
+const SEASONAL_VARIATIONS = opts([
+  'No seasonal change',
+  'Higher in the festive season (Oct – Dec)',
+  'Higher in the wedding season',
+  'Lower in summer',
+  'Lower in the monsoon',
+  'Premium in event weeks',
+  'Other — noted on the card',
+]);
+
 /** QR-24: the ways a space is held; everything but OWNED carries a date it runs out. */
 const RIGHTS_OPTIONS = [
   { id: 'OWNED', title: 'I own it', description: 'The land, wall or vehicle is yours' },
@@ -87,7 +157,9 @@ function documentKinds(category: string) {
 }
 
 /**
- * The listing wizard: seven steps, then a review.
+ * The listing wizard: ten steps, then the papers and a review (LF-2, 28 Sep
+ * 2026, added audience evidence, booking terms and the rate card — the
+ * numbered list below is the original seven).
  *
  * DR 02 draws it as "Step N of 7", and the seven are a sequence rather than a
  * list — each one narrows what the next may offer. Category decides which
@@ -119,7 +191,7 @@ export const LISTING_FLOW = {
       key: 'select-category',
       title: 'Ad space category',
       subtitle: 'Choose the ad space category for this listing.',
-      step: 1, totalSteps: 7, ctaLabel: 'Continue',
+      step: 1, totalSteps: 10, ctaLabel: 'Continue',
       fields: [
         {
           id: 'category',
@@ -160,7 +232,7 @@ function listingBranch(id: string, title: string, description: string, cities: C
         key: 'venue',
         title: 'Venue selection',
         subtitle: 'Where the spot lives. This decides which spots yours is priced against.',
-        step: 2, totalSteps: 7, ctaLabel: 'Continue',
+        step: 2, totalSteps: 10, ctaLabel: 'Continue',
         fields: [
           // The controlled list, filtered by the category chosen in step 1.
           // Outdoor spots have no venue — a hoarding is on a road, not inside
@@ -179,7 +251,7 @@ function listingBranch(id: string, title: string, description: string, cities: C
         key: 'spot-type',
         title: 'Ad spot type',
         subtitle: 'What kind of spot it is. Only the formats this venue actually has.',
-        step: 3, totalSteps: 7, ctaLabel: 'Continue',
+        step: 3, totalSteps: 10, ctaLabel: 'Continue',
         fields: [
           // Resolved against the taxonomy rather than typed. A name that matches
           // nothing is logged for ops instead of quietly minting a duplicate.
@@ -191,7 +263,7 @@ function listingBranch(id: string, title: string, description: string, cities: C
         key: 'spot-details',
         title: 'Spot details',
         subtitle: 'Add core info for the selected ad spot.',
-        step: 4, totalSteps: 7, ctaLabel: 'Save spot details',
+        step: 4, totalSteps: 10, ctaLabel: 'Save spot details',
         fields: [
           // The frame heads this group with the spot type the publisher picked
           // — "Mirror Decals" — rather than a fixed word, so the section names
@@ -230,6 +302,50 @@ function listingBranch(id: string, title: string, description: string, cities: C
           // inside a free-text address — which is where it was until now —
           // matched no market at all.
           { type: 'city', id: 'city', label: 'City', placeholder: 'Bengaluru', required: id !== 'media', options: cities },
+          /*
+           * VH-3: a moving spot's registration.
+           *
+           * Transit only, and optional there: the branch covers a metro
+           * station and a taxi wrap alike, and a platform hoarding has no
+           * plate. Optional is the honest setting — a publisher who cannot
+           * find the RC book in the moment must still be able to finish the
+           * listing, and ADX can ask later.
+           *
+           * The app draws a Verify button under this field (it is matched on
+           * the id), which checks the number against the vehicle register and
+           * says whether the owner matches the publisher. The check is the
+           * app's because it calls a vendor; whether the field is ASKED at
+           * all is decided here, so the categories can change without a
+           * release.
+           */
+          ...(id === 'transit'
+            ? [
+                { type: 'section', id: 'sec_vehicle', label: 'Vehicle' },
+                // LD-1 (3 Oct 2026): the kind of vehicle, stored as a code (AUTO, CAR, CAB, BUS, TRUCK, OTHER) in `vehicleType`.
+                { type: 'select', id: 'vehicle_type', label: 'What kind of vehicle?', required: false, options: flowOptionsOf(LISTING_VEHICLE_TYPES) },
+                {
+                  type: 'text',
+                  id: 'vehicle_number',
+                  label: 'Vehicle registration number',
+                  placeholder: 'KA 01 AB 1234',
+                  hint: 'If this spot is a vehicle. Leave it blank for a station, a platform or a shelter.',
+                  required: false,
+                },
+                // LF-2: the website's "Vehicle type / model" (column `vehicleModel`). LD-1: the kind is
+                // asked above as a closed list, so this is the model in the publisher's words.
+                { type: 'text', id: 'vehicle_model', label: 'Vehicle model', placeholder: 'e.g. Bajaj RE, Tata Starbus', required: false },
+              ]
+            : []),
+          // LF-2: a broadcast or print outlet, as the website's "Outlet" asked it (columns
+          // `broadcastLanguage`, `contentFormat`, and `size` for the slot).
+          ...(id === 'media'
+            ? [
+                { type: 'section', id: 'sec_outlet', label: 'Outlet' },
+                { type: 'select', id: 'broadcast_language', label: 'Broadcast language', required: false, options: opts(LANGUAGES) },
+                { type: 'select', id: 'content_format', label: 'Content format', required: false, options: opts(CONTENT_FORMATS) },
+                { type: 'select', id: 'slot_duration', label: 'Slot duration', required: false, options: opts(SLOT_DURATIONS) },
+              ]
+            : []),
           { type: 'section', id: 'sec_location', label: 'Location Pin' },
           // Comparables are found within 200 m and the radius never widens, so
           // this has to be the spot rather than the neighbourhood.
@@ -256,13 +372,56 @@ function listingBranch(id: string, title: string, description: string, cities: C
                 { type: 'select', id: 'illumination', label: 'Illumination', required: false, options: ILLUMINATION_OPTIONS },
                 { type: 'select', id: 'facing', label: 'Facing', required: false, options: FACING_OPTIONS },
               ]),
+          /*
+           * LD-1 (the owner, 3 Oct 2026): the columns a buyer reads and a
+           * pricing factor keys on that no form filled. A fixed physical spot
+           * is asked how many pass it, how busy and how far it is seen; an
+           * outdoor one how high it stands. Not transit (the spot moves) and
+           * not media (a broadcast has no street). All optional; the selects
+           * store codes (`shared/listing-vocabulary`), the clients print the words.
+           */
+          ...(id === 'indoor' || id === 'outdoor'
+            ? [
+                {
+                  type: 'number',
+                  id: 'estimated_daily_footfall',
+                  label: 'About how many people pass this spot in a day?',
+                  placeholder: 'e.g. 2500',
+                  hint: 'Your best estimate — we may refine it with measured data.',
+                  required: false,
+                },
+                { type: 'select', id: 'traffic_grade', label: 'How busy is it?', required: false, options: flowOptionsOf(TRAFFIC_GRADES) },
+                { type: 'select', id: 'visibility', label: 'From how far can it be seen?', required: false, options: flowOptionsOf(VISIBILITY_RANGES) },
+              ]
+            : []),
+          ...(id === 'outdoor'
+            ? [{ type: 'select', id: 'elevation', label: 'How high is it?', required: false, options: flowOptionsOf(ELEVATIONS) }]
+            : []),
+          /*
+           * LD-1: a digital screen's resolution, for the artwork spec
+           * (`widthPx` x `heightPx`). The flow has no conditional fields, so
+           * the clients draw this pair only for a digital screen — the media
+           * type's loop rule, or "Digital" illumination — and the section
+           * says so for any other renderer.
+           */
+          ...(id === 'media'
+            ? []
+            : [
+                { type: 'section', id: 'sec_screen', label: 'Screen resolution (pixels)', hint: 'Digital screens only.' },
+                { type: 'number', id: 'width_px', label: 'Width (px)', placeholder: 'e.g. 1920', required: false },
+                { type: 'number', id: 'height_px', label: 'Height (px)', placeholder: 'e.g. 1080', required: false },
+              ]),
+          // LF-2: the website's tick (column `installationByAdx`) — a fixed spot ADX may put the creative up on.
+          ...(id === 'indoor' || id === 'outdoor'
+            ? [{ type: 'checkbox', id: 'installation_by_adx', label: 'Installation by ADX', description: 'ADX installs the creative on this spot. Special pricing applies.', required: false }]
+            : []),
         ],
       },
       {
         key: 'more-info',
         title: 'More info',
         subtitle: 'Add the selling story for this ad spot.',
-        step: 5, totalSteps: 7, ctaLabel: 'Save listing details',
+        step: 5, totalSteps: 10, ctaLabel: 'Save listing details',
         fields: [
           // The AI assist DR 02 draws beside this field is a separate feature
           // and deliberately not described here: this config says what the flow
@@ -274,10 +433,37 @@ function listingBranch(id: string, title: string, description: string, cities: C
         ],
       },
       {
+        /*
+         * LF-2: the website's "Audience evidence" — optional, all of it. The six
+         * answers are stored together as the listing's `audienceDemographics`
+         * ({ ageBand, genderSplit, urbanRural, secProfile, incomeBracket,
+         * occupation }); the two reports are filed as listing documents
+         * (AUDIENCE_RATING, FOOTFALL_AUDIT) once the listing exists.
+         */
+        key: 'audience',
+        title: 'Audience evidence',
+        subtitle: 'Who sees this space, if you know. All optional.',
+        step: 6, totalSteps: 10, ctaLabel: 'Save audience evidence',
+        fields: [
+          { type: 'section', id: 'sec_audience', label: 'Audience profile' },
+          { type: 'select', id: 'age_band', label: 'Primary age band', required: false, options: opts(AGE_BANDS) },
+          { type: 'select', id: 'gender_split', label: 'Gender split', required: false, options: opts(GENDER_SPLITS) },
+          { type: 'select', id: 'urban_rural', label: 'Urban / rural mix', required: false, options: opts(URBAN_RURAL) },
+          { type: 'select', id: 'sec_profile', label: 'SEC profile', required: false, options: opts(SEC_PROFILES) },
+          { type: 'section', id: 'sec_income', label: 'Income & occupation' },
+          { type: 'select', id: 'income_bracket', label: 'Income bracket', required: false, options: opts(INCOME_BRACKETS) },
+          { type: 'select', id: 'occupation', label: 'Top occupation', required: false, options: opts(OCCUPATIONS) },
+          { type: 'section', id: 'sec_reports', label: 'Supporting reports' },
+          { type: 'file-upload', id: 'barc_report', label: 'BARC / TAM rating sheet', hint: 'PDF or image · the latest quarter', required: false },
+          // The website's design said "PDF or Excel"; the upload door takes images, PDF and video only, so the hint says what it takes.
+          { type: 'file-upload', id: 'footfall_report', label: 'Footfall audit report', hint: 'PDF or image', required: false },
+        ],
+      },
+      {
         key: 'content-rules',
         title: 'Content rules',
         subtitle: 'Set the brand safety limits for this inventory.',
-        step: 6, totalSteps: 7, ctaLabel: 'Review listing',
+        step: 7, totalSteps: 10, ctaLabel: 'Save content rules',
         fields: [
           // Two strengths of the same statement, drawn differently because they
           // mean different things: a restricted category can run with the
@@ -287,10 +473,29 @@ function listingBranch(id: string, title: string, description: string, cities: C
         ],
       },
       {
+        /*
+         * LF-2: the website's "Availability & booking terms" (columns `availableNow`,
+         * `maxBookingDays`, `advanceBookingDays`, `cancellationPolicy` +
+         * `cancellationNoticeDays`). The minimum booking stays with the price.
+         */
+        key: 'terms',
+        title: 'Availability & booking terms',
+        subtitle: 'When the space can be booked, and on what terms.',
+        step: 8, totalSteps: 10, ctaLabel: 'Save booking terms',
+        fields: [
+          // LD-1: the live `availableNow` flag, asked plainly; on unless the publisher says otherwise.
+          { type: 'switch', id: 'available_now', label: 'Available to book now?', required: false },
+          { type: 'select', id: 'available_year_round', label: 'Available year-round?', required: false, options: YEAR_ROUND },
+          { type: 'select', id: 'max_booking_days', label: 'Maximum booking period', required: false, options: MAX_BOOKING },
+          { type: 'select', id: 'advance_booking_days', label: 'Advance booking required', required: false, options: ADVANCE_BOOKING },
+          { type: 'select', id: 'cancellation_notice', label: 'Cancellation notice', required: false, options: CANCELLATION_NOTICE },
+        ],
+      },
+      {
         key: 'pricing',
         title: 'Pricing & availability',
         subtitle: 'You set this. ADX only tells you how it compares to spots nearby.',
-        step: 7, totalSteps: 7, ctaLabel: 'Save price & availability',
+        step: 9, totalSteps: 10, ctaLabel: 'Save price & availability',
         fields: [
           // The publisher's own unit. A mall quotes per square foot per month; a
           // billboard owner quotes per day. Converting in their head is how a
@@ -310,9 +515,25 @@ function listingBranch(id: string, title: string, description: string, cities: C
           { type: 'date', id: 'available_from', label: 'Available from' },
           { type: 'time-range', id: 'available_hours', label: 'Visibility hours', placeholder: '10 AM - 10 PM' },
           { type: 'text', id: 'peak_period_note', label: 'Peak period note', placeholder: 'Evenings and weekends' },
+        ],
+      },
+      {
+        /*
+         * LF-2: the website's "Rate card" — the file, when it holds, and how the
+         * price moves through the year (columns `rateCardUrl`, `rateCardValidFrom`,
+         * `rateCardValidTo`, `seasonalVariationNote`).
+         */
+        key: 'rate-card',
+        title: 'Rate card',
+        subtitle: 'Your published rates, if you have them. All optional.',
+        step: 10, totalSteps: 10, ctaLabel: 'Save rate card',
+        fields: [
           // Evidence, not a price ADX applies. A publisher's rate card is a
           // PROVISIONAL comparable at best, and never their own listing's price.
           { type: 'file-upload', id: 'rate_card', label: 'Upload rate card', hint: 'PDF or image, optional' },
+          { type: 'date', id: 'rate_card_valid_from', label: 'Validity start', required: false },
+          { type: 'date', id: 'rate_card_valid_to', label: 'Validity end', required: false },
+          { type: 'select', id: 'rate_card_seasonal', label: 'Seasonal variation', required: false, options: SEASONAL_VARIATIONS },
         ],
       },
       {
@@ -331,7 +552,7 @@ function listingBranch(id: string, title: string, description: string, cities: C
          * review screen, then posts each one to
          * POST /supply/listings/:listingId/documents before submitting.
          */
-        step: 8, totalSteps: 7, badge: 'Verification', ctaLabel: 'Save proofs',
+        step: 11, totalSteps: 10, badge: 'Verification', ctaLabel: 'Save proofs',
         fields: [
           /*
            * QR-24: a hoarding on a highway, a shelter, a digital billboard —
@@ -365,9 +586,12 @@ function listingBranch(id: string, title: string, description: string, cities: C
         title: 'Review & submit',
         subtitle: 'Check everything before it goes for approval.',
         // Unnumbered: DR 02 counts seven steps and this collects nothing new.
-        step: 9, totalSteps: 7, ctaLabel: 'Submit listing',
+        step: 12, totalSteps: 10, ctaLabel: 'Submit listing',
         fields: [
-          { type: 'image-upload', id: 'main_photo', label: 'Main photo', required: true },
+          // LF-2: the website's "3 to 5 angles" — front (the main photo), left, right and wide.
+          { type: 'image-upload', id: 'main_photo', label: 'Main photo (front)', required: true },
+          { type: 'image-upload', id: 'left_photo', label: 'Left angle' },
+          { type: 'image-upload', id: 'right_photo', label: 'Right angle' },
           { type: 'image-upload', id: 'wide_photo', label: 'Wide angle shot' },
           { type: 'checkbox', id: 'terms', label: 'Terms agreement', description: 'I confirm that all information provided is accurate and I agree to ADX listing guidelines.', required: true },
         ],

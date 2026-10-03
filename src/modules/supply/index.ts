@@ -32,6 +32,13 @@ export type { RightsState } from './supply.service';
  */
 export { createAttempt, attachListingToAttempt, getAttempt } from './supply.service';
 
+/**
+ * ST-2 (28 Sep 2026): the listings a stored file is filed on as a document,
+ * and each one's publisher login — bootstrap asks it for `uploads`'
+ * private-file door, which cannot import this module.
+ */
+export { listingsNamingFile } from './supply.service';
+
 /** O-B: the five supply gates counted, for `section-overviews` — the platform's state now, the same read `GET /supply/funnel` answers. */
 export { getFunnel as supplyFunnel } from './supply.service';
 export type { SupplyFunnel } from './supply.repository';

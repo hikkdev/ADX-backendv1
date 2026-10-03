@@ -1,10 +1,12 @@
+import { accountClosedAt, assertOpenForKyc } from '../../../shared/party-status';
 import type { Request } from 'express';
 import { applyKycDecision, applyKycDecisionByUserId, findAdvertiser, getAdvertiserForUser } from '../../advertisers';
 import { ApiError } from '../../../shared/errors';
 import { logger } from '../../../shared/logging';
 import { auditDiff, logActivity } from '../../../shared/audit';
 import type { Advertiser, AdvertiserKyc, KycStatus } from '../../../shared/database';
-import { kycStateCounts } from '../../../shared/kyc-state';
+import { isUpgradeRequest, kycStateCounts } from '../../../shared/kyc-state';
+import { cashfreeIdentityProven } from '../../../shared/verification';
 import { createNotification, notify } from '../../notifications';
 import {
   KYC_DEEP_LINK,
@@ -13,11 +15,11 @@ import {
   type AssignCaseInput,
   type DocumentDecisionInput,
   type KycEscalateInput,
-  type KycRequestInput,
+  type KycEntityRequestInput,
   type ReuploadRequestInput,
 } from '../kyc.schema';
 import { escalateKyc } from '../escalation.service';
-import { initiateAdvertiserDigioKyc } from './advertiser-digio.service';
+import { initiateAdvertiserDigioKyc, noteEntityTypeForManualRequest } from './advertiser-digio.service';
 import { prismaAdvertiserKycRepository as repository } from './prisma-advertiser-kyc.repository';
 import type { AdvertiserKycFilter, AdvertiserKycKey, AdvertiserKycSort } from './advertiser-kyc.repository';
 import { slaAge, slaCutoff } from '../../../shared/time';
@@ -26,7 +28,7 @@ import { clearDocumentReviews, flagDocuments, flaggedDocuments, listDocumentRevi
 import { hasSubmittedLiveness, livenessStateFor } from '../user/user-kyc.service';
 import { resolveManifestVersion } from '../manifest-pin';
 import { kycCaseExtras, kycLabelFor, kycUserLabels } from '../case-read';
-import { ADVERTISER_KYC_DOCUMENT_FIELDS, type CreateAdvertiserKycInput, type UpdateAdvertiserKycInput } from './advertiser-kyc.schema';
+import { ADVERTISER_KYC_DOCUMENT_FIELDS, advertiserDocumentField, withFlaggedPanAlias, withPanAlias, type CreateAdvertiserKycInput, type UpdateAdvertiserKycInput } from './advertiser-kyc.schema';
 
 /* ── N3-B: the record is keyed by the profile ────────────────────────────── */
 
@@ -161,7 +163,7 @@ export async function listAdvertiserKycs(
 export async function getMyAdvertiserKyc(userId: string) {
   const { kyc } = await resolveSelf(userId);
   if (!kyc) throw new ApiError(404, 'NOT_FOUND', 'KYC not found');
-  return kyc;
+  return withPanAlias(kyc);
 }
 
 export async function getAdvertiserKycById(id: string) {
@@ -197,7 +199,7 @@ export async function getAdvertiserKycCase(id: string, now = new Date()) {
     // E7-3: the age against the SLA, the reviewer and the assignee by name.
     kycCaseExtras(kyc, now),
   ]);
-  return { ...kyc, documentReviews, liveness, ...extras };
+  return { ...withPanAlias(kyc), documentReviews, liveness, ...extras };
 }
 
 /**
@@ -212,7 +214,7 @@ export async function createAdvertiserKyc(userId: string, input: CreateAdvertise
   const created = await repository.create(key, data);
   await pinManifest(key, manifestVersion);
   await mirrorStatus(created);
-  return created;
+  return withPanAlias(created);
 }
 
 /** Lot F: the manifest version is pinned once, at the first submission, and never moves. */
@@ -248,7 +250,7 @@ export async function resubmitAdvertiserKyc(
   const sent = Object.keys(data);
   if (sent.length) await clearDocumentReviews('ADVERTISER', resubmitted.id, sent);
   await mirrorStatus(resubmitted);
-  return resubmitted;
+  return withPanAlias(resubmitted);
 }
 
 /**
@@ -353,15 +355,22 @@ async function auditRecordedAtDesk(
  * skipped with a logged reason and the answer says `notified: false`. A
  * VERIFIED record is 409.
  */
-export async function requestAdvertiserKyc(id: string, input: KycRequestInput, byUserId: string, req?: Request, now = new Date()) {
+export async function requestAdvertiserKyc(id: string, input: KycEntityRequestInput, byUserId: string, req?: Request, now = new Date()) {
   const { kyc: current, advertiser } = await resolveAdvertiserCase(id);
   if (!advertiser) throw new ApiError(404, 'NOT_FOUND', 'No advertiser behind that id');
-  if (current?.status === 'VERIFIED') {
+  // Account lifecycle (2 Oct 2026): a closed account is never asked; one suspended from new work, not until reinstated.
+  assertOpenForKyc({ closedAt: await accountClosedAt(advertiser.userId), suspensionScopes: advertiser.suspensionScopes });
+  // Phase D: the upgrade — a verified individual verifying again as a business — is the one Digio request a verified advertiser may have.
+  const upgrade = input.channel === 'DIGIO' && isUpgradeRequest('ADVERTISER', advertiser, input.entityType);
+  if (current?.status === 'VERIFIED' && !upgrade) {
     throw new ApiError(409, 'KYC_ALREADY_VERIFIED', 'This advertiser is already verified; there is nothing to request');
   }
   const key = keyFor(advertiser, null, current);
 
-  const digio = input.channel === 'DIGIO' ? await initiateAdvertiserDigioKyc(advertiser) : null;
+  // Phase D: Digio needs the legal form (409 ENTITY_TYPE_REQUIRED before anything is stamped); a manual request stores one when given.
+  const start = { byUserId, entityType: input.entityType, req };
+  const digio = input.channel === 'DIGIO' ? await initiateAdvertiserDigioKyc(advertiser, start, now) : null;
+  if (input.channel !== 'DIGIO') await noteEntityTypeForManualRequest(advertiser, start);
   const kyc = await repository.requestKyc(key, { requestedById: byUserId, requestedChannel: input.channel, at: now });
 
   await logActivity(byUserId, 'ADVERTISER_KYC_REQUESTED', {
@@ -418,7 +427,8 @@ export async function reviewAdvertiserKyc(
   const kycCase = await getAdvertiserKycById(id);
   const userId = kycCase.advertiserId;
 
-  if (status === 'VERIFIED' && kycCase.method !== 'DIGIO' && !(userId && (await hasSubmittedLiveness(userId)))) {
+  // Cashfree Phase 1: a Cashfree session whose liveness and face match passed proved the person the way Digio does.
+  if (status === 'VERIFIED' && kycCase.method !== 'DIGIO' && !(userId && (await hasSubmittedLiveness(userId))) && !(kycCase.advertiserProfileId && (await cashfreeIdentityProven('ADVERTISER_KYC', kycCase.advertiserProfileId)))) {
     throw new ApiError(
       409,
       'LIVENESS_REQUIRED',
@@ -498,7 +508,8 @@ async function advertiserNameFor(kyc: AdvertiserKyc): Promise<string> {
 /* ── Lot D (Q42/Q119): the per-document desk ─────────────────────────────── */
 
 /** PATCH /advertiser-kyc/:id/documents/:field — one tile approved or flagged. */
-export async function reviewAdvertiserDocument(id: string, field: string, input: DocumentDecisionInput, byUserId: string, req?: Request) {
+export async function reviewAdvertiserDocument(id: string, named: string, input: DocumentDecisionInput, byUserId: string, req?: Request) {
+  const field = advertiserDocumentField(named);
   if (!ADVERTISER_KYC_DOCUMENT_FIELDS.includes(field)) {
     throw new ApiError(400, 'VALIDATION_ERROR', `Unknown document field: ${field}`);
   }
@@ -520,7 +531,9 @@ export async function reviewAdvertiserDocument(id: string, field: string, input:
  * told exactly which to send again (when they have an app account). N3-B:
  * the mirror goes NEEDS_INFO with it.
  */
-export async function requestAdvertiserReupload(id: string, input: ReuploadRequestInput, byUserId: string, req?: Request) {
+export async function requestAdvertiserReupload(id: string, named: ReuploadRequestInput, byUserId: string, req?: Request) {
+  // 26 Sep 2026: the manifest's `panFrontUrl` is this row's `panCardUrl`.
+  const input = { ...named, fields: [...new Set(named.fields.map(advertiserDocumentField))] };
   const unknown = input.fields.filter((field) => !ADVERTISER_KYC_DOCUMENT_FIELDS.includes(field));
   if (unknown.length) throw new ApiError(400, 'VALIDATION_ERROR', `Unknown document fields: ${unknown.join(', ')}`);
   const kycCase = await getAdvertiserKycById(id);
@@ -583,7 +596,8 @@ export async function advertiserKycReviewStateFor(userId: string) {
     reviewNote: row.reviewNote,
     /** Lot F: the manifest version pinned at the first submission, for the server-side pin. */
     manifestVersion: row.manifestVersion ?? null,
-    flagged: await flaggedDocuments('ADVERTISER', row.id),
+    // 26 Sep 2026: a flagged `panCardUrl` is also named `panFrontUrl`, the manifest's PAN tile.
+    flagged: withFlaggedPanAlias(await flaggedDocuments('ADVERTISER', row.id)),
   };
 }
 
@@ -595,6 +609,15 @@ export async function escalateAdvertiserCase(id: string, input: KycEscalateInput
 }
 
 export async function deleteAdvertiserKyc(id: string) {
-  await getAdvertiserKycById(id);
+  const kyc = await getAdvertiserKycById(id);
+  // Account lifecycle (2 Oct 2026): a decided case is the record of a decision — kept, never deleted.
+  assertUndecided(kyc.status);
   await repository.remove(id);
+}
+
+/** Account lifecycle: VERIFIED and REJECTED are decisions; the row that holds one is not removed. */
+export function assertUndecided(status: KycStatus): void {
+  if (status === 'VERIFIED' || status === 'REJECTED') {
+    throw new ApiError(409, 'KYC_DECIDED', 'This KYC case has been decided, so it is kept on the record and cannot be deleted.', { status });
+  }
 }

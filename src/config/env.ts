@@ -2,6 +2,12 @@ import './load-env';
 import { z } from 'zod';
 import { parseTrustProxy } from './trust-proxy';
 
+/** 32 bytes as 64 hex characters or as base64 — the shape every AES-256 key here is given in. */
+function decodesTo32Bytes(value: string): boolean {
+  const raw = /^[0-9a-fA-F]{64}$/.test(value) ? Buffer.from(value, 'hex') : Buffer.from(value, 'base64');
+  return raw.length === 32;
+}
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(3000),
@@ -31,6 +37,22 @@ const envSchema = z.object({
    */
   TOTP_ENCRYPTION_KEY: z.string().optional().or(z.literal('').transform(() => undefined)),
   /**
+   * Cashfree Phase 1 (the owner, 1 Oct 2026: "Go ahead, Encrypt it"): the
+   * AES-256-GCM key the integrations row's secrets are sealed with at rest
+   * (shared/integrations/secret-box.ts) — 32 bytes as base64 (or 64 hex
+   * characters). Unset, development keeps the row in plaintext and says so
+   * once per boot; production refuses to save a secret (503
+   * ENCRYPTION_KEY_MISSING). A value that does not decode to 32 bytes stops
+   * the boot rather than seal anything under a short key.
+   */
+  INTEGRATIONS_ENCRYPTION_KEY: z
+    .string()
+    .optional()
+    .or(z.literal('').transform(() => undefined))
+    .refine((value) => value === undefined || decodesTo32Bytes(value), {
+      message: 'INTEGRATIONS_ENCRYPTION_KEY must decode to 32 bytes (base64, or 64 hex characters)',
+    }),
+  /**
    * The scratch database the monthly restore drill restores the newest dump
    * into (jobs/restore-drill.job.ts). Optional: unset, the drill logs a
    * warning and does nothing. It must never name the production database.
@@ -59,7 +81,7 @@ const envSchema = z.object({
   SMTP_PORT: z.preprocess((v) => (v === '' ? undefined : v), z.coerce.number().int().positive().optional()),
   SMTP_USER: z.string().optional(),
   SMTP_PASSWORD: z.string().optional(),
-  SMTP_FROM: z.string().default('ADX Admin <no-reply@adx.local>'),
+  SMTP_FROM: z.string().default('ADX <no-reply@mail.adx.in>'),
   // AE-B: the SMTP door's mode — SMTP (the host above) or ETHEREAL (a
   // throwaway test inbox, nothing delivered). The integrations row wins.
   EMAIL_MODE: z.preprocess((v) => (v === '' ? undefined : v), z.enum(['SMTP', 'ETHEREAL']).optional()),
@@ -93,6 +115,13 @@ const envSchema = z.object({
     .string()
     .default('false')
     .transform((value) => value.toLowerCase() === 'true'),
+  /**
+   * RP-1: who sits in the Super admin chair when no open account holds it at
+   * boot — a mobile (+91…) or an email of an open ADMIN account. Unset, the
+   * oldest open ADMIN is seated. Read once, at boot; never re-seats while
+   * anyone open holds the role.
+   */
+  BOOTSTRAP_SUPER_ADMIN: z.string().trim().min(1).optional(),
   // Outside production, OTP is delivered through the terminal and the send-otp
   // response, so a live SMS is a cost and a failure mode with nothing to gain.
   // Set to "true" only to test the MSG91 path itself. Not z.coerce.boolean():
@@ -110,7 +139,13 @@ const envSchema = z.object({
   // Digio KYC
   DIGIO_CLIENT_ID: z.string().optional(),
   DIGIO_CLIENT_SECRET: z.string().optional(),
-  DIGIO_BASE_URL: z.string().url().default('https://ext-enterprise.digio.in'), // sandbox default
+  /**
+   * Digio's API host (30 Sep 2026, confirmed against Digio's onboarding and
+   * its sandbox): https://ext.digio.in:444 in the sandbox, https://api.digio.in
+   * in production. ext-enterprise.digio.in / enterprise.digio.in are the
+   * dashboards people sign in to — not the API; every call there fails.
+   */
+  DIGIO_BASE_URL: z.string().url().default('https://ext.digio.in:444'),
   /**
    * Shared secret Digio signs webhook bodies with.
    *
@@ -175,9 +210,13 @@ const envSchema = z.object({
   // because a login endpoint that skips its check lets anyone in.
   GOOGLE_CLIENT_ID: z.string().optional(),
   // Comma-separated Workspace domains allowed to sign in, matched against the
-  // ID token's `hd` claim (e.g. "adx.co"). Blank means any Google account may
+  // ID token's `hd` claim (e.g. "adx.in"). Blank means any Google account may
   // attempt it — the account must still already exist in ADX either way.
   GOOGLE_ALLOWED_DOMAINS: z.string().default(''),
+  // FB-1: Facebook Login — the app id and secret the website's SDK button is
+  // issued for. Also settable under Settings › Integrations; either place.
+  FACEBOOK_APP_ID: z.string().optional(),
+  FACEBOOK_APP_SECRET: z.string().optional(),
   // Razorpay — payments
   RAZORPAY_KEY_ID: z.string().optional(),
   RAZORPAY_KEY_SECRET: z.string().optional(),
@@ -218,6 +257,16 @@ const envSchema = z.object({
   CASHFREE_VERIFICATION_CLIENT_ID: z.string().optional(),
   CASHFREE_VERIFICATION_CLIENT_SECRET: z.string().optional(),
   CASHFREE_VERIFICATION_TEST_MODE: z.string().optional(),
+  /**
+   * Cashfree Phase 1: the Secure ID public key (Developers › Two-Factor
+   * Authentication › Public Key) — the PEM text itself (a `
+`-escaped
+   * single line is fine) or the path of the downloaded .pem file. With it
+   * every Secure ID call carries `x-cf-signature`; without it Cashfree must
+   * have whitelisted this server's IP instead. The integrations row's
+   * `secureId.publicKey` wins.
+   */
+  CASHFREE_VERIFICATION_PUBLIC_KEY: z.string().optional().or(z.literal('').transform(() => undefined)),
   CASHFREE_PAYOUT_CLIENT_ID: z.string().optional(),
   CASHFREE_PAYOUT_CLIENT_SECRET: z.string().optional(),
   CASHFREE_PAYOUT_TEST_MODE: z.string().optional(),

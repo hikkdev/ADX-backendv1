@@ -84,7 +84,6 @@ describe('publishListing — the basics gate', () => {
   it.each([
     ['email', { email: null }],
     ['address', { address: '  ' }],
-    ['dateOfBirth', { dateOfBirth: null }],
     ['name', { name: '+919876543210' }],
   ])('refuses 409 PROFILE_INCOMPLETE naming a missing %s — even for a verified publisher', async (key, over) => {
     repository.findPublisherById.mockResolvedValue(publisher('VERIFIED', over));
@@ -100,6 +99,13 @@ describe('publishListing — the basics gate', () => {
     expect((caught as ApiError).details).toEqual({ missing: [key] });
     expect((caught as ApiError).message).not.toContain('KYC');
     expect(repository.publish).not.toHaveBeenCalled();
+  });
+
+  it('AGE-1: publishes the spot of a publisher with no date of birth, or one under 18 — listing asks no age', async () => {
+    repository.findPublisherById.mockResolvedValue(publisher('PENDING', { dateOfBirth: null }));
+    await expect(publishListing('lst_1')).resolves.toMatchObject({ status: 'ACTIVE' });
+    repository.findPublisherById.mockResolvedValue(publisher('VERIFIED', { dateOfBirth: new Date('2012-06-01T00:00:00Z') }));
+    await expect(publishListing('lst_1')).resolves.toMatchObject({ status: 'ACTIVE' });
   });
 
   it('does not gate a listing that carries no publisher', async () => {
@@ -128,7 +134,7 @@ describe('assertPublisherBasics', () => {
     repository.findPublisherById.mockResolvedValue(publisher('PENDING', { email: null, address: null, dateOfBirth: null }));
     await expect(assertPublisherBasics('pub_1')).rejects.toMatchObject({
       code: 'PROFILE_INCOMPLETE',
-      details: { missing: ['email', 'address', 'dateOfBirth'] },
+      details: { missing: ['email', 'address'] },
     });
   });
 });

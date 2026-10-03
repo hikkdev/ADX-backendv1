@@ -22,10 +22,10 @@ agentKycRouter.post('/me/digio/initiate', asyncHandler(initiateMyAgentDigioHandl
 agentKycRouter.get('/me/digio/status', asyncHandler(myAgentDigioStatusHandler));
 
 // Ops: the queue, one record, recording on the agent's behalf, the decision.
-agentKycRouter.get('/', requireRole('ADMIN'), asyncHandler(listAgentKycsHandler));
-agentKycRouter.get('/:agentId', requireRole('ADMIN'), asyncHandler(getAgentKycHandler));
-agentKycRouter.put('/:agentId', requireRole('ADMIN'), asyncHandler(recordAgentKycHandler));
-agentKycRouter.patch('/:agentId/review', requireRole('ADMIN'), asyncHandler(reviewAgentKycHandler));
+agentKycRouter.get('/', requireRole('ADMIN'), requirePermission('kyc.view'), asyncHandler(listAgentKycsHandler));
+agentKycRouter.get('/:agentId', requireRole('ADMIN'), requirePermission('kyc.view'), asyncHandler(getAgentKycHandler));
+agentKycRouter.put('/:agentId', requireRole('ADMIN'), requirePermission('kyc.edit'), asyncHandler(recordAgentKycHandler));
+agentKycRouter.patch('/:agentId/review', requireRole('ADMIN'), requirePermission('kyc.approve'), asyncHandler(reviewAgentKycHandler));
 // N3-B: the one-click Digio request — the catalogue's KYC edit tier beside ADMIN (a role config granted
 // `kyc.edit` may send it; the super admin and an admin with no role config pass under the launch rule).
 agentKycRouter.post('/:agentId/request', requireRole('ADMIN'), requirePermission('kyc.edit'), asyncHandler(requestAgentKycHandler));

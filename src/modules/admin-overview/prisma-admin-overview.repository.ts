@@ -1,9 +1,31 @@
 import { Prisma, prisma, type ListingCategory } from '../../shared/database';
+import { AGENT_DEAD_END_STAGES, workingAdvertiserWhere, workingAgentAccountWhere, workingPublisherWhere, workingUserWhere } from '../../shared/party-status';
 import type { AdminOverviewRepository, AnalyticsFilter, AnalyticsRepository, InsightsRepository, Window } from './admin-overview.repository';
 
 const ZERO = new Prisma.Decimal(0);
 
 const between = (window: Window) => ({ gte: window.start, lt: window.end });
+
+/**
+ * Account lifecycle (2 Oct 2026): the KYC counts on the dashboard are the
+ * queues' counts — a suspended, deactivated or closed party's case is not
+ * waiting on anybody, so it is not counted. The advertiser record hangs off
+ * the profile, or (a legacy row) only off the user.
+ */
+async function countWorkingKyc(record: { status: 'PENDING'; submittedAt: { not: null } | { lt: Date } }): Promise<number> {
+  const [publishers, advertisers, agents, users] = await Promise.all([
+    prisma.publisherKyc.count({ where: { ...record, publisher: workingPublisherWhere() } }),
+    prisma.advertiserKyc.count({
+      where: {
+        ...record,
+        OR: [{ profile: { is: workingAdvertiserWhere() } }, { advertiserProfileId: null, advertiser: { is: workingUserWhere() } }],
+      },
+    }),
+    prisma.agentKyc.count({ where: { ...record, agent: { AND: [workingAgentAccountWhere(), { stage: { notIn: [...AGENT_DEAD_END_STAGES] } }] } } }),
+    prisma.userKyc.count({ where: { ...record, user: workingUserWhere() } }),
+  ]);
+  return publishers + advertisers + agents + users;
+}
 
 /** A category or city narrows through the listing; "agent-assisted" through the spot's campaign. */
 function accrualFilter(filter: AnalyticsFilter): Prisma.EarningAccrualWhereInput {
@@ -112,14 +134,7 @@ export const prismaAdminOverviewRepository: AdminOverviewRepository & AnalyticsR
   },
 
   async kycPending() {
-    const pending = { status: 'PENDING' as const, submittedAt: { not: null } };
-    const [publishers, advertisers, agents, users] = await Promise.all([
-      prisma.publisherKyc.count({ where: pending }),
-      prisma.advertiserKyc.count({ where: pending }),
-      prisma.agentKyc.count({ where: pending }),
-      prisma.userKyc.count({ where: pending }),
-    ]);
-    return publishers + advertisers + agents + users;
+    return countWorkingKyc({ status: 'PENDING', submittedAt: { not: null } });
   },
 
   /* ── Lot G (Q115): the facts the analytics set walks ─────────────────── */
@@ -134,6 +149,20 @@ export const prismaAdminOverviewRepository: AdminOverviewRepository & AnalyticsR
       select: { amount: true, campaignId: true, transaction: { select: { occurredAt: true } } },
     });
     return legs.map((leg) => ({ occurredAt: leg.transaction.occurredAt, campaignId: leg.campaignId!, amount: leg.amount }));
+  },
+
+  async platformRevenueByDay(window) {
+    /* The same account and the same window as `platformRevenue`, one row per
+       leg rather than one sum, so each carries the day it landed on. A
+       reversal is a negative leg and is included, exactly as before. */
+    const legs = await prisma.ledgerLeg.findMany({
+      where: {
+        account: { code: 'platform:revenue' },
+        transaction: { occurredAt: between(window) },
+      },
+      select: { amount: true, transaction: { select: { occurredAt: true } } },
+    });
+    return legs.map((leg) => ({ occurredAt: leg.transaction.occurredAt, amount: leg.amount }));
   },
 
   async campaignsWithSpots(campaignIds) {
@@ -214,9 +243,18 @@ export const prismaAdminOverviewRepository: AdminOverviewRepository & AnalyticsR
     const groups = await prisma.earningAccrual.groupBy({
       by: ['forDate'],
       where: { forDate: between(window), ...accrualFilter(filter) },
-      _sum: { gross: true, net: true },
+      /* AN-1: all four money columns off the one grouping — effective
+         commission and tax withheld are metrics of their own and come from
+         these same rows, so widening the select beats a second walk. */
+      _sum: { gross: true, net: true, commission: true, taxWithheld: true },
     });
-    return groups.map((group) => ({ forDate: group.forDate, gross: group._sum.gross ?? ZERO, net: group._sum.net ?? ZERO }));
+    return groups.map((group) => ({
+      forDate: group.forDate,
+      gross: group._sum.gross ?? ZERO,
+      net: group._sum.net ?? ZERO,
+      commission: group._sum.commission ?? ZERO,
+      taxWithheld: group._sum.taxWithheld ?? ZERO,
+    }));
   },
 
   async accrualBySpot(window, filter) {
@@ -286,14 +324,7 @@ export const prismaAdminOverviewRepository: AdminOverviewRepository & AnalyticsR
   /* ── Lot G (Q112): the counts behind the dashboard's rules ───────────── */
 
   async kycPendingSubmittedBefore(cutoff) {
-    const late = { status: 'PENDING' as const, submittedAt: { lt: cutoff } };
-    const [publishers, advertisers, agents, users] = await Promise.all([
-      prisma.publisherKyc.count({ where: late }),
-      prisma.advertiserKyc.count({ where: late }),
-      prisma.agentKyc.count({ where: late }),
-      prisma.userKyc.count({ where: late }),
-    ]);
-    return publishers + advertisers + agents + users;
+    return countWorkingKyc({ status: 'PENDING', submittedAt: { lt: cutoff } });
   },
 
   payoutBatchesInReview() {

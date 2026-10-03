@@ -8,7 +8,7 @@ const state = vi.hoisted(() => ({
   repository: null as unknown as ReturnType<typeof import('./in-memory.repository').inMemoryRepository>,
   cache: { readThrough: vi.fn(), invalidate: vi.fn() },
   advertisers: { advertiserFunnel: vi.fn(), findAdvertiserLabels: vi.fn() },
-  agents: { findAgentLabels: vi.fn() },
+  agents: { agentCostOverWindow: vi.fn(), findAgentLabels: vi.fn() },
 }));
 
 vi.mock('../prisma-section-overviews.repository', () => ({
@@ -29,6 +29,7 @@ vi.mock('../../supply', () => ({}));
 vi.mock('../../publishers', () => ({}));
 vi.mock('../../employees', () => ({}));
 vi.mock('../../print-partners', () => ({}));
+vi.mock('../../campaigns', () => ({ WAITING_REASONS: [], launchQueueSummary: async () => ({ total: 0, byReason: {} }) }));
 
 import { SECTION_OVERVIEW_CACHE_SECONDS, sectionOverview, sectionOverviewCacheKey, type AdvertisersOverview } from '../section-overviews.service';
 
@@ -47,8 +48,23 @@ const read = (query: { from?: string; to?: string; city?: string } = QUERY) => {
   return sectionOverview('advertisers', query, NOW) as Promise<AdvertisersOverview>;
 };
 
+/* CP-2: the agents module owns the salary and incentive rows and exports the
+   cost as an aggregate; here it is a fixed answer, so the division the
+   service does is what gets pinned. */
+const COST = {
+  side: 'ALL',
+  salary: '40000.00',
+  rewards: '2000.00',
+  commission: '6000.00',
+  basis: '42000.00',
+  allIn: '48000.00',
+  agentsOnTerms: 4,
+  byCity: [{ key: 'city_bengaluru', cityId: 'city_bengaluru', slug: 'bengaluru', name: 'Bengaluru', typed: [], salary: '30000.00', rewards: '1500.00', commission: '4500.00', basis: '31500.00', allIn: '36000.00' }],
+};
+
 beforeEach(() => {
   vi.clearAllMocks();
+  state.agents.agentCostOverWindow.mockResolvedValue(COST);
   state.cache.readThrough.mockImplementation(async (_key: string, _ttl: number, load: () => Promise<unknown>) => load());
   state.advertisers.advertiserFunnel.mockResolvedValue(FUNNEL);
   state.advertisers.findAdvertiserLabels.mockImplementation(labelsOf);
@@ -93,10 +109,22 @@ describe('the advertisers overview', () => {
     expect(money.topUps).toEqual({ value: '5000.00', previous: '8000.00', delta: '-3000.00' });
   });
 
+  /** CP-2: the advertiser-side twin — the same arithmetic over the advertisers an agent brought. */
+  it('costs an advertiser onboarded against the advertiser-side agents only', async () => {
+    const { cost } = await read();
+    expect(cost.side).toBe('ADVERTISER');
+    expect(cost.onboardings).toEqual({ byAgent: 3, selfServe: 2 });
+    expect(cost.perOnboarding).toBe('14000.00');
+    expect(cost.allInPerOnboarding).toBe('16000.00');
+  });
+
   it('answers the breakdowns on the list contract', async () => {
     const { breakdowns } = await read();
     expect(breakdowns.byCity).toMatchObject({ total: 2, page: 1, pageSize: 100, counts: {} });
-    expect(breakdowns.byCity.items[1]).toEqual({ key: 'mumbai', label: 'Mumbai', href: '/advertisers?city=mumbai', cityId: 'city_mumbai', typed: [], count: 4, spend: '20000.00' });
+    /* CP-2: the seeded cost names Bengaluru only. Mumbai onboarded one
+       advertiser in the window and no agent money is recorded against it, so
+       the cost is null — "not recorded", never a free onboarding. */
+    expect(breakdowns.byCity.items[1]).toEqual({ key: 'mumbai', label: 'Mumbai', href: '/advertisers?city=mumbai', cityId: 'city_mumbai', typed: [], count: 4, spend: '20000.00', cost: null, onboardings: 1 });
     expect(breakdowns.byPackageTier.items[0]).toMatchObject({ key: 'GROWTH', label: 'Growth', count: 4 });
     expect(breakdowns.byAgent.items[0]).toMatchObject({ key: 'agt_1', label: 'Name agt_1', href: '/agents/agt_1', count: 3 });
   });

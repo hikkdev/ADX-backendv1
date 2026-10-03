@@ -71,7 +71,7 @@ reviewPartyRouter.get(
 );
 
 /* The desk's view of one agent's stars, hidden ones included. */
-reviewPartyRouter.get('/agents/:id/reviews', authenticate, requireRole('ADMIN'), reviews, asyncHandler(agentReviewsHandler));
+reviewPartyRouter.get('/agents/:id/reviews', authenticate, requireRole('ADMIN'), requirePermission('agents.view'), reviews, asyncHandler(agentReviewsHandler));
 
 /**
  * The desk. Hiding is moderation, so it sits behind `content.approve` on top
@@ -79,6 +79,6 @@ reviewPartyRouter.get('/agents/:id/reviews', authenticate, requireRole('ADMIN'),
  */
 export const reviewRouter = Router();
 reviewRouter.use(authenticate, requireRole('ADMIN'), reviews);
-reviewRouter.get('/', asyncHandler(listReviewsHandler));
+reviewRouter.get('/', requirePermission('agents.view'), asyncHandler(listReviewsHandler));
 reviewRouter.patch('/:id/hide', requirePermission('content.approve'), asyncHandler(hideReviewHandler));
 reviewRouter.patch('/:id/unhide', requirePermission('content.approve'), asyncHandler(unhideReviewHandler));

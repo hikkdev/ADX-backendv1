@@ -1,8 +1,8 @@
-import { redis } from '../shared/cache';
+import { redis, orSkipWhenRedisDown } from '../shared/cache';
 import { logger } from '../shared/logging';
 import { reportError } from '../shared/errors';
 import { recordHeartbeat } from '../shared/jobs';
-import { expireSpotReservations, runCampaignTransitions, snapshotDailyMetrics } from '../modules/campaigns';
+import { abandonLapsedReservations, expireSpotReservations, lapseUnpaidReservationFees, runCampaignTransitions, snapshotDailyMetrics } from '../modules/campaigns';
 import { runPackageExpiry } from '../modules/packages';
 
 const TAG = 'campaignLifecycleJob';
@@ -32,7 +32,8 @@ export function startCampaignLifecycleJob(): void {
     recordHeartbeat('campaign-lifecycle');
     // Every instance runs the interval; only the one that wins the lock does the
     // work, or a campaign's hold would be captured once per instance.
-    const acquired = await redis.set(LOCK_KEY, '1', 'PX', LOCK_TTL_MS, 'NX');
+    // Redis away (Docker stopped): skip this tick rather than take the API down.
+    const acquired = await orSkipWhenRedisDown(redis.set(LOCK_KEY, '1', 'PX', LOCK_TTL_MS, 'NX'), TAG);
     if (!acquired) return;
 
     try {
@@ -48,6 +49,13 @@ export function startCampaignLifecycleJob(): void {
       // for 24 hours; a hold that has lapsed goes back to a plain reservation.
       const { cleared } = await expireSpotReservations();
       if (cleared > 0) logger.info('Spot reservations expired', { tag: TAG, cleared });
+
+      // RF-1: a reservation fee not paid within its hour lapses; a paid
+      // reservation whose day passed unpaid is closed, ADX keeping its part.
+      const { lapsed } = await lapseUnpaidReservationFees();
+      if (lapsed > 0) logger.info('Reservation fees lapsed', { tag: TAG, lapsed });
+      const { abandoned } = await abandonLapsedReservations();
+      if (abandoned > 0) logger.info('Lapsed reservations closed', { tag: TAG, abandoned });
 
       // Package terms end on the same tick. Nothing auto-renews — a mandate
       // needs a gateway ADX has not chosen — so an expired plan is a sale

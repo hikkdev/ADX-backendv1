@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { dateOfBirthSchema, genderSchema } from '../../../shared/validation';
+import { adultDateOfBirthSchema, genderSchema, pinCodeSchema } from '../../../shared/validation';
 
 /**
  * AG-1: what the applicant and the desk may send. The rules
@@ -46,6 +46,8 @@ export const applicationProfileSchema = z.object({
   currentAddress: text(300).nullable().optional(),
   currentLatitude: z.number().min(-90).max(90).nullable().optional(),
   currentLongitude: z.number().min(-180).max(180).nullable().optional(),
+  /** Onboarding addresses (1 Oct 2026): the current address's PIN code — six digits, never required, null clears. */
+  currentPostalCode: pinCodeSchema,
   permanentAddress: text(300).nullable().optional(),
   emergencyContactName: text(120).nullable().optional(),
   emergencyContactRelation: text(60).nullable().optional(),
@@ -90,7 +92,8 @@ export type ApplicationProfileInput = z.infer<typeof applicationProfileSchema>;
  */
 export const deskProfileSchema = applicationProfileSchema.extend({
   name: z.string().trim().min(2).max(120).optional(),
-  dateOfBirth: dateOfBirthSchema.optional(),
+  // AGE-1: an agent is engaged for work — the adult rule stays here (the ladder asks 18 or 21 by side on top).
+  dateOfBirth: adultDateOfBirthSchema.optional(),
   gender: genderSchema.optional(),
 });
 export type DeskProfileInput = z.infer<typeof deskProfileSchema>;

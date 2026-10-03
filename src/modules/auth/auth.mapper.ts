@@ -33,6 +33,9 @@ export function mobileOtpLoginUser(user: LoginUser, roles: Role[]) {
     mobile: user.mobile,
     name: user.name,
     email: user.email,
+    // ED-1: both stamps, so a client can route to the step still missing.
+    mobileVerifiedAt: user.mobileVerifiedAt,
+    emailVerifiedAt: user.emailVerifiedAt,
     language: user.language,
     avatarUrl: user.avatarUrl,
     hashPassword: !!user.passwordHash,
@@ -50,6 +53,8 @@ export function emailOtpLoginUser(user: LoginUser, roles: Role[]) {
     mobile: user.mobile,
     name: user.name,
     email: user.email,
+    mobileVerifiedAt: user.mobileVerifiedAt,
+    emailVerifiedAt: user.emailVerifiedAt,
     language: user.language,
     avatarUrl: user.avatarUrl,
     hasPassword: !!user.passwordHash,

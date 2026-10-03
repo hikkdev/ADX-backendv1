@@ -1,5 +1,7 @@
 import { redis } from '../cache/redis';
 import { logger } from './logger';
+import { redisKnownDown } from '../cache/redis-outage';
+import { warnThrottled } from './throttled';
 
 /**
  * Request latency, kept a few minutes in Redis — Lot G (Q130).
@@ -18,13 +20,15 @@ const WINDOW_TTL_SECONDS = 3 * 60;
 export const latencyMinuteKey = (at: Date): string => `${KEY_PREFIX}${Math.floor(at.getTime() / 60_000)}`;
 
 export function recordRequestLatency(durationMs: number, at = new Date()): void {
+  // 28 Sep 2026: while Redis is known to be down, skip — a queued write would only fail ~30 s later.
+  if (redisKnownDown(redis.status)) return;
   const key = latencyMinuteKey(at);
   void redis
     .multi()
     .rpush(key, String(Math.max(0, Math.round(durationMs))))
     .expire(key, WINDOW_TTL_SECONDS)
     .exec()
-    .catch((err: unknown) => logger.warn('Request latency not recorded', { reason: err instanceof Error ? err.message : String(err) }));
+    .catch((err: unknown) => warnThrottled('Request latency not recorded', { reason: err instanceof Error ? err.message : String(err) }));
 }
 
 /** The p95 of a sorted-in-place sample, by the nearest-rank method. Null when empty. */

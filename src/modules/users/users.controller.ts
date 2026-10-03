@@ -223,7 +223,7 @@ export async function updateUserByAdmin(req: Request, res: Response): Promise<vo
     throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid request', parsed.error.flatten());
   }
 
-  const { user, diff, movedIdentity } = await service.updateUserByAdmin(id, req.user!.sub, parsed.data);
+  const { user, diff, movedIdentity, cascaded } = await service.updateUserByAdmin(id, req.user!.sub, parsed.data);
 
   // Logged against the edited user, not the acting admin, with the actor
   // recorded in the metadata. K-B1: one row, `USER_UPDATED_BY_ADMIN`, with
@@ -243,6 +243,8 @@ export async function updateUserByAdmin(req: Request, res: Response): Promise<vo
       fields: Object.keys(fields),
       outcome: service.adminUpdateAction(parsed.data),
       ...(movedIdentity.length ? { movedIdentity, reason } : {}),
+      // Account lifecycle: the profiles the Deactivate suspended or the Reactivate reinstated.
+      ...(cascaded.length ? { cascaded } : {}),
     },
   });
 
@@ -399,6 +401,11 @@ export async function resetTwoFactorFallback(req: Request, res: Response): Promi
       cleared: { emailFallback: true, authenticator: cleared.hadAuthenticator, recoveryCodes: cleared.recoveryCodesCleared },
     },
   });
+}
+
+/** Account lifecycle (2 Oct 2026): `GET /users/:id/deletable` → `{ deletable, blockers: [{ kind, label, count }] }`. */
+export async function getUserDeletability(req: Request, res: Response): Promise<void> {
+  res.json({ success: true, data: await service.getDeletability(req.params['id'] as string, req.user!.sub) });
 }
 
 export async function deleteUser(req: Request, res: Response): Promise<void> {

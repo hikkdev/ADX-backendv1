@@ -37,6 +37,8 @@ const { repository, auth, accessControl, audit, publishers, advertisers } = vi.h
 
 vi.mock('../prisma-users.repository', () => ({ prismaUsersRepository: repository }));
 vi.mock('../../auth', () => auth);
+// 28 Sep 2026: createUser mints the person's ADX-… id — never off the real counter in a test.
+vi.mock('../../identifiers', () => ({ allocateIdentifier: vi.fn(async () => 'ADX-2809-2699') }));
 vi.mock('../../access-control', () => accessControl);
 vi.mock('../../../shared/audit', () => audit);
 vi.mock('../../publishers', () => publishers);
@@ -47,7 +49,7 @@ import { assignRole, createUser, getUserForAdmin, updateUserByAdmin } from '../u
 const target = (over: Record<string, unknown> = {}) => ({
   id: 'usr_1',
   mobile: '+919845012210',
-  email: 'asha@adx.co',
+  email: 'asha@adx.in',
   isActive: true,
   roles: [{ role: 'PUBLISHER' }],
   ...over,

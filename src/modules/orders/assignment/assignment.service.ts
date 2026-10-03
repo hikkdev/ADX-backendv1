@@ -8,6 +8,7 @@ import { installationFeeFor } from '../../payouts';
 import { prismaOrdersRepository as repository } from '../prisma-orders.repository';
 import { notifyAdmins, notifyAgent, shortId } from '../orders.notify';
 import { OFFER_EXPIRED_REASON } from './rejection-reasons';
+import { assertOrderNotHeld, assertOrderNotHeldForParty, isOrderHeld } from '../risk/order-hold';
 
 const MAX_AGENT_REJECTIONS = 3;
 
@@ -67,6 +68,12 @@ async function quoteFeeFor(
 export async function autoAssignAgent(orderId: string) {
   const order = await repository.findById(orderId);
   if (!order) return;
+  // Order fraud screening: a held order is offered to nobody. Releasing the
+  // hold offers it (order-risk.service), so nothing is lost by waiting.
+  if (await isOrderHeld(orderId)) {
+    logger.info('Auto-assignment skipped: the order is on hold for review', { orderId });
+    return;
+  }
 
   const assignments = await repository.findAssignments(orderId);
   const rejectedAgentIds = assignments
@@ -250,6 +257,8 @@ export async function agentAcceptOrder(
   const order = await repository.findById(orderId);
   if (!order) throw new Error('ORDER_NOT_FOUND');
   if (order.status !== 'PENDING_AGENT') throw new Error('WRONG_STATUS');
+  // Order fraud screening: a held job cannot be taken; the agent hears the neutral line.
+  await assertOrderNotHeldForParty(orderId);
   // The clock on the sheet is the clock ADX keeps: a late tap is refused, and
   // the sweep will have handed the job on. An offer placed by hand carries no
   // stamp and can always be taken.
@@ -351,6 +360,8 @@ export async function adminAssignAgent(
   let order = await repository.findById(orderId);
   if (!order) throw new Error('ORDER_NOT_FOUND');
   if (order.status !== 'PENDING_AGENT') throw new Error('WRONG_STATUS');
+  // Order fraud screening: no hand-placed offer on a held order either.
+  await assertOrderNotHeld(orderId);
 
   if (options.agentFee !== undefined && options.agentFee !== null) {
     order = await repository.update(orderId, { agentFeeAmount: new Decimal(options.agentFee) });
@@ -401,6 +412,8 @@ export async function reassignAgent(orderId: string, newAgentId: string, reason:
   if (!order) throw new Error('ORDER_NOT_FOUND');
   if (!(REASSIGNABLE_STATUSES as readonly string[]).includes(order.status)) throw new Error('WRONG_STATUS');
   if (order.agentId === newAgentId) throw new Error('SAME_AGENT');
+  // Order fraud screening: a held order is not handed to anyone.
+  await assertOrderNotHeld(orderId);
   // Lot A BLOCK_NEW: a hand-placed offer is still new work.
   await assertAgentAcceptsWork(newAgentId);
 

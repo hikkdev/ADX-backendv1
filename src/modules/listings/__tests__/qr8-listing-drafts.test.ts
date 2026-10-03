@@ -19,7 +19,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  * by idle days; an agent or an advertiser has no drafts route.
  */
 
-const { drafts, service, identifiers, features } = vi.hoisted(() => ({
+const { drafts, service, identifiers, features, audit } = vi.hoisted(() => ({
+  audit: { logActivity: vi.fn() },
   drafts: {
     listForPublisher: vi.fn(),
     findForPublisher: vi.fn(),
@@ -27,6 +28,7 @@ const { drafts, service, identifiers, features } = vi.hoisted(() => ({
     update: vi.fn(),
     remove: vi.fn(),
     desk: vi.fn(),
+    findForDesk: vi.fn(),
   },
   service: { findOwnPublisher: vi.fn(), createListing: vi.fn() },
   identifiers: { allocateIdentifier: vi.fn() },
@@ -43,6 +45,7 @@ vi.mock('../listings.service', async (importOriginal) => {
 });
 vi.mock('../../identifiers', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../identifiers')>()), ...identifiers }));
 vi.mock('../../feature-flags', () => features());
+vi.mock('../../../shared/audit', async (importOriginal) => ({ ...(await importOriginal<typeof import('../../../shared/audit')>()), ...audit }));
 
 import { errorHandler } from '../../../shared/errors';
 import { tokenFor } from '../../../shared/testing';
@@ -192,5 +195,38 @@ describe('the desk', () => {
     expect(query).toMatchObject({ idleDays: 3, q: 'asha' });
     expect(idleBefore).toBeInstanceOf(Date);
     expect((await request(app()).get('/api/v1/listings/drafts/desk').set(auth(publisher))).status).toBe(403);
+  });
+
+  /* 2 Oct 2026: drafts sit inside the Listings table now, each row with "Open draft" and "Delete draft". */
+  it('opens one draft with its answers, whoever it belongs to, and 404s one that is gone', async () => {
+    drafts.findForDesk.mockResolvedValueOnce(rows[0]);
+    const res = await request(app()).get('/api/v1/listings/drafts/desk/drf_1').set(auth(admin));
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({ id: 'drf_1', displayId: 'LST-1709-2601', answers: { venue_type_id: 'vt_gym' }, publisher: { name: 'Asha Rao' } });
+    expect(res.body.data).not.toHaveProperty('publisherId');
+    expect(drafts.findForDesk).toHaveBeenCalledWith('drf_1');
+
+    drafts.findForDesk.mockResolvedValueOnce(null);
+    expect((await request(app()).get('/api/v1/listings/drafts/desk/drf_gone').set(auth(admin))).status).toBe(404);
+    expect((await request(app()).get('/api/v1/listings/drafts/desk/drf_1').set(auth(publisher))).status).toBe(403);
+  });
+
+  it("throws a publisher's draft away from the desk, audited, and is ADMIN's route", async () => {
+    drafts.findForDesk.mockResolvedValueOnce(rows[0]);
+    const res = await request(app()).delete('/api/v1/listings/drafts/desk/drf_1').set(auth(admin));
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual({ deleted: true });
+    expect(drafts.remove).toHaveBeenCalledWith('drf_1');
+    expect(audit.logActivity).toHaveBeenCalledWith(
+      'usr_admin',
+      'LISTING_DRAFT_DELETED',
+      expect.objectContaining({ targetType: 'ListingDraft', targetId: 'drf_1', metadata: expect.objectContaining({ displayId: 'LST-1709-2601', publisherId: 'pub_1' }) }),
+    );
+
+    drafts.remove.mockClear();
+    drafts.findForDesk.mockResolvedValueOnce(null);
+    expect((await request(app()).delete('/api/v1/listings/drafts/desk/drf_gone').set(auth(admin))).status).toBe(404);
+    expect((await request(app()).delete('/api/v1/listings/drafts/desk/drf_1').set(auth(publisher))).status).toBe(403);
+    expect(drafts.remove).not.toHaveBeenCalled();
   });
 });

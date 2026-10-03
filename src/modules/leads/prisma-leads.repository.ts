@@ -1,6 +1,7 @@
 import { Prisma, prisma } from '../../shared/database';
 import type { LeadStatus, LeadImportance, LeadTemperature, LeadSourceKind } from '../../shared/database';
 import { countsFrom, listArgs } from '../../shared/pagination';
+import { workingAgentWhere } from '../../shared/party-status';
 import { money } from '../../shared/money';
 import type {
   AccountByPhone,
@@ -562,6 +563,13 @@ export const prismaLeadsRepository: LeadsRepository = {
 
   // ── LH3: feeds, inbound, referrals ─────────────────────────────────────
 
+  findByVehicleNumber(vehicleNumber: string) {
+    return prisma.lead.findUnique({
+      where: { vehicleNumber },
+      select: { id: true, displayId: true, businessName: true, assignedAgentId: true },
+    });
+  },
+
   findByExternalKeys(keys) {
     if (keys.length === 0) return Promise.resolve([]);
     return prisma.lead.findMany({ where: { externalKey: { in: keys } }, select: { id: true, externalKey: true } });
@@ -590,10 +598,9 @@ export const prismaLeadsRepository: LeadsRepository = {
   async candidateAgents(side, cityId) {
     const role = side === 'ADVERTISER' ? 'AGENT_ADVERTISER' : 'AGENT_PUBLISHER';
     const agents = await prisma.agentProfile.findMany({
+      // Account lifecycle (2 Oct 2026): working agents only — stage and status ACTIVE, no BLOCK_NEW, signing in, not closed.
       where: {
-        status: 'ACTIVE',
-        user: { isActive: true, roles: { some: { role: role as never } } },
-        ...(cityId ? { cityId } : {}),
+        AND: [workingAgentWhere(), { user: { roles: { some: { role: role as never } } } }, ...(cityId ? [{ cityId }] : [])],
       },
       select: { id: true, userId: true, tier: true, cityId: true },
       take: 500,
@@ -785,6 +792,13 @@ export const prismaLeadsRepository: LeadsRepository = {
 
   countOpenFor(agentId) {
     return prisma.lead.count({ where: { status: { notIn: ['CONVERTED', 'LOST'] }, OR: [{ assignedAgentId: agentId }, { claimedByAgentId: agentId }] } });
+  },
+
+  findOpenHeldBy(agentId) {
+    return prisma.lead.findMany({
+      where: { status: { notIn: ['CONVERTED', 'LOST'] }, OR: [{ assignedAgentId: agentId }, { claimedByAgentId: agentId }] },
+      select: { id: true },
+    });
   },
 
   async partyOfUser(userId) {

@@ -2,12 +2,14 @@ import type { Request, Response } from 'express';
 import { actorLabelFor } from '../access-control';
 import { doorProvenance } from '../../shared/onboarding';
 import { ApiError } from '../../shared/errors';
+import { includesInactive } from '../../shared/party-status';
 import { logActivity } from '../../shared/audit';
 import { agentExists, requireAgentProfile, requireWorkingAgent } from '../agents';
 import { getListingsForPublisher } from '../listings';
 import type { KycStatus, PartySizeBand, PublisherType } from '../../shared/database';
 import { translateListings } from '../ai';
-import { assignCaseSchema, bulkAssignSchema, documentDecisionSchema, kycEscalateSchema, kycRequestSchema, reuploadRequestSchema } from '../kyc';
+import { assignCaseSchema, bulkAssignSchema, documentDecisionSchema, kycEntityRequestSchema, kycEscalateSchema, reuploadRequestSchema } from '../kyc';
+import { parseKycStartBody } from './kyc/digio.controller';
 import { assignKycCase, assignKycCases, escalateKycCase, recordKycAtDesk, requestKycFromDesk, requestKycReupload, reviewKycDocument } from './kyc/kyc-desk.service';
 import { stampBelowFloor } from './my-listings.service';
 import {
@@ -31,10 +33,12 @@ import {
   submitKyc,
   updatePublisher,
   updatePublisherAtDesk,
+  withEntityType,
   listKycQueue,
   getKycCase,
   restartDigioKyc,
   setPublisherBand,
+  publicPublisherCard,
 } from './publishers.service';
 
 /**
@@ -103,7 +107,7 @@ export async function getPublishersHandler(req: Request, res: Response): Promise
     // `q=`, a `pageSize` nobody asked a page for — rather than answering 400.
     const bare = publisherBareQuerySchema.safeParse(req.query);
     if (!bare.success) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid request', bare.error.flatten());
-    res.json({ success: true, data: await getAllPublishers(bare.data.category, bare.data.q) });
+    res.json({ success: true, data: await getAllPublishers(bare.data.category, bare.data.q, bare.data.status) });
     return;
   }
   const agent = await requireAgentProfile(req.user!.sub);
@@ -123,17 +127,19 @@ export async function updatePublisherHandler(req: Request, res: Response): Promi
   if (!parsed.success) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid request', parsed.error.flatten());
 
   // QR-13: the desk edits everything the ladder collects; the agent path is unchanged.
+  // Phase D: `entityType` rides in the same body; the answer carries the effective legal form.
   if ((req.user?.roles ?? []).includes('ADMIN')) {
-    const publisher = await updatePublisherAtDesk(req.params['publisherId'] as string, req.user!.sub, parsed.data as { type?: PublisherType });
-    res.json({ success: true, data: publisher });
+    const publisher = await updatePublisherAtDesk(req.params['publisherId'] as string, req.user!.sub, parsed.data as { type?: PublisherType }, req);
+    res.json({ success: true, data: withEntityType(publisher) });
     return;
   }
   const publisher = await updatePublisher(
     req.params['publisherId'] as string,
     req.user!.sub,
     parsed.data as { type?: PublisherType },
+    req,
   );
-  res.json({ success: true, data: publisher });
+  res.json({ success: true, data: withEntityType(publisher) });
 }
 
 export async function submitKycHandler(req: Request, res: Response): Promise<void> {
@@ -185,7 +191,8 @@ export async function getPublisherListingsHandler(req: Request, res: Response): 
 export async function kycQueueHandler(req: Request, res: Response): Promise<void> {
   const parsed = kycQueueQuerySchema.safeParse(req.query);
   if (!parsed.success) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid query', parsed.error.flatten());
-  res.json({ success: true, data: await listKycQueue({ ...parsed.data, viewerUserId: req.user!.sub }) });
+  // Account lifecycle (2 Oct 2026): `?include=inactive` puts the suspended, deactivated and closed back on the queue.
+  res.json({ success: true, data: await listKycQueue({ ...parsed.data, includeInactive: includesInactive(req.query['include']), viewerUserId: req.user!.sub }) });
 }
 
 /* ── Lot D (Q42/Q119): the per-document desk ─────────────────────────────── */
@@ -236,7 +243,8 @@ export async function kycCaseHandler(req: Request, res: Response): Promise<void>
 
 // POST /publishers/kyc-queue/:publisherId/request — the desk asks the publisher for their KYC.
 export async function requestKycFromDeskHandler(req: Request, res: Response): Promise<void> {
-  const parsed = kycRequestSchema.safeParse(req.body ?? {});
+  // Phase D: `{ channel?, note?, entityType? }`.
+  const parsed = kycEntityRequestSchema.safeParse(req.body ?? {});
   if (!parsed.success) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid request', parsed.error.flatten());
   res.json({ success: true, data: await requestKycFromDesk(req.params['publisherId'] as string, parsed.data, req.user!.sub, req) });
 }
@@ -249,8 +257,10 @@ export async function recordKycAtDeskHandler(req: Request, res: Response): Promi
 }
 
 // POST /publishers/kyc-queue/:publisherId/digio/restart — the desk asks Digio again.
+// Phase D: body `{ entityType? }` — asked when the legal form is not known, or the upgrade.
 export async function restartDigioKycHandler(req: Request, res: Response): Promise<void> {
-  res.json({ success: true, data: await restartDigioKyc(req.params['publisherId'] as string, req.user!.sub, req) });
+  const body = parseKycStartBody(req.body);
+  res.json({ success: true, data: await restartDigioKyc(req.params['publisherId'] as string, req.user!.sub, req, body) });
 }
 
 /** AG-5: the desk sets the publisher's band. */
@@ -259,4 +269,9 @@ export async function setPublisherBandHandler(req: Request, res: Response): Prom
   if (!parsed.success) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid request', parsed.error.flatten());
   const publisher = await setPublisherBand(req.params['publisherId'] as string, req.user!.sub, parsed.data.sizeBand as PartySizeBand, req);
   res.json({ success: true, data: publisher });
+}
+
+/** 26 Sep 2026: `GET /publishers/:publisherId/public` — the storefront header, signed out. */
+export async function publicPublisherHandler(req: Request, res: Response): Promise<void> {
+  res.json({ success: true, data: await publicPublisherCard(req.params['publisherId'] as string) });
 }

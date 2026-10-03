@@ -47,6 +47,11 @@ export const patchHolidaySchema = z
   })
   .refine((body) => Object.keys(body).length > 0, { message: 'Nothing to change' });
 
+/** HC-1: `POST /hr/holidays/sync { years? }` — the years to reconcile; left out, this year and next (IST). */
+export const holidaySyncSchema = z.strictObject({
+  years: z.array(z.number().int().min(2000).max(2100)).min(1).max(5).optional(),
+});
+
 export const PERSON_KINDS = ['STAFF', 'AGENT'] as const;
 export type PersonKind = (typeof PERSON_KINDS)[number];
 
@@ -68,4 +73,5 @@ export const peopleQuerySchema = z.object({
 export type HolidaysQuery = z.infer<typeof holidaysQuerySchema>;
 export type CreateHolidayInput = z.infer<typeof createHolidaySchema>;
 export type PatchHolidayInput = z.infer<typeof patchHolidaySchema>;
+export type HolidaySyncInput = z.infer<typeof holidaySyncSchema>;
 export type PeopleQuery = z.infer<typeof peopleQuerySchema>;

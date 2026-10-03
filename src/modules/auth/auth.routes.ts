@@ -27,6 +27,8 @@ import {
   publisherVerifyOtpHandler,
 } from './publisher/publisher-auth.controller';
 import { googleLoginHandler } from './google/google.controller';
+import { facebookLoginHandler } from './facebook/facebook.controller';
+import { authProvidersHandler } from './providers.controller';
 import {
   confirmTotpHandler,
   disableTotpHandler,
@@ -75,6 +77,10 @@ authRouter.post('/change-mobile/verify', authenticate, otpVerifyLimiter, asyncHa
 // for the flow to fail. Authentication happens against Google's JWKS; this
 // endpoint never provisions an account.
 authRouter.post('/google', googleAuthLimiter, asyncHandler(googleLoginHandler));
+/* FB-1: "Continue with Facebook" — register-or-login on the mailbox Facebook vouches for. */
+authRouter.post('/facebook', googleAuthLimiter, asyncHandler(facebookLoginHandler));
+/* The apps (and the website) ask which social doors are open, before sign-in; public ids only. */
+authRouter.get('/providers', asyncHandler(authProvidersHandler));
 
 /* Lot A (Q25): the admin second factor. An ADMIN's password or Google sign-in
  * answers with a challenge instead of tokens; these two finish it. Anonymous —
@@ -87,10 +93,11 @@ authRouter.post('/2fa/verify', otpVerifyLimiter, asyncHandler(verifyTwoFactorHan
  * settings — and the code-taking ones rate-limited like a verify, because a
  * confirm, a disable and a regenerate each check one. `/2fa/status` is open
  * to any signed-in account (a non-admin reads an empty method list). */
-authRouter.post('/2fa/totp/enrol', authenticate, requireRole('ADMIN'), otpRequestLimiter, asyncHandler(enrolTotpHandler));
-authRouter.post('/2fa/totp/confirm', authenticate, requireRole('ADMIN'), otpVerifyLimiter, asyncHandler(confirmTotpHandler));
-authRouter.post('/2fa/totp/disable', authenticate, requireRole('ADMIN'), otpVerifyLimiter, asyncHandler(disableTotpHandler));
-authRouter.post('/2fa/recovery-codes/regenerate', authenticate, requireRole('ADMIN'), otpVerifyLimiter, asyncHandler(regenerateRecoveryCodesHandler));
+/* 2FA-A (the owner, 25 Sep 2026): the authenticator is every account's to set up, not only an admin's. */
+authRouter.post('/2fa/totp/enrol', authenticate, otpRequestLimiter, asyncHandler(enrolTotpHandler));
+authRouter.post('/2fa/totp/confirm', authenticate, otpVerifyLimiter, asyncHandler(confirmTotpHandler));
+authRouter.post('/2fa/totp/disable', authenticate, otpVerifyLimiter, asyncHandler(disableTotpHandler));
+authRouter.post('/2fa/recovery-codes/regenerate', authenticate, otpVerifyLimiter, asyncHandler(regenerateRecoveryCodesHandler));
 authRouter.get('/2fa/status', authenticate, asyncHandler(twoFactorStatusHandler));
 
 /* Lot A (Q26): accepting an invitation to the console. Anonymous by

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { asyncHandler } from '../../shared/http';
-import { authenticate, requireRole } from '../../shared/auth';
+import { authenticate, requireRole, requirePermission } from '../../shared/auth';
 import { requireFeature } from '../feature-flags';
 import {
   cancelOrderHandler,
@@ -44,7 +44,7 @@ revenueRouter.use(authenticate);
  * that a neighbour holds a promotional rate is its own commercial problem.
  * The trimmed advertiser-facing version belongs with the cart.
  */
-revenueRouter.post('/quote', requireRole('ADMIN'), asyncHandler(quoteHandler));
+revenueRouter.post('/quote', requireRole('ADMIN'), requirePermission('finance.view'), asyncHandler(quoteHandler));
 
 /* ── Price locks ─────────────────────────────────────────────────────
  * The advertiser comes from the session, never the body, so these are open
@@ -54,8 +54,8 @@ revenueRouter.post('/price-locks', asyncHandler(lockPriceHandler));
 revenueRouter.get('/price-locks/:listingId', asyncHandler(heldRateHandler));
 
 /* ── Commission, ops only ────────────────────────────────────────────── */
-revenueRouter.get('/commission', requireRole('ADMIN'), asyncHandler(listCommissionRatesHandler));
-revenueRouter.post('/commission', requireRole('ADMIN'), asyncHandler(setCommissionRateHandler));
+revenueRouter.get('/commission', requireRole('ADMIN'), requirePermission('finance.view'), asyncHandler(listCommissionRatesHandler));
+revenueRouter.post('/commission', requireRole('ADMIN'), requirePermission('finance.edit'), asyncHandler(setCommissionRateHandler));
 
 /* ── Lot J (B1): the publisher plan catalogue and the self-service orders ──
  * The catalogue reads for anyone signed in — the phone draws the cards from
@@ -64,13 +64,13 @@ revenueRouter.post('/commission', requireRole('ADMIN'), asyncHandler(setCommissi
  * switch; who may act on an order is decided per order in the service.
  */
 revenueRouter.get('/plans', asyncHandler(listPlansHandler));
-revenueRouter.patch('/plans/:tier', requireRole('ADMIN'), asyncHandler(updatePlanHandler));
+revenueRouter.patch('/plans/:tier', requireRole('ADMIN'), requirePermission('finance.edit'), asyncHandler(updatePlanHandler));
 
 const publisherPlans = requireFeature('revenue.publisher-plans');
 revenueRouter.post('/subscription-orders/quote', publisherPlans, asyncHandler(quoteOrderHandler));
 /* Lot J2 (5): the free trial — declared before `/:id` so `trial` is never taken for an order id. */
 revenueRouter.post('/subscription-orders/trial', publisherPlans, asyncHandler(startTrialHandler));
-revenueRouter.get('/subscription-orders', publisherPlans, requireRole('ADMIN'), asyncHandler(listOrdersHandler));
+revenueRouter.get('/subscription-orders', publisherPlans, requireRole('ADMIN'), requirePermission('finance.view'), asyncHandler(listOrdersHandler));
 revenueRouter.post('/subscription-orders', publisherPlans, asyncHandler(createOrderHandler));
 revenueRouter.get('/subscription-orders/:id', publisherPlans, asyncHandler(getOrderHandler));
 revenueRouter.post('/subscription-orders/:id/pay', publisherPlans, asyncHandler(payOrderHandler));
@@ -78,7 +78,7 @@ revenueRouter.post('/subscription-orders/:id/cancel', publisherPlans, asyncHandl
 revenueRouter.post(
   '/subscription-orders/:id/record-payment',
   publisherPlans,
-  requireRole('ADMIN'),
+  requireRole('ADMIN'), requirePermission('finance.edit'),
   asyncHandler(recordOrderPaymentHandler)
 );
 
@@ -88,22 +88,22 @@ revenueRouter.get('/subscriptions/me', publisherPlans, asyncHandler(mySubscripti
 revenueRouter.patch('/subscriptions/me', publisherPlans, asyncHandler(setAutoRenewHandler));
 
 /* Lot J2 (d): the console's list on the list contract. */
-revenueRouter.get('/subscriptions', requireRole('ADMIN'), asyncHandler(listSubscriptionsPageHandler));
-revenueRouter.post('/subscriptions', requireRole('ADMIN'), asyncHandler(grantSubscriptionHandler));
+revenueRouter.get('/subscriptions', requireRole('ADMIN'), requirePermission('finance.view'), asyncHandler(listSubscriptionsPageHandler));
+revenueRouter.post('/subscriptions', requireRole('ADMIN'), requirePermission('finance.edit'), asyncHandler(grantSubscriptionHandler));
 revenueRouter.post(
   '/subscriptions/:id/end',
-  requireRole('ADMIN'),
+  requireRole('ADMIN'), requirePermission('finance.edit'),
   asyncHandler(endSubscriptionHandler)
 );
 
 /* ADX giving up its own revenue. Approver recorded, reason required. */
-revenueRouter.get('/overrides', requireRole('ADMIN'), asyncHandler(listOverridesHandler));
-revenueRouter.post('/overrides', requireRole('ADMIN'), asyncHandler(grantOverrideHandler));
+revenueRouter.get('/overrides', requireRole('ADMIN'), requirePermission('finance.view'), asyncHandler(listOverridesHandler));
+revenueRouter.post('/overrides', requireRole('ADMIN'), requirePermission('finance.edit'), asyncHandler(grantOverrideHandler));
 
 /* ── Fees and tax ────────────────────────────────────────────────────── */
-revenueRouter.get('/fees', requireRole('ADMIN'), asyncHandler(listFeesHandler));
-revenueRouter.post('/fees', requireRole('ADMIN'), asyncHandler(createFeeHandler));
-revenueRouter.patch('/fees/:id', requireRole('ADMIN'), asyncHandler(updateFeeHandler));
+revenueRouter.get('/fees', requireRole('ADMIN'), requirePermission('finance.view'), asyncHandler(listFeesHandler));
+revenueRouter.post('/fees', requireRole('ADMIN'), requirePermission('finance.edit'), asyncHandler(createFeeHandler));
+revenueRouter.patch('/fees/:id', requireRole('ADMIN'), requirePermission('finance.edit'), asyncHandler(updateFeeHandler));
 
-revenueRouter.get('/tax', requireRole('ADMIN'), asyncHandler(getTaxHandler));
-revenueRouter.patch('/tax', requireRole('ADMIN'), asyncHandler(updateTaxHandler));
+revenueRouter.get('/tax', requireRole('ADMIN'), requirePermission('finance.view'), asyncHandler(getTaxHandler));
+revenueRouter.patch('/tax', requireRole('ADMIN'), requirePermission('finance.edit'), asyncHandler(updateTaxHandler));

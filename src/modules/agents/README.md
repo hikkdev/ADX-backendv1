@@ -180,6 +180,129 @@ score rather than deriving them from the driver's rate.
   boot, **once per type** — a desk that retired one is not handed it back —
   and the desk edits the targets and rewards like any template.
 
+## Compensation, the daily quota and the commission (CP-1, 23 Sep 2026)
+
+An agent is paid a **monthly salary**, and that salary covers a **daily
+quota** of onboardings. Work past the quota is not covered, so it pays a
+commission. Nothing else about their pay changed: lead rewards, site visits
+and bonuses are recorded exactly as they were.
+
+| Term | What it is |
+| --- | --- |
+| `monthlySalary` | The base for a full month, as money |
+| `dailyQuota` | Onboardings one working day's salary covers |
+| `workingDaysPerMonth` | **A planning figure and nothing else** — it prices the commission so that rate stays still while attendance moves. Never read as days worked |
+| `commissionUpliftPct` | What an onboarding past the quota pays **on top of** the planned unit cost |
+
+The arithmetic, all of it in `compensation.rules.ts` and pure:
+
+- planned unit cost = `monthlySalary / (dailyQuota × workingDaysPerMonth)`
+- commission per extra = unit cost × `(1 + uplift/100)`
+- what the cost report divides by = `monthlySalary / onboardings actually done`
+
+Worked, at the figures the owner gave: a ₹12,000 field agent onboarding autos
+at ten a day over a six-day week costs **₹46.15** an onboarding and earns
+**₹50.77** for the eleventh of a day; a ₹25,000 advertiser agent at twelve a
+day over **twenty-two** days — offices shut at the weekend, so their month is
+shorter and each onboarding costs more — costs **₹94.70** and earns
+**₹104.17**. The seeded flat `PUBLISHER_ONBOARDED` rate of ₹2,000 was between
+twenty and forty times either.
+
+**Three decisions worth keeping straight:**
+
+1. **The quota is a day and it resets.** Not a month. An agent who works
+   fifteen days is never measured against a month of work, and a day nobody
+   works simply has no quota — which is why none of this needs an attendance
+   record. The day is the Indian calendar day every other read uses.
+2. **The uplift is on top, not a share.** Ten per cent means the unit cost
+   plus a tenth (₹105.77 on ₹96.15), not a tenth of it (₹9.62) — the second
+   would move nobody, and `cp1-compensation.test.ts` pins the difference.
+3. **An agent with no pay record is not on the model.** `payForNextOnboarding`
+   answers `NO_TERMS` and the party module falls back to the flat rate table
+   exactly as before — which is every agent before CP-1, and a fleet
+   partner's rider after it. A read that fails answers `NO_TERMS` too: an
+   onboarding must never fail over the pricing of its commission.
+
+Records are **effective-dated** like `IncentiveRate`, so a past month is
+costed at the salary in force then; writing one closes the one before it, and
+`AGENT_COMPENSATION_SET` is audited with both. Defaults per grade live in
+platform settings (`agents.compensation.byGrade`) and only fill the form —
+G1 Field ₹12,000/10/26, G2 ₹25,000/10/26, G3 ₹25,000/12/22, G4
+₹25,000/10/22.
+
+`Publisher.onboardingCompletedAt` was added for the quota to count: the
+publisher table had the status but no moment, and `onboardedAt` is the door
+the account came through, not the finish. Rows completed before 23 Sep 2026
+are backfilled from the best stamp they carry and are approximate.
+
+Routes: `GET/POST /agents/:id/compensation`, `GET /agents/:id/standing`,
+`GET /agents/compensation/defaults` — ADMIN. Tests:
+`__tests__/cp1-compensation.test.ts`, and the quota's effect on the
+commission in `publishers/__tests__/onboarding-commission.test.ts`.
+
+## Cost per onboarding (CP-2, 23 Sep 2026)
+
+What an onboarding cost, read separately for each side of the market because
+the work is different: a field agent walking a market and a sales agent
+sitting in an office are not the same money per account.
+
+`agentCostOverWindow(window, scope, side)` is the aggregate this module
+exports — the same shape `supply` exports its funnel in. Rows never leave
+here: `section-overviews` is aggregates-only by its own contract, and a
+salary record is a row, so the money is computed where it is owned and the
+onboarding counts are that module's own.
+
+| Part | What it is |
+| --- | --- |
+| `salary` | What was COMMITTED at the recorded terms, prorated across the days each record was in force and clamped to the engagement |
+| `rewards` | Lead rewards, milestone and tier bonuses, site visits, campaign assists — CREDITED in the window |
+| `commission` | The per-onboarding commission alone, reported BESIDE the basis, not inside it |
+| `basis` | `salary + rewards` — the numerator |
+| `allIn` | `basis + commission` |
+
+**The denominator is agent-led onboardings only.** An account that walked in
+through the app cost no agent anything, and folding it in would flatter the
+figure every month. The self-serve half is reported next to it rather than
+hidden.
+
+**Two payments are in neither list.** `INSTALLATION` and `PACKAGE_SOLD` pay
+for executing an order or selling a package — work done *after* the account
+was won — and charging them to a cost per onboarding would make the figure
+meaningless.
+
+**A day costs `monthlySalary / days in ITS calendar month`**, so a full month
+costs exactly the salary and February is not cheaper than March. A flat
+thirtieth would be arbitrary in a way nobody could explain to an agent.
+
+**An agent holding both roles counts on both sides.** The publisher and
+advertiser figures therefore never add up to the blended one, and that is
+deliberate: their salary genuinely buys both, and splitting it by guesswork
+would turn a real number into a made-up one.
+
+**Null means "not recorded", never "free".** No onboardings, or no salary on
+record for any agent there, both answer null — and every screen says which.
+
+Tests: `__tests__/cp2-cost.test.ts` (the proration and the division),
+`section-overviews/__tests__/{publishers,advertisers,agents}.test.ts` (the
+tiles and the per-city column).
+
+## The quota beside the milestones (CP-5, 23 Sep 2026)
+
+The daily quota appears on the milestone board as a **tracker, not a
+milestone**: the salary already paid for it, so there is nothing to claim and
+no reward field to fill in. It is synthesised from `standingFor` rather than
+stored as a `MilestoneTemplate`, precisely so nobody can attach a reward to
+it by editing a row. Null for an agent off the quota model; a failed read is
+null too, because a board must not fall over for want of a tracker.
+
+Every ONBOARDING milestone also carries `stretch`: whether its target sits
+ABOVE the agent's planned month (`dailyQuota × workingDaysPerMonth`). A
+target inside the quota is work the salary already bought, so a bonus for it
+pays twice — the console says so in the reward column rather than in a
+footnote. Null off the quota model, and null for a milestone that counts
+something other than onboardings: the quota counts onboardings and nothing
+else, so it has no opinion about a revenue or a quality target.
+
 ## The tier ladder (DR 05)
 
 - **`AgentProfile.tier` is the `AgentTier` enum with `tierLevel` beside it**
@@ -386,3 +509,18 @@ the exit's wallet settlement and access revocation (Lot 5), the app screens
 (Lot 2) and the console workbench (Lot 3).
 
 Tests: `__tests__/ag1-application-rules.test.ts`, `__tests__/ag1-application.test.ts`, the stage cases in `__tests__/accepts-work.test.ts`.
+
+## 29 Sep 2026 — the uniform party roster
+
+`GET /agents` (ADMIN) takes the cuts every party roster takes, under the
+names every roster sends: **`onboardedVia`** is the profile's `sourceKind`
+(`SELF`, `FLEET`, `REFERRAL`, `WALK_IN`, `JOB_PORTAL`, `DESK`, `IMPORT`),
+**`type`** is the side (`PUBLISHER` / `ADVERTISER`, the ladder's `sideOf`
+rule over the roles) and **`kycState`** is `shared/kyc-state`'s six (no
+mirror on an agent). `search` also matches the email, the AGT- id, the city
+and the phone as the console prints it. Every row carries **`kyc`** (the six
+facts with `state`), **`side`**, the person's **`email`** and
+**`onboardedCount`** — the publishers and advertisers the agent brought in,
+counted in the same query; the roles are read to say the side and do not
+ride out. Pinned by `uniform-roster.test.ts` and
+`uniform-roster.repository.test.ts`.

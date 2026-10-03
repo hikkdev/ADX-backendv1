@@ -19,3 +19,13 @@ feature('console.overview', {
     'The dashboard aggregates across campaigns, sales, the ledger and the parties.',
   routes: ['/api/v1/admin/overview'],
 });
+
+feature('console.metrics-registry', {
+  surfaces: ['CONSOLE', 'BACKEND'],
+  owner: 'finance',
+  kind: 'FEATURE',
+  launch: 'on',
+  description:
+    'AN-1: the metric registry — every figure Analytics can draw declared once in code with its formula, its roll-up rule and the cuts it supports, served as a catalogue and as a series at day, week or month.',
+  routes: ['/api/v1/admin/analytics'],
+});

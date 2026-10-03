@@ -28,6 +28,7 @@ const { repository, identifiers } = vi.hoisted(() => ({
     findUserClosure: vi.fn(),
     findUserLabel: vi.fn(),
     findKycSummary: vi.fn(),
+    findKycSummaries: vi.fn(async (rows: { id: string }[]) => new Map(rows.map((r) => [r.id, null]))),
     userLabels: vi.fn(),
     listAdvertisers: vi.fn(),
     ensureWallet: vi.fn(),
@@ -114,6 +115,13 @@ describe('registerAdvertiser at the desk', () => {
     expect(repository.createAdvertiser.mock.calls[0]![0]).not.toHaveProperty('firstName');
     expect(repository.createAdvertiser.mock.calls[0]![0]).not.toHaveProperty('dateOfBirth');
     expect(advertiser.userId).toBe('usr_new');
+  });
+
+  it('takes the precise entity type at creation and stores it on the profile', async () => {
+    expect(registerAdvertiserSchema.safeParse({ name: 'St. Mary’s School', mobile: '9876543210', onBehalf: true, type: 'NGO', entityType: 'GOVERNMENT_EDUCATION' }).success).toBe(true);
+    expect(registerAdvertiserSchema.safeParse({ name: 'St. Mary’s School', mobile: '9876543210', onBehalf: true, entityType: 'SCHOOL' }).success).toBe(false);
+    await registerAdvertiser({ name: 'St. Mary’s School', mobile: '9876543210', type: 'NGO', entityType: 'GOVERNMENT_EDUCATION' } as never);
+    expect(repository.createAdvertiser).toHaveBeenLastCalledWith(expect.objectContaining({ type: 'NGO', entityType: 'GOVERNMENT_EDUCATION' }));
   });
 
   it('holds a bare account for the number without opening a sign-in', async () => {

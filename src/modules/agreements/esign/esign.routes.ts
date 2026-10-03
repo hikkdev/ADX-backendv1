@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { asyncHandler } from '../../../shared/http';
-import { authenticate, requireRole } from '../../../shared/auth';
+import { authenticate, requireRole, requirePermission } from '../../../shared/auth';
 import {
   getSigningHandler,
   listSigningHandler,
@@ -28,7 +28,7 @@ signingRouter.post('/:id/refresh', asyncHandler(refreshSigningHandler));
 signingRouter.post('/:id/mock-sign', asyncHandler(mockSignHandler));
 
 signingRouter.use(requireRole('ADMIN'));
-signingRouter.get('/', asyncHandler(listSigningHandler));
-signingRouter.post('/', asyncHandler(openSigningHandler));
-signingRouter.post('/:id/remind', asyncHandler(remindSigningHandler));
-signingRouter.post('/:id/void', asyncHandler(voidSigningHandler));
+signingRouter.get('/', requirePermission('content.view'), asyncHandler(listSigningHandler));
+signingRouter.post('/', requirePermission('content.edit'), asyncHandler(openSigningHandler));
+signingRouter.post('/:id/remind', requirePermission('content.edit'), asyncHandler(remindSigningHandler));
+signingRouter.post('/:id/void', requirePermission('content.edit'), asyncHandler(voidSigningHandler));

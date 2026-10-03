@@ -1,8 +1,11 @@
+import crypto from 'crypto';
 import { z } from 'zod';
 import {
   AUDIENCE_FOOTFALL_BLENDS,
   AUDIENCE_PROVIDERS,
   AUDIENCE_VENDORS,
+  DIGIO_TEMPLATE_ID_PATTERN,
+  DIGIO_WORKFLOW_KEYS,
   EMAIL_MODES,
   EMAIL_PRIMARIES,
   HRMS_PROVIDERS,
@@ -11,13 +14,58 @@ import {
   TELEPHONY_PROVIDERS,
   WHATSAPP_BSPS,
   WORK_TOOL_PROVIDERS,
+  type DigioWorkflowKey,
   type HrmsProvider,
   type IntegrationsConfig,
   type WorkToolProvider,
 } from '../../shared/integrations';
 import { AUDIENCE_FIELD_PATTERN } from '../../shared/audience';
 import { SMS_KINDS, SMS_RAIL_NAMES } from '../../shared/sms';
+import { CHECK_TYPES, COMPOSITE_STEP_KINDS, MAX_FALLBACKS, UPI_CHECK_MODES, VERIFICATION_PROVIDER_NAMES, type CheckType } from '../../shared/verification';
 
+/**
+ * Cashfree Phase 1: the Secure ID public key as it is saved — the PEM text
+ * of an RSA public key, checked by parsing it, so a pasted certificate
+ * password or half a file is refused at the form rather than by Cashfree
+ * as a "signature mismatch" on every call.
+ */
+const PUBLIC_KEY_PEM = z
+  .string()
+  .trim()
+  .max(8_000)
+  .refine(
+    (value) => {
+      try {
+        return crypto.createPublicKey(value.replace(/\\n/g, '\n')).asymmetricKeyType === 'rsa';
+      } catch {
+        return false;
+      }
+    },
+    { message: 'Paste the whole public key file Cashfree gave you (-----BEGIN PUBLIC KEY----- … -----END PUBLIC KEY-----)' },
+  );
+/** One check's route: the primary, and up to two fallbacks that are not the primary; null goes back to the default. */
+const CHECK_ROUTE = z
+  .strictObject({
+    primary: z.enum(VERIFICATION_PROVIDER_NAMES),
+    fallbacks: z.array(z.enum(VERIFICATION_PROVIDER_NAMES)).max(MAX_FALLBACKS).optional(),
+  })
+  .refine((route) => !(route.fallbacks ?? []).includes(route.primary), { message: 'A fallback cannot be the primary provider' })
+  .refine((route) => new Set(route.fallbacks ?? []).size === (route.fallbacks ?? []).length, { message: 'A provider can be a fallback only once' })
+  .nullable()
+  .optional();
+/** One workflow's Cashfree steps, in order; null goes back to the default. */
+const COMPOSITE_OVERRIDE = z
+  .array(z.strictObject({ step: z.enum(COMPOSITE_STEP_KINDS), required: z.boolean().optional() }))
+  .min(1)
+  .max(COMPOSITE_STEP_KINDS.length)
+  .refine((steps) => new Set(steps.map((row) => row.step)).size === steps.length, { message: 'A step can appear only once' })
+  .nullable()
+  .optional();
+
+/** Phase D: a Digio workflow template id (`KTP…`), trimmed. */
+const DIGIO_TEMPLATE_ID = z.string().trim().max(64).regex(DIGIO_TEMPLATE_ID_PATTERN, 'A Digio template id: KTP followed by capital letters and digits');
+/** One workflow's override: an id, null back to the default, or blank to keep what is stored. */
+const WORKFLOW_OVERRIDE = DIGIO_TEMPLATE_ID.nullable().optional().or(z.literal(''));
 /** An http(s) base URL, trimmed; a trailing slash is the resolver's to strip. */
 const HTTP_URL = z.string().trim().max(500).regex(/^https?:\/\/[^\s]+$/, 'Must be an http(s) URL');
 /** Z-B: a raster tile template — an http(s) URL carrying `{z}`, `{x}` and `{y}`; `{key}` optional. */
@@ -30,7 +78,7 @@ export const audienceTestSchema = z.object({ vendor: z.enum(AUDIENCE_VENDORS) })
 /** AE-B: `POST /integrations/email/test { to }` — where the one test message goes; strict, so nothing else rides along. */
 export const emailTestSchema = z.strictObject({ to: z.string().trim().email().max(200) });
 
-export const sectionSchema = z.enum(['sms', 'email', 'storage', 'kyc', 'esign', 'twilio', 'resend', 'googleMaps', 'razorpay', 'cashfree', 'ccavenue', 'stripe', 'branding', 'ai', 'hrms', 'workTool', 'maps', 'audience', 'qrEngine', 'leadFeeds', 'leadForms', 'leadChannels']);
+export const sectionSchema = z.enum(['sms', 'email', 'storage', 'kyc', 'esign', 'twilio', 'resend', 'googleMaps', 'razorpay', 'cashfree', 'ccavenue', 'stripe', 'branding', 'bankTransfer', 'facebook', 'geoIp', 'ai', 'hrms', 'workTool', 'maps', 'audience', 'qrEngine', 'leadFeeds', 'leadForms', 'leadChannels', 'secureId', 'verificationRouting', 'holidayCalendar']);
 
 /** QR-1: a hex colour as GenQR validates it. */
 const HEX_COLOR = z.string().trim().regex(/^#[0-9a-fA-F]{6}$/, 'Must be a #rrggbb colour');
@@ -111,6 +159,22 @@ export const patchSchemas = {
     baseUrl: z.string().url().optional(),
     /** Lot D (Q129): DIGIO, DEGRADED (the probe's verdict) or MANUAL (ops' switch). */
     kycProvider: z.enum(['DIGIO', 'DEGRADED', 'MANUAL']).optional(),
+    /** DR-2: who reads identity papers at the document door. */
+    documentReader: z.enum(['MODEL', 'DIGIO']).optional(),
+    ocrPath: z.string().trim().max(200).regex(/^\//, 'A path, starting with /').optional().or(z.literal('')),
+    /**
+     * Phase D (1 Oct 2026): template ids that replace the defaults of the
+     * twenty-five Digio KYC workflows — known keys only (strict). Merged
+     * over the stored overrides key by key: blank keeps, null goes back to
+     * the default from the owner's document.
+     */
+    workflowTemplates: z
+      .strictObject(
+        Object.fromEntries(DIGIO_WORKFLOW_KEYS.map((key) => [key, WORKFLOW_OVERRIDE])) as Record<DigioWorkflowKey, typeof WORKFLOW_OVERRIDE>,
+      )
+      .optional(),
+    /** Digio's gateway, when the KYC page should not follow the eSign section's. */
+    gatewayUrl: z.string().url().optional().or(z.literal('')),
   }),
   /** LH3 (D4): the directory feeds' partner credentials, one card each; Google Places rides the maps key. */
   leadFeeds: z.object({
@@ -239,6 +303,25 @@ export const patchSchemas = {
     consoleTitle: z.string().trim().max(40).nullable().optional().or(z.literal('')),
     siteTitle: z.string().trim().max(70).nullable().optional().or(z.literal('')),
     siteDescription: z.string().trim().max(160).nullable().optional().or(z.literal('')),
+  }),
+  /** FB-1: Facebook Login — the app id (public) and the app secret. */
+  facebook: z.object({
+    appId: z.string().trim().max(64).optional(),
+    appSecret: z.string().optional(),
+  }),
+  /** SL-1: the geo-IP provider behind the sessions page's "signed in from". */
+  geoIp: z.object({
+    provider: z.enum(['NONE', 'IPAPI', 'IPINFO']).optional(),
+    token: z.string().optional(),
+  }),
+  /** BT-1: the platform's receiving account for bank transfers — shown to the payer as-is. */
+  bankTransfer: z.object({
+    beneficiary: z.string().trim().max(120).nullable().optional().or(z.literal('')),
+    accountNumber: z.string().trim().regex(/^[0-9]{6,20}$/, '6–20 digits').nullable().optional().or(z.literal('')),
+    ifsc: z.string().trim().regex(/^[A-Z]{4}0[A-Z0-9]{6}$/, 'An IFSC is 4 letters, a zero and 6 characters').nullable().optional().or(z.literal('')),
+    bank: z.string().trim().max(80).nullable().optional().or(z.literal('')),
+    branch: z.string().trim().max(120).nullable().optional().or(z.literal('')),
+    instructions: z.string().trim().max(300).nullable().optional().or(z.literal('')),
   }),
   ai: z.object({
     provider: z.enum(['anthropic', 'openai', 'google', 'azure-openai', 'custom']).optional(),
@@ -383,5 +466,57 @@ export const patchSchemas = {
     aziraClientId: z.string().max(200).optional(),
     aziraBaseUrl: z.string().url().nullable().optional().or(z.literal('')),
     catchmentRadiusM: z.number().int().min(50).max(5_000).optional(),
+  }),
+  /**
+   * Cashfree Phase 1: the Secure ID keys. Strict. `clientSecret` and
+   * `publicKey` are secrets — sealed at rest, masked on the read, blank
+   * keeps; `publicKey: null` removes the key (the account is back on IP
+   * whitelisting). `testMode` picks the sandbox host.
+   */
+  secureId: z.strictObject({
+    clientId: z.string().trim().max(200).optional(),
+    clientSecret: z.string().max(400).optional(),
+    publicKey: PUBLIC_KEY_PEM.nullable().optional().or(z.literal('')),
+    testMode: z.boolean().optional(),
+  }),
+  /**
+   * Cashfree Phase 1: the verification routing. Strict, known keys only.
+   * `checks`, `breaker` and `composites` are merged over what is stored key
+   * by key (null on a key goes back to its default); the three switches are
+   * plain fields. Nothing here is a secret.
+   */
+  verificationRouting: z.strictObject({
+    checks: z.strictObject(Object.fromEntries(CHECK_TYPES.map((check) => [check, CHECK_ROUTE])) as Record<CheckType, typeof CHECK_ROUTE>).optional(),
+    breaker: z
+      .strictObject({
+        failures: z.number().int().min(1).max(100),
+        windowMinutes: z.number().int().min(1).max(24 * 60),
+        cooldownMinutes: z.number().int().min(1).max(24 * 60),
+      })
+      .partial()
+      .optional(),
+    composites: z
+      .strictObject(Object.fromEntries(DIGIO_WORKFLOW_KEYS.map((key) => [key, COMPOSITE_OVERRIDE])) as Record<DigioWorkflowKey, typeof COMPOSITE_OVERRIDE>)
+      .optional(),
+    nameMatchMin: z.number().min(0).max(100).optional(),
+    upiCheck: z.enum(UPI_CHECK_MODES).optional(),
+    hostedKycBackup: z.enum(['ON', 'OFF']).optional(),
+  }),
+  /**
+   * HC-1 (1 Oct 2026): the public holiday calendar. Strict. `url` must be
+   * https (a calendar is fetched by the server, so a plain-http address is
+   * refused); null or blank goes back to Google's "Holidays in India".
+   */
+  holidayCalendar: z.strictObject({
+    enabled: z.boolean().optional(),
+    url: z
+      .string()
+      .trim()
+      .max(500)
+      .regex(/^https:\/\/[^\s]+$/, 'The calendar address must start with https://')
+      .nullable()
+      .optional()
+      .or(z.literal('')),
+    includeObservances: z.boolean().optional(),
   }),
 } satisfies Record<keyof IntegrationsConfig, z.ZodTypeAny>;

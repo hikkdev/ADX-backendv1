@@ -35,7 +35,7 @@ const { repository, advertisers, notifications, audit, digio, settings, labels }
   advertisers: { applyKycDecision: vi.fn(), applyKycDecisionByUserId: vi.fn(), getAdvertiserForUser: vi.fn(), findAdvertiser: vi.fn() },
   notifications: { createNotification: vi.fn(), notify: vi.fn(async () => ({ notificationId: 'ntf_1', templateKey: 'kyc-requested', deliveries: [] })) },
   audit: { logActivity: vi.fn(), auditDiff: vi.fn(() => ({})) },
-  digio: { initiateAdvertiserDigioKyc: vi.fn(), restartAdvertiserDigioKyc: vi.fn(), advertiserDigioStatus: vi.fn(), handleAdvertiserDigioWebhook: vi.fn() },
+  digio: { initiateAdvertiserDigioKyc: vi.fn(), noteEntityTypeForManualRequest: vi.fn(), restartAdvertiserDigioKyc: vi.fn(), advertiserDigioStatus: vi.fn(), handleAdvertiserDigioWebhook: vi.fn() },
   settings: { getPlatformSettings: vi.fn(async () => ({ kyc: { reviewSlaHours: 48 } })), getFlow: vi.fn(async () => ({ version: 7 })), ONBOARDING_FLOW_KEY: 'onboarding' },
   labels: { kycUserLabels: vi.fn(), kycLabelFor: vi.fn(), kycCaseExtras: vi.fn() },
 }));
@@ -96,7 +96,12 @@ describe('the request body', () => {
 describe('POST /advertiser-kyc/:id/request', () => {
   it('DIGIO: initiates Digio on the advertiser’s behalf, stamps the request, tells the advertiser with the deep link, and audits', async () => {
     const result = await requestAdvertiserKyc('akyc_1', { channel: 'DIGIO', note: 'Please finish this week' }, 'usr_admin', undefined, NOW);
-    expect(digio.initiateAdvertiserDigioKyc).toHaveBeenCalledWith(expect.objectContaining({ id: 'adv_1', userId: 'usr_adv', name: 'Meera S', email: 'meera@example.com', mobile: '+919876543210' }));
+    // Phase D: the profile goes in whole (its entity type picks the workflow), with who asked and any entity type the desk sent.
+    expect(digio.initiateAdvertiserDigioKyc).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'adv_1', userId: 'usr_adv', name: 'Meera S', email: 'meera@example.com', mobile: '+919876543210' }),
+      { byUserId: 'usr_admin', entityType: undefined, req: undefined },
+      NOW,
+    );
     expect(repository.requestKyc).toHaveBeenCalledWith(KEY, { requestedById: 'usr_admin', requestedChannel: 'DIGIO', at: NOW });
     expect(notifications.notify).toHaveBeenCalledWith(
       'KYC_REQUESTED',
@@ -112,9 +117,34 @@ describe('POST /advertiser-kyc/:id/request', () => {
     expect(result).toMatchObject({ kyc: { requestedById: 'usr_admin', requestedChannel: 'DIGIO' }, digio: { kycId: 'dg_1' }, notified: true });
   });
 
+  it('Phase D: passes the desk’s entity type through, and stamps nothing when the start answers 409 ENTITY_TYPE_REQUIRED', async () => {
+    await requestAdvertiserKyc('akyc_1', { channel: 'DIGIO', entityType: 'COMPANY' }, 'usr_admin', undefined, NOW);
+    expect(digio.initiateAdvertiserDigioKyc).toHaveBeenLastCalledWith(expect.objectContaining({ id: 'adv_1' }), { byUserId: 'usr_admin', entityType: 'COMPANY', req: undefined }, NOW);
+
+    vi.clearAllMocks();
+    digio.initiateAdvertiserDigioKyc.mockRejectedValueOnce(Object.assign(new Error('Say what kind of advertiser this is'), { statusCode: 409, code: 'ENTITY_TYPE_REQUIRED' }));
+    await expect(requestAdvertiserKyc('akyc_1', { channel: 'DIGIO' }, 'usr_admin', undefined, NOW)).rejects.toMatchObject({ statusCode: 409, code: 'ENTITY_TYPE_REQUIRED' });
+    expect(repository.requestKyc).not.toHaveBeenCalled();
+    expect(notifications.notify).not.toHaveBeenCalled();
+    expect(audit.logActivity).not.toHaveBeenCalled();
+  });
+
+  it('Phase D: a verified individual may be sent the upgrade (a business form) on DIGIO; anything else on a verified record stays 409', async () => {
+    repository.findById.mockResolvedValue({ ...row, status: 'VERIFIED' });
+    await expect(requestAdvertiserKyc('akyc_1', { channel: 'DIGIO', entityType: 'COMPANY' }, 'usr_admin', undefined, NOW)).resolves.toMatchObject({ digio: { kycId: 'dg_1' } });
+    expect(digio.initiateAdvertiserDigioKyc).toHaveBeenCalledWith(expect.objectContaining({ id: 'adv_1' }), { byUserId: 'usr_admin', entityType: 'COMPANY', req: undefined }, NOW);
+
+    vi.clearAllMocks();
+    await expect(requestAdvertiserKyc('akyc_1', { channel: 'DIGIO', entityType: 'INDIVIDUAL' }, 'usr_admin')).rejects.toMatchObject({ statusCode: 409, code: 'KYC_ALREADY_VERIFIED' });
+    await expect(requestAdvertiserKyc('akyc_1', { channel: 'MANUAL', entityType: 'COMPANY' }, 'usr_admin')).rejects.toMatchObject({ code: 'KYC_ALREADY_VERIFIED' });
+    expect(digio.initiateAdvertiserDigioKyc).not.toHaveBeenCalled();
+  });
+
   it('MANUAL: only stamps, tells and audits — Digio is never asked', async () => {
     const result = await requestAdvertiserKyc('akyc_1', { channel: 'MANUAL' }, 'usr_admin', undefined, NOW);
     expect(digio.initiateAdvertiserDigioKyc).not.toHaveBeenCalled();
+    // Phase D: a manual request stores an entity type only when one is sent.
+    expect(digio.noteEntityTypeForManualRequest).toHaveBeenCalledWith(expect.objectContaining({ id: 'adv_1' }), { byUserId: 'usr_admin', entityType: undefined, req: undefined });
     expect(repository.requestKyc).toHaveBeenCalledWith(KEY, { requestedById: 'usr_admin', requestedChannel: 'MANUAL', at: NOW });
     expect(notifications.notify).toHaveBeenCalledWith('KYC_REQUESTED', 'usr_adv', expect.objectContaining({ channel: 'at the ADX desk', note: '' }), expect.anything());
     expect(audit.logActivity).toHaveBeenCalledWith('usr_admin', 'ADVERTISER_KYC_REQUESTED', expect.objectContaining({ metadata: expect.objectContaining({ channel: 'MANUAL' }) }));
@@ -136,7 +166,11 @@ describe('POST /advertiser-kyc/:id/request', () => {
 
   it('N3-B: an advertiser created on the console with no app account — the record carries the profile alone, Digio is asked with the profile’s contact, the notice is skipped and the answer says so', async () => {
     const result = await requestAdvertiserKyc('adv_console', { channel: 'DIGIO' }, 'usr_admin', undefined, NOW);
-    expect(digio.initiateAdvertiserDigioKyc).toHaveBeenCalledWith(expect.objectContaining({ id: 'adv_console', userId: null, email: 'meera@example.com', mobile: '+919876543210' }));
+    expect(digio.initiateAdvertiserDigioKyc).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'adv_console', userId: null, email: 'meera@example.com', mobile: '+919876543210' }),
+      { byUserId: 'usr_admin', entityType: undefined, req: undefined },
+      NOW,
+    );
     expect(repository.requestKyc).toHaveBeenCalledWith({ advertiserProfileId: 'adv_console', advertiserId: null }, expect.objectContaining({ requestedChannel: 'DIGIO' }));
     expect(notifications.notify).not.toHaveBeenCalled();
     expect(audit.logActivity).toHaveBeenCalledWith('usr_admin', 'ADVERTISER_KYC_REQUESTED', expect.objectContaining({ metadata: expect.objectContaining({ advertiserId: null, advertiserProfileId: 'adv_console' }) }));

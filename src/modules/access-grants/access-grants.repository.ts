@@ -20,7 +20,8 @@ export type NewGrant = {
 /** A grant with the names a screen needs, so no caller re-queries for them. */
 export type GrantDetail = DelegatedAccessGrant & {
   publisher: { id: string; name: string; userId: string | null } | null;
-  assignedAgent: { id: string; userId: string };
+  advertiser: { id: string; name: string; userId: string | null } | null;
+  assignedAgent: { id: string; userId: string; displayId: string | null; user: { name: string | null } | null };
 };
 
 export interface AccessGrantsRepository {

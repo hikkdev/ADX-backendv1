@@ -9,7 +9,9 @@ import {
   getTemplate,
   listAcceptances,
   listTemplates,
+  myAgreements,
   partyAgreements,
+  publicAgreement,
   searchParties,
   staleParties,
   updateTemplate,
@@ -47,6 +49,16 @@ const actor = (req: Request): string => {
 const param = (req: Request, name: string): string => req.params[name] as string;
 
 /* Live text --------------------------------------------------------- */
+
+/** 26 Sep 2026: `GET /agreements/mine` — the signed-in account's platform agreements, current or outdated. */
+export async function myAgreementsHandler(req: Request, res: Response): Promise<void> {
+  res.json({ success: true, data: await myAgreements(req.user!.sub) });
+}
+
+/** 26 Sep 2026: `GET /legal/agreements/:kind` — public, the live text only. */
+export async function publicAgreementHandler(req: Request, res: Response): Promise<void> {
+  res.json({ success: true, data: await publicAgreement(param(req, 'kind')) });
+}
 
 export async function currentTemplateHandler(req: Request, res: Response): Promise<void> {
   const kind = parse(agreementKindSchema, param(req, 'kind'));

@@ -23,6 +23,7 @@ const { fake, repository, identifiers, wallets, payouts, auth, notifications, up
   const repository = {
     findUserByMobile: vi.fn(async (mobile: string) => fake.users.get(mobile) ?? null),
     emailTaken: vi.fn(async () => false),
+    orderDisplayIds: vi.fn(async (ids: readonly string[]) => new Map(ids.map((id) => [id, id === 'ord_1' ? 'BKG-2609-0001' : null]))),
     createPartner: vi.fn(async (data: Row) => {
       const row: Row = {
         id: `prt_${fake.partners.size + 1}`,
@@ -72,7 +73,7 @@ const { fake, repository, identifiers, wallets, payouts, auth, notifications, up
     listJobsForPartner: vi.fn(async () => [{ id: 'job_1', status: 'READY' }]),
     countJobsForPartner: vi.fn(async () => [{ status: 'READY', count: 1 }]),
     findFilesByIds: vi.fn(async (ids: string[]) => ids.map((id) => ({ id, filename: `${id}.pdf`, mimeType: 'application/pdf', sizeBytes: 10, url: `/api/v1/files/${id}`, createdAt: new Date('2026-09-01T00:00:00Z') }))),
-    findLastLogins: vi.fn(async (ids: string[]) => ids.map((userId) => ({ userId, lastLoginAt: userId === 'usr_prt_1' ? NOW : null }))),
+    findLastLogins: vi.fn(async (ids: string[]) => ids.map((userId) => ({ userId, lastLoginAt: userId === 'usr_prt_1' ? NOW : null, displayId: userId === 'usr_prt_1' ? 'ADX-1209-2601' : null }))),
   };
   return {
     fake,
@@ -119,6 +120,9 @@ const { fake, repository, identifiers, wallets, payouts, auth, notifications, up
 });
 
 vi.mock('../prisma-print-partners.repository', () => ({ prismaPrintPartnersRepository: repository }));
+// Account lifecycle (2 Oct 2026): whether the account behind the shop is closed — open unless a test says so.
+const { accountFacts } = vi.hoisted(() => ({ accountFacts: { findAccountFacts: vi.fn(async () => null), accountClosedAt: vi.fn(async () => null as Date | null) } }));
+vi.mock('../../../shared/party-status/account-facts', () => accountFacts);
 vi.mock('../../identifiers', () => identifiers);
 vi.mock('../../wallets', () => wallets);
 vi.mock('../../payouts', () => payouts);
@@ -136,6 +140,7 @@ vi.mock('../../../shared/audit', async (importOriginal) => {
 import {
   activatePartner,
   applyAsPartner,
+  completeApplication,
   createPartner,
   deactivatePartner,
   getPartnerForUser,
@@ -187,8 +192,10 @@ describe('creating a partner', () => {
   it('creates the inactive account, the row, the identifier and the wallet together', async () => {
     const partner = await createPartner({ name: 'Rapid Prints', mobile: '98765 43210', city: 'Bengaluru' });
     expect(identifiers.allocateIdentifier).toHaveBeenCalledWith('PARTNER');
+    // 28 Sep 2026: the account opened with the partner is a person with their own ADX-… id too.
+    expect(identifiers.allocateIdentifier).toHaveBeenCalledWith('USER');
     expect(repository.createPartner).toHaveBeenCalledWith(
-      expect.objectContaining({ displayId: 'PRT-1209-2601', mobile: '+919876543210', name: 'Rapid Prints', city: 'Bengaluru', cityId: 'city_bengaluru' })
+      expect.objectContaining({ displayId: 'PRT-1209-2601', userDisplayId: expect.any(String), mobile: '+919876543210', name: 'Rapid Prints', city: 'Bengaluru', cityId: 'city_bengaluru' })
     );
     expect(wallets.ensureWallet).toHaveBeenCalledWith({ kind: 'PRINT_PARTNER', id: partner.id }, 'Rapid Prints · print partner');
     expect(partner.displayId).toBe('PRT-1209-2601');
@@ -307,6 +314,19 @@ describe('keeping the roster', () => {
 
   it('answers 404 for a partner that is not there', async () => {
     await expect(deactivatePartner('prt_missing')).rejects.toMatchObject({ statusCode: 404 });
+  });
+
+  it('account lifecycle (2 Oct 2026): a closed account stays closed — reactivating or activating it is 409 ACCOUNT_CLOSED', async () => {
+    const shop = await createPartner({ name: 'Closed Shop', mobile: '9876543219' });
+    await activatePartner(shop.id, 'usr_admin', NOW);
+    await deactivatePartner(shop.id);
+    accountFacts.accountClosedAt.mockResolvedValueOnce(new Date());
+    await expect(reactivatePartner(shop.id)).rejects.toMatchObject({ statusCode: 409, code: 'ACCOUNT_CLOSED' });
+    expect(accountFacts.accountClosedAt).toHaveBeenCalledWith(shop.userId);
+
+    const fresh = await createPartner({ name: 'Fresh Shop', mobile: '9876543218' });
+    accountFacts.accountClosedAt.mockResolvedValueOnce(new Date());
+    await expect(activatePartner(fresh.id, 'usr_admin', NOW)).rejects.toMatchObject({ code: 'ACCOUNT_CLOSED' });
   });
 });
 
@@ -427,6 +447,32 @@ describe('the partner’s own profile', () => {
   });
 });
 
+describe('onboarding addresses (1 Oct 2026): the shop address\'s state and PIN', () => {
+  it('the desk\'s create writes them beside the address, and null when not given', async () => {
+    await createPartner({ name: 'Rapid Prints', mobile: '9876543210', address: '7, Industrial Estate', city: 'Bengaluru', state: 'Karnataka', postalCode: '560058' });
+    expect(repository.createPartner).toHaveBeenLastCalledWith(expect.objectContaining({ address: '7, Industrial Estate', state: 'Karnataka', postalCode: '560058' }));
+    await createPartner({ name: 'Quick Prints', mobile: '9876543211' });
+    expect(repository.createPartner).toHaveBeenLastCalledWith(expect.objectContaining({ state: null, postalCode: null }));
+  });
+
+  it('the shop\'s application opens with neither, and its details step writes both', async () => {
+    const { partner } = await applyAsPartner('usr_shop', { name: 'Shop Prints', mobile: '9876543212' });
+    expect(repository.createApplication).toHaveBeenLastCalledWith(expect.objectContaining({ state: null, postalCode: null }));
+    const { after } = await completeApplication(partner as never, { address: '9, MIDC', state: 'Maharashtra', postalCode: '411026' });
+    expect(repository.updatePartner).toHaveBeenLastCalledWith(partner.id, { address: '9, MIDC', state: 'Maharashtra', postalCode: '411026' });
+    expect(after).toMatchObject({ state: 'Maharashtra', postalCode: '411026' });
+  });
+
+  it('the desk\'s edit and the shop\'s own update write them, null clearing', async () => {
+    const partner = await createPartner({ name: 'Rapid Prints', mobile: '9876543210', state: 'Karnataka', postalCode: '560058' });
+    await updatePartner(partner.id, { postalCode: '560001' });
+    expect(repository.updatePartner).toHaveBeenLastCalledWith(partner.id, { postalCode: '560001' });
+    const { after } = await updateMe(fake.partners.get(partner.id) as never, { state: null, postalCode: null });
+    expect(repository.updatePartner).toHaveBeenLastCalledWith(partner.id, { state: null, postalCode: null });
+    expect(after).toMatchObject({ state: null, postalCode: null });
+  });
+});
+
 describe('the rate card', () => {
   it('rows alone make a rate card, stamped with the moment', async () => {
     const partner = await createPartner({ name: 'Rapid Prints', mobile: '9876543210' });
@@ -472,6 +518,8 @@ describe('the money, from the partner’s own phone', () => {
     expect(view.walletId).toBe('wal_prt');
     expect(payouts.withdrawalAllowance).toHaveBeenCalledWith('wal_prt');
     expect(view.entries[0]).toMatchObject({ amount: '500.00', orderId: 'ord_1' });
+    // 26 Sep 2026: the booking id the partner is told, beside the order id.
+    expect(view.entries[0]).toMatchObject({ orderDisplayId: 'BKG-2609-0001' });
     expect(payouts.listWithdrawals).toHaveBeenCalledWith({ walletId: 'wal_prt', limit: 50 });
   });
 
@@ -613,5 +661,7 @@ describe('G13-B: the last login', () => {
     const rows = await withLastLogin([first, second]);
     expect(repository.findLastLogins).toHaveBeenCalledWith([first.userId, second.userId]);
     expect(rows.map((row) => row.lastLoginAt)).toEqual([NOW, null]);
+    // 28 Sep 2026: the person's own ADX-… id rides the same lookup.
+    expect(rows.map((row) => row.userDisplayId)).toEqual(['ADX-1209-2601', null]);
   });
 });

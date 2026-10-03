@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { asyncHandler } from '../../shared/http';
-import { authenticate, requireRole } from '../../shared/auth';
+import { authenticate, requireRole, requirePermission } from '../../shared/auth';
 import { mineHandler, queueHandler, raiseHandler, updateHandler } from './safety.controller';
 
 export const safetyRouter = Router();
@@ -10,5 +10,5 @@ safetyRouter.use(authenticate);
  * ADMIN because a safety report names where somebody is standing. */
 safetyRouter.get('/alerts/mine', asyncHandler(mineHandler));
 safetyRouter.post('/alerts', asyncHandler(raiseHandler));
-safetyRouter.get('/alerts', requireRole('ADMIN'), asyncHandler(queueHandler));
-safetyRouter.patch('/alerts/:alertId', requireRole('ADMIN'), asyncHandler(updateHandler));
+safetyRouter.get('/alerts', requireRole('ADMIN'), requirePermission('support.view'), asyncHandler(queueHandler));
+safetyRouter.patch('/alerts/:alertId', requireRole('ADMIN'), requirePermission('support.edit'), asyncHandler(updateHandler));

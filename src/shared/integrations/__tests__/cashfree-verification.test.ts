@@ -4,6 +4,9 @@ import { describe, expect, it, vi } from 'vitest';
  * AG-4 (the owner, 20 Sep 2026): Cashfree's Verification Suite — the vehicle
  * RC lookup and the bank penny drop.
  *
+ * Cashfree Phase 1 (1 Oct 2026): these two exports are now thin wrappers
+ * over the Secure ID provider; what they answer is unchanged.
+ *
  * Pinned: the sandbox host and the client pair on the wire; the RC row
  * shaped into ADX's facts whatever Cashfree's spelling; a refusal (an
  * unwhitelisted IP, an unknown number) and an outage as answers, never
@@ -35,10 +38,14 @@ describe('the vehicle RC lookup', () => {
       }),
     );
     const answer = await lookupVehicleRc('ka 01 ab-1234', fetchImpl, cfg);
+    // Cashfree Phase 1: the documented call is a POST with an id of ours and the number in the body, on the 2024-12-01 API.
     expect(fetchImpl).toHaveBeenCalledWith(
-      'https://sandbox.cashfree.com/verification/vehicle-rc?vehicle_number=KA01AB1234',
-      expect.objectContaining({ method: 'GET', headers: expect.objectContaining({ 'x-client-id': 'CF-TEST', 'x-client-secret': 'cfsk_test' }) }),
+      'https://sandbox.cashfree.com/verification/vehicle-rc',
+      expect.objectContaining({ method: 'POST', headers: expect.objectContaining({ 'x-client-id': 'CF-TEST', 'x-client-secret': 'cfsk_test', 'x-api-version': '2024-12-01' }) }),
     );
+    const sent = JSON.parse((fetchImpl.mock.calls[0] as unknown as [string, { body: string }])[1].body) as { verification_id: string; vehicle_number: string };
+    expect(sent.vehicle_number).toBe('KA01AB1234');
+    expect(sent.verification_id).toMatch(/^[A-Za-z0-9]{1,50}$/);
     expect(answer.ok).toBe(true);
     if (!answer.ok) return;
     expect(answer.facts).toMatchObject({

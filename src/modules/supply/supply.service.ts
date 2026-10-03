@@ -13,7 +13,7 @@ import {
 import type {
   ComplianceCaseStatus,
   ContactAttemptChannel,
-  Listing,
+  ListingRead as Listing,
   ListingAttemptOrigin,
   ListingAttemptStatus,
   ListingClaimStatus,
@@ -22,11 +22,16 @@ import type {
   RightsBasis,
   ListingDocument,
 } from '../../shared/database';
+import type { Request } from 'express';
 import type { PageQuery } from '../../shared/pagination';
+import { findActivityRows, logActivity } from '../../shared/audit';
 import { getPlatformSettings } from '../app-config';
-import { createNotification } from '../notifications';
+import { createNotification, notify } from '../notifications';
+import { dispatchAskFor, findAssignableAgentInCity } from '../agents';
+import { createVisit, getVisit } from '../visits';
 import { listAdminUserIds } from '../users';
 import { assertPublisherLicenceSigned, isCurrentAcceptance, requestPublisherLicence } from '../agreements';
+import { adoptListingDocument, type DocumentFiler } from '../uploads';
 import { prismaSupplyRepository as repository } from './prisma-supply.repository';
 import type { AttemptListingInput, ResolvedAttemptListing } from './supply.repository';
 
@@ -454,21 +459,52 @@ export async function requestAttemptAcceptance(attemptId: string) {
 /* Documents                                                           */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Files a paper on a listing.
+ *
+ * ST-2 (28 Sep 2026): the papers a listing is checked against are private,
+ * whatever the client uploaded them as. When the URL names a PUBLIC file in
+ * the upload register — and the filer uploaded it, or is the desk — `uploads`
+ * adopts it (moved to the private prefix, re-filed as LISTING_DOCUMENT) and
+ * the document is stored with its `/files/:id` URL. An outside link is
+ * stored as given, and so is the URL of a file that could not be moved: a
+ * paper is never refused or lost over its file. `filer` is absent only for
+ * a caller that is not a person; the platform may then move any paper.
+ */
 export async function submitDocument(input: {
   listingId: string;
   kind: ListingDocumentKind;
   url: string;
   /** QR-24: the day the permit or agreement runs out, YYYY-MM-DD. */
   expiresAt?: string | null;
+  /** ST-2: who is filing it, and the host a moved file's `/files/:id` URL is recorded under. */
+  filer?: DocumentFiler;
+  baseUrl?: string;
 }) {
   const listing = await repository.findListing(input.listingId);
   if (!listing) throw new ApiError(404, 'NOT_FOUND', 'Listing not found');
-  const { expiresAt, ...rest } = input;
-  return repository.addDocument({ ...rest, expiresAt: expiresAt ? endOfDay(expiresAt) : null });
+  const { expiresAt, filer, baseUrl, url, ...rest } = input;
+  const adopted = await adoptListingDocument(url, { filer: filer ?? null, baseUrl: baseUrl ?? '' });
+  return repository.addDocument({ ...rest, url: adopted.url, expiresAt: expiresAt ? endOfDay(expiresAt) : null });
 }
 
 export function getDocuments(listingId: string) {
   return repository.listDocuments(listingId);
+}
+
+/**
+ * ST-2 (28 Sep 2026): the listings a stored file is filed on, for the
+ * private-file door (`uploads`' `FileAccessPort.listingDocumentMayView`,
+ * composed in bootstrap). A venue paper or an audience report went private,
+ * and who may read one is decided by the listing it sits on — so the file is
+ * found by how the URLs end: `/files/<id>`, and `/<objectName>` for a URL a
+ * document recorded while the file was still public. An object name shorter
+ * than twelve characters is not trusted to be unique and is not matched.
+ */
+export function listingsNamingFile(ref: { fileId: string; objectName?: string | null }) {
+  const suffixes = [`/files/${ref.fileId}`];
+  if (ref.objectName && ref.objectName.length >= 12 && !ref.objectName.includes('/')) suffixes.push(`/${ref.objectName}`);
+  return repository.listingsNamingFile(suffixes);
 }
 
 /**
@@ -629,7 +665,9 @@ export async function runRightsSweep(now = new Date()) {
       if (row.rightsLapsedAt) continue;
       await repository.setRights(row.id, { rightsLapsedAt: now, availableNow: false });
       lapsed += 1;
-      await tellPublisher(row, {
+      // Account lifecycle (2 Oct 2026): the lapse is a fact and is recorded; a
+      // suspended, deactivated or closed publisher is not asked to renew.
+      if (row.publisherWorking) await tellPublisher(row, {
         title: 'Your right to this spot has run out',
         message: `The ${basisWord(row.rightsBasis)} on ${row.title} ended on ${dayLabel(until)}. It takes no new booking until you upload the renewed document and ADX approves it.`,
         suggestedAction: 'Upload the renewed permit or agreement',
@@ -637,6 +675,8 @@ export async function runRightsSweep(now = new Date()) {
       await tellAdmins(row, { title: 'A spot\'s right to the space has lapsed', message: `${row.publisherName ?? 'The publisher'} held ${row.title} on a ${basisWord(row.rightsBasis)} that ended on ${dayLabel(until)}. It is off the shelf until a renewal is approved.` });
       continue;
     }
+    // Account lifecycle (2 Oct 2026): no reminder to a publisher who is not a working account.
+    if (!row.publisherWorking) continue;
     const daysLeft = Math.ceil((until.getTime() - now.getTime()) / DAY_MS);
     // The tightest window the day falls in: seven days out is the seven-day reminder, not a late thirty-day one.
     const window = RIGHTS_REMINDER_DAYS.filter((days) => daysLeft <= days).pop();
@@ -653,6 +693,93 @@ export async function runRightsSweep(now = new Date()) {
     });
   }
   return { considered: rows.length, lapsed, reminded };
+}
+
+/** The renewals desk's "Remind publisher to renew": the audit action that is its clock, and how long the clock runs. */
+export const RIGHTS_REMINDER_ACTION = 'LISTING_RIGHTS_REMINDED';
+export const RIGHTS_DESK_REMINDER_INTERVAL_HOURS = 24;
+
+export type RightsReminder = {
+  listingId: string;
+  /** Whether the reminder said the term has run out (expired) or only that it is ending. */
+  expired: boolean;
+  validUntil: Date;
+  remindedAt: Date;
+  nextAllowedAt: Date;
+};
+
+/**
+ * `POST /supply/listings/:listingId/rights/remind` — 3 Oct 2026: the
+ * renewals desk asks the publisher to renew a lease, licence or permit now,
+ * between the sweep's thirty- and seven-day reminders or after the lapse.
+ * The same in-app notice the sweep sends (relatedType LISTING, so a tap
+ * opens the listing and its Renew door); `rightsRemindedAt` is stamped, so
+ * the sweep counts it as the reminder for the window it falls in.
+ *
+ * Once per 24 hours per listing with the audit trail as the clock, as
+ * `remindReverification` keeps its own. Refused for an owned spot or one
+ * with no end date (409), one with no publisher, no login or an account
+ * that is not working (409), and a second reminder inside the day (429).
+ */
+export async function remindRightsRenewal(listingId: string, byUserId: string, now = new Date(), req?: Request): Promise<RightsReminder> {
+  const listing = await repository.findListing(listingId);
+  if (!listing) throw new ApiError(404, 'NOT_FOUND', 'Listing not found');
+  if (listing.rightsBasis === 'OWNED' || !listing.rightsValidUntil) {
+    throw new ApiError(409, 'CONFLICT', 'This spot is not held on a lease, licence or permit with an end date, so there is nothing to renew.');
+  }
+  if (!listing.publisherId) {
+    throw new ApiError(409, 'CONFLICT', 'This listing has no publisher, so there is nobody to remind.');
+  }
+  const publisher = await repository.publisherContact(listing.publisherId);
+  if (!publisher?.userId) {
+    throw new ApiError(409, 'CONFLICT', 'This publisher has no login yet, so there is nobody to remind.');
+  }
+  if (!publisher.working) {
+    throw new ApiError(409, 'CONFLICT', "This publisher's account is not working, so no reminder goes out.");
+  }
+
+  const intervalMs = RIGHTS_DESK_REMINDER_INTERVAL_HOURS * HOUR_MS;
+  const [last] = await findActivityRows(
+    { action: RIGHTS_REMINDER_ACTION, targetType: 'Listing', targetId: listing.id, from: new Date(now.getTime() - intervalMs) },
+    { skip: 0, take: 1, sort: 'newest' },
+  );
+  if (last) {
+    const nextAllowedAt = new Date(last.createdAt.getTime() + intervalMs);
+    throw new ApiError(
+      429,
+      'TOO_MANY_REQUESTS',
+      `The publisher was reminded within the last ${RIGHTS_DESK_REMINDER_INTERVAL_HOURS} hours. The next reminder can go after ${nextAllowedAt.toISOString()}.`,
+      { lastRemindedAt: last.createdAt, nextAllowedAt },
+    );
+  }
+
+  const until = listing.rightsValidUntil;
+  const expired = Boolean(listing.rightsLapsedAt) || until.getTime() <= now.getTime();
+  const word = basisWord(listing.rightsBasis);
+  const daysLeft = Math.ceil((until.getTime() - now.getTime()) / DAY_MS);
+  await createNotification({
+    userId: publisher.userId,
+    type: 'SYSTEM',
+    subtitle: listing.title,
+    relatedId: listing.id,
+    relatedType: 'LISTING',
+    title: expired
+      ? `Your ${word} on ${listing.title} has run out`
+      : `Your ${word} on ${listing.title} ends in ${daysLeft} day${daysLeft === 1 ? '' : 's'}`,
+    message: expired
+      ? `It ended on ${dayLabel(until)}. The spot takes no new booking until you upload the renewed document and ADX approves it.`
+      : `It runs out on ${dayLabel(until)}. Upload the renewed document before then and the spot stays on the shelf.`,
+    suggestedAction: 'Upload the renewed permit or agreement',
+  });
+  await repository.setRights(listing.id, { rightsRemindedAt: now });
+  await logActivity(byUserId, RIGHTS_REMINDER_ACTION, {
+    ...(req ? { req } : {}),
+    module: 'supply',
+    targetType: 'Listing',
+    targetId: listing.id,
+    metadata: { publisherId: listing.publisherId, rightsBasis: listing.rightsBasis, validUntil: until.toISOString(), expired },
+  });
+  return { listingId: listing.id, expired, validUntil: until, remindedAt: now, nextAllowedAt: new Date(now.getTime() + intervalMs) };
 }
 
 function basisWord(basis: RightsBasis): string {
@@ -879,6 +1006,306 @@ export async function getVerificationQueue(now = new Date()) {
 }
 
 /* ------------------------------------------------------------------ */
+/* The verification queue's actions (3 Oct 2026)                       */
+/* ------------------------------------------------------------------ */
+
+/*
+ * The owner, of Listings › Verification: "If verifications lapsed, what
+ * action can we take here?" Three answers live here — remind the publisher,
+ * send an agent, give more time — beside the suspension module's own
+ * Suspend / Reinstate, which the console calls as it always has. None of
+ * them marks a listing verified: only an accepted check (`reviewVerification`)
+ * restarts the clock for a full cadence.
+ */
+
+/** The audit action that is the reminder's clock, and how long it runs. */
+export const REVERIFICATION_REMINDER_ACTION = 'LISTING_REVERIFICATION_REMINDED';
+export const REVERIFICATION_REMINDER_INTERVAL_HOURS = 24;
+/** "Give more time": the most one decision may add, in days. */
+export const REVERIFICATION_EXTEND_MAX_DAYS = 30;
+export const REVERIFICATION_EXTENDED_ACTION = 'LISTING_REVERIFICATION_EXTENDED';
+/** "Send an agent": the audit row that remembers which visit went, and the tag the visit carries on the dispatch board. */
+export const SITE_CHECK_ACTION = 'LISTING_SITE_CHECK_DISPATCHED';
+export const SITE_CHECK_TAG = 'Re-verification';
+export const COMPLIANCE_RESOLVED_ACTION = 'COMPLIANCE_CASE_RESOLVED';
+
+/** A listing on the re-verification clock: verified once, and live or suspended. */
+const ON_THE_CLOCK: Listing['status'][] = ['ACTIVE', 'SUSPENDED'];
+
+async function requireListing(listingId: string): Promise<Listing> {
+  const listing = await repository.findListing(listingId);
+  if (!listing) throw new ApiError(404, 'NOT_FOUND', 'Listing not found');
+  return listing;
+}
+
+export type ReverificationReminder = {
+  listingId: string;
+  /** Whether the reminder said the check is overdue (earnings paused) or only due. */
+  lapsed: boolean;
+  dueAt: Date;
+  remindedAt: Date;
+  nextAllowedAt: Date;
+};
+
+/**
+ * `POST /supply/listings/:listingId/reverification/remind` — ADX asks the
+ * publisher for a fresh photo of the spot. One `notify` call: the in-app row
+ * names the listing (relatedType LISTING), so a tap opens the listing where
+ * the "Is the spot still standing?" card is, and the push the seeded
+ * `listing-reverification-reminder` template sends carries the same record.
+ * No SMS — no DLT-registered kind exists for it.
+ *
+ * Once per 24 hours per listing: the audit trail is the clock (the last
+ * `LISTING_REVERIFICATION_REMINDED` against the listing), as
+ * `POST /campaigns/:id/remind-payment` keeps its own, so the limit survives
+ * a restart and a second console. Refused for a listing that is not on the
+ * clock (409), one with no publisher, no login or an account that is not
+ * working (409), and a second reminder inside the day (429).
+ */
+export async function remindReverification(listingId: string, byUserId: string, now = new Date(), req?: Request): Promise<ReverificationReminder> {
+  const listing = await requireListing(listingId);
+  if (!listing.verificationExpiresAt || !ON_THE_CLOCK.includes(listing.status)) {
+    throw new ApiError(409, 'CONFLICT', 'This listing is not waiting on a re-verification, so there is nothing to remind about.');
+  }
+  if (!listing.publisherId) {
+    throw new ApiError(409, 'CONFLICT', 'This listing has no publisher, so there is nobody to remind.');
+  }
+  const publisher = await repository.publisherContact(listing.publisherId);
+  if (!publisher?.userId) {
+    throw new ApiError(409, 'CONFLICT', 'This publisher has no login yet, so there is nobody to remind.');
+  }
+  if (!publisher.working) {
+    throw new ApiError(409, 'CONFLICT', "This publisher's account is not working, so no reminder goes out.");
+  }
+
+  const intervalMs = REVERIFICATION_REMINDER_INTERVAL_HOURS * HOUR_MS;
+  const [last] = await findActivityRows(
+    { action: REVERIFICATION_REMINDER_ACTION, targetType: 'Listing', targetId: listing.id, from: new Date(now.getTime() - intervalMs) },
+    { skip: 0, take: 1, sort: 'newest' },
+  );
+  if (last) {
+    const nextAllowedAt = new Date(last.createdAt.getTime() + intervalMs);
+    throw new ApiError(
+      429,
+      'TOO_MANY_REQUESTS',
+      `The publisher was reminded within the last ${REVERIFICATION_REMINDER_INTERVAL_HOURS} hours. The next reminder can go after ${nextAllowedAt.toISOString()}.`,
+      { lastRemindedAt: last.createdAt, nextAllowedAt },
+    );
+  }
+
+  const dueAt = listing.verificationExpiresAt;
+  const lapsed = dueAt.getTime() <= now.getTime();
+  const due = dayLabel(dueAt);
+  const detail = lapsed
+    ? `${listing.title} is overdue for its photo check, so its earnings are paused. Open the listing and take a fresh photo from the spot.`
+    : `${listing.title} needs a fresh photo from the spot by ${due}, or its earnings pause.`;
+  await notify(
+    'LISTING_REVERIFICATION_DUE',
+    publisher.userId,
+    { listing: listing.title, due, detail },
+    {
+      inApp: {
+        type: 'SYSTEM',
+        title: 'Is your spot still standing?',
+        subtitle: listing.title,
+        message: detail,
+        suggestedAction: 'Take a fresh photo',
+        relatedId: listing.id,
+        relatedType: 'LISTING',
+      },
+    },
+  );
+  await logActivity(byUserId, REVERIFICATION_REMINDER_ACTION, {
+    ...(req ? { req } : {}),
+    module: 'supply',
+    targetType: 'Listing',
+    targetId: listing.id,
+    metadata: { publisherId: listing.publisherId, dueAt: dueAt.toISOString(), lapsed },
+  });
+  return { listingId: listing.id, lapsed, dueAt, remindedAt: now, nextAllowedAt: new Date(now.getTime() + intervalMs) };
+}
+
+export type ReverificationExtension = {
+  listingId: string;
+  previousDueAt: Date;
+  dueAt: Date;
+  days: number;
+  /** Earnings holds the lapse had opened, released now. */
+  holdsReleased: number;
+  /** The open compliance case closed with it, if there was one. */
+  caseResolved: string | null;
+};
+
+/**
+ * `POST /supply/listings/:listingId/reverification/extend { days, reason }`
+ * — ADX gives the publisher more time. The due date moves `days` past the
+ * later of now and the date on file (a lapsed listing gets `days` from
+ * today, not from a date already behind it); `verifiedAt` stays the last real
+ * check. The lapse's earnings holds are released and its open compliance
+ * case is closed — the lapse is no longer current — so the earnings run
+ * until the new date, when the sweep picks the listing up again if nothing
+ * was sent. Audited with the reason and the before and after; the publisher
+ * is told the new date in the app.
+ *
+ * Refused (409) for a listing never verified (there is no date to move), one
+ * not live, and one suspended: a desk suspension is reinstated first; a
+ * suspension for the lapse itself is lifted only by an accepted check.
+ */
+export async function extendReverification(
+  listingId: string,
+  input: { days: number; reason: string },
+  byUserId: string,
+  now = new Date(),
+  req?: Request,
+): Promise<ReverificationExtension> {
+  if (!Number.isInteger(input.days) || input.days < 1 || input.days > REVERIFICATION_EXTEND_MAX_DAYS) {
+    throw new ApiError(400, 'VALIDATION_ERROR', `Give between 1 and ${REVERIFICATION_EXTEND_MAX_DAYS} days.`);
+  }
+  const listing = await requireListing(listingId);
+  if (!listing.verificationExpiresAt) {
+    throw new ApiError(409, 'CONFLICT', 'This listing has never been verified, so there is no due date to move. It needs its first site check.');
+  }
+  if (listing.suspensionScopes.length > 0) {
+    throw new ApiError(409, 'CONFLICT', 'This listing is suspended. Reinstate it first, then give it more time.');
+  }
+  if (listing.status === 'SUSPENDED') {
+    throw new ApiError(
+      409,
+      'CONFLICT',
+      'This listing was suspended when its verification lapsed, so more time cannot be given. It comes back when a new check is accepted — remind the publisher or send an agent.',
+    );
+  }
+  if (listing.status !== 'ACTIVE') {
+    throw new ApiError(409, 'CONFLICT', 'Only a live listing can be given more time.');
+  }
+
+  const previousDueAt = listing.verificationExpiresAt;
+  const from = Math.max(previousDueAt.getTime(), now.getTime());
+  const dueAt = addDays(new Date(from), input.days);
+  await repository.setVerificationExpiry(listing.id, dueAt);
+  const holdsReleased = await repository.releaseHolds(listing.id);
+  const openCase = await repository.findOpenCaseForListing(listing.id);
+  if (openCase) await repository.setCaseStatus(openCase.id, 'RESOLVED');
+
+  await logActivity(byUserId, REVERIFICATION_EXTENDED_ACTION, {
+    ...(req ? { req } : {}),
+    module: 'supply',
+    targetType: 'Listing',
+    targetId: listing.id,
+    diff: { verificationExpiresAt: { before: previousDueAt.toISOString(), after: dueAt.toISOString() } },
+    metadata: { days: input.days, reason: input.reason, holdsReleased, caseResolved: openCase?.id ?? null },
+  });
+  await tellPublisher(listing, {
+    title: 'More time to re-verify your spot',
+    message: `ADX moved the photo check for ${listing.title} to ${dayLabel(dueAt)}. Send a fresh photo from the spot before then.`,
+    suggestedAction: 'Take a fresh photo',
+  });
+
+  return { listingId: listing.id, previousDueAt, dueAt, days: input.days, holdsReleased, caseResolved: openCase?.id ?? null };
+}
+
+/** A dispatched visit still on somebody's day: answered and slotted, under way, or an offer still inside its window. */
+function visitStillOpen(visit: { status: string; expiresInSeconds: number | null }): boolean {
+  if (visit.status === 'SCHEDULED' || visit.status === 'IN_PROGRESS') return true;
+  return visit.status === 'REQUESTED' && (visit.expiresInSeconds ?? 0) > 0;
+}
+
+const clip = (text: string, max: number) => (text.length <= max ? text : `${text.slice(0, max - 1)}…`);
+
+/**
+ * `POST /supply/listings/:listingId/reverification/site-check { agentId?, note? }`
+ * — ADX sends an agent to look at the spot.
+ *
+ * There is no order behind a re-verification, so the order-milestone lane
+ * (which every AGENT_INITIAL visit rides) cannot carry it; the trip that is
+ * not a step on an order is `visits`' FieldVisit, and this books one through
+ * `createVisit` exactly as the dispatch board does: an AUDIT visit to the
+ * listing's publisher, at the spot's pin, tagged "Re-verification", offered
+ * to the agent with the 25-minute window and the VISIT_OFFER notice. Without
+ * `agentId` the agent is the dispatch sweep's pick (`findAssignableAgent`'s
+ * ranking) from the listing's own city. The visit is remembered in the audit
+ * row, and a second is refused while the first is still open.
+ */
+export async function dispatchSiteCheck(
+  listingId: string,
+  input: { agentId?: string | undefined; note?: string | undefined },
+  byUserId: string,
+  now = new Date(),
+  req?: Request,
+) {
+  const listing = await requireListing(listingId);
+  if (!ON_THE_CLOCK.includes(listing.status)) {
+    throw new ApiError(409, 'CONFLICT', 'Only a live or suspended listing is re-verified on site.');
+  }
+  if (!listing.publisherId) {
+    throw new ApiError(409, 'CONFLICT', 'This listing has no publisher, so a visit cannot be booked against it.');
+  }
+
+  const [previous] = await findActivityRows(
+    { action: SITE_CHECK_ACTION, targetType: 'Listing', targetId: listing.id },
+    { skip: 0, take: 1, sort: 'newest' },
+  );
+  const previousVisitId = (previous?.metadata as { visitId?: unknown } | null | undefined)?.visitId;
+  if (typeof previousVisitId === 'string') {
+    const visit = await getVisit(previousVisitId, byUserId, true).catch(() => null);
+    if (visit && visitStillOpen(visit)) {
+      throw new ApiError(
+        409,
+        'CONFLICT',
+        `An agent is already booked for this spot (${visit.displayId ?? visit.id}, ${visit.pill.label.toLowerCase()}). Wait for that visit, or cancel it on the dispatch board.`,
+        { visitId: visit.id },
+      );
+    }
+  }
+
+  let agentId = input.agentId ?? null;
+  if (!agentId) {
+    if (!listing.city && !listing.cityId) {
+      throw new ApiError(409, 'CONFLICT', 'This listing has no city, so ADX cannot pick an agent near it.');
+    }
+    const ask = await dispatchAskFor(null, { latitude: listing.latitude, longitude: listing.longitude });
+    agentId = (await findAssignableAgentInCity({ cityId: listing.cityId, city: listing.city }, ask, now))?.id ?? null;
+    if (!agentId) {
+      throw new ApiError(409, 'CONFLICT', `No agent is free in ${listing.city ?? 'this city'} right now. Try again later, or book one from the dispatch board.`);
+    }
+  }
+
+  const publisher = await repository.publisherContact(listing.publisherId);
+  const reference = listing.displayId ?? listing.id;
+  const notes = [
+    `Re-verification of ${reference} (${listing.title})${publisher ? ` for ${publisher.name}` : ''}.`,
+    'Stand at the spot, photograph it whole with location on, and say whether it is still standing.',
+    input.note?.trim() || null,
+  ]
+    .filter(Boolean)
+    .join(' ');
+  const visit = await createVisit(
+    {
+      kind: 'AUDIT',
+      publisherId: listing.publisherId,
+      agentId,
+      businessName: clip(listing.title, 160),
+      ...(listing.address ? { locality: clip(listing.address, 120) } : {}),
+      ...(listing.city ? { city: clip(listing.city, 80) } : {}),
+      ...(listing.latitude !== null && listing.longitude !== null ? { latitude: listing.latitude, longitude: listing.longitude } : {}),
+      campaignTag: SITE_CHECK_TAG,
+      notes: clip(notes, 1000),
+    },
+    { userId: byUserId, isAdmin: true },
+    now,
+  );
+
+  await logActivity(byUserId, SITE_CHECK_ACTION, {
+    ...(req ? { req } : {}),
+    module: 'supply',
+    targetType: 'Listing',
+    targetId: listing.id,
+    metadata: { visitId: visit.id, visitDisplayId: visit.displayId, agentId, picked: !input.agentId },
+  });
+  return { listingId: listing.id, picked: !input.agentId, visit };
+}
+
+/* ------------------------------------------------------------------ */
 /* Enforcement                                                         */
 /* ------------------------------------------------------------------ */
 
@@ -952,10 +1379,32 @@ export async function logContactAttempt(input: {
   return attempt;
 }
 
-export async function resolveComplianceCase(caseId: string) {
+/**
+ * Closes a case. 3 Oct 2026: the desk says how it ended — `outcome`, free
+ * text like a contact attempt's, and a `note` — and the decision is audited
+ * with both (the case row has no columns for them; the trail is the record).
+ * Both stay optional so an older console that sends nothing still resolves.
+ */
+export async function resolveComplianceCase(
+  caseId: string,
+  input: { outcome?: string | undefined; note?: string | undefined } = {},
+  byUserId?: string,
+  req?: Request,
+) {
   const found = await repository.findCase(caseId);
   if (!found) throw new ApiError(404, 'NOT_FOUND', 'Compliance case not found');
-  return repository.setCaseStatus(caseId, 'RESOLVED');
+  const resolved = await repository.setCaseStatus(caseId, 'RESOLVED');
+  if (byUserId) {
+    await logActivity(byUserId, COMPLIANCE_RESOLVED_ACTION, {
+      ...(req ? { req } : {}),
+      module: 'supply',
+      targetType: 'ComplianceCase',
+      targetId: caseId,
+      diff: { status: { before: found.status, after: 'RESOLVED' } },
+      metadata: { listingId: found.listingId, outcome: input.outcome ?? null, note: input.note ?? null },
+    });
+  }
+  return resolved;
 }
 
 /* ------------------------------------------------------------------ */

@@ -1,4 +1,7 @@
+import { PARTY_ACCOUNT_STATES, accountStateOf, advertiserStateWhere, type PartyAccountState } from '../../shared/party-status';
 import { Prisma, prisma } from '../../shared/database';
+import { kycRosterStateWhere } from '../../shared/kyc-state';
+import { mobileSearchNeedle } from '../../shared/validation';
 import type {
   Brand,
   Gender,
@@ -75,6 +78,22 @@ async function findKycSummary(advertiserId: string, userId: string | null) {
   const byProfile = await prisma.advertiserKyc.findUnique({ where: { advertiserProfileId: advertiserId }, select });
   if (byProfile || !userId) return byProfile;
   return prisma.advertiserKyc.findUnique({ where: { advertiserId: userId }, select });
+}
+
+/**
+ * 29 Sep 2026 (the owner, on the Advertisers roster: "Why does the status say
+ * not yet activated? It should rather be KYC status"): the same record
+ * `findKycSummary` reads, for a whole page in two queries — keyed by the
+ * advertiser id, the profile's own record first, else the account's.
+ */
+async function findKycSummaries(rows: readonly { id: string; userId: string | null }[]) {
+  const select = { id: true, status: true, submittedAt: true, requestedAt: true, requestedChannel: true, method: true, advertiserProfileId: true, advertiserId: true } as const;
+  const ids = rows.map((row) => row.id);
+  const userIds = rows.map((row) => row.userId).filter((id): id is string => !!id);
+  const records = ids.length === 0 ? [] : await prisma.advertiserKyc.findMany({ where: { OR: [{ advertiserProfileId: { in: ids } }, ...(userIds.length ? [{ advertiserId: { in: userIds } }] : [])] }, select });
+  const byProfile = new Map(records.filter((r) => r.advertiserProfileId).map((r) => [r.advertiserProfileId as string, r]));
+  const byUser = new Map(records.filter((r) => r.advertiserId).map((r) => [r.advertiserId as string, r]));
+  return new Map(rows.map((row) => [row.id, byProfile.get(row.id) ?? (row.userId ? byUser.get(row.userId) : undefined) ?? null]));
 }
 
 async function attachAgent(advertiserId: string, agentId: string) {
@@ -154,6 +173,7 @@ async function createAdvertiser(input: CreateAdvertiserInput) {
       mobile: input.mobile,
       email: input.email ?? null,
       type: input.type ?? 'INDIVIDUAL',
+      entityType: input.entityType ?? null,
       companyName: input.companyName ?? null,
       gstin: input.gstin ?? null,
       billingAddress: input.billingAddress ?? null,
@@ -197,28 +217,64 @@ const findAdvertiserLabelsByUserIds = async (userIds: string[]) => {
 const updateAdvertiser = (id: string, patch: UpdateAdvertiserInput) =>
   prisma.advertiser.update({ where: { id }, data: patch });
 
+/**
+ * E7-3 / QR-15: the roster's search and cuts. 29 Sep 2026 (the party rosters,
+ * made uniform): the search reaches the city and the phone as the console
+ * prints it (`+91 98765 43210`), and the KYC state, the type and the city
+ * cut it — each an AND part, so no cut's `OR` can overwrite another's.
+ */
+function rosterWhere(query: Omit<AdvertiserRosterQuery, 'status'>): Prisma.AdvertiserWhereInput {
+  const parts: Prisma.AdvertiserWhereInput[] = [];
+  if (query.q) {
+    const digits = mobileSearchNeedle(query.q);
+    parts.push({
+      OR: [
+        { name: { contains: query.q, mode: 'insensitive' } },
+        { companyName: { contains: query.q, mode: 'insensitive' } },
+        { email: { contains: query.q, mode: 'insensitive' } },
+        { mobile: { contains: query.q } },
+        ...(digits ? [{ mobile: { contains: digits } }] : []),
+        { displayId: { contains: query.q, mode: 'insensitive' } },
+        { city: { contains: query.q, mode: 'insensitive' } },
+      ],
+    });
+  }
+  // QR-15: the roster's cuts — who onboarded, and how.
+  if (query.onboardedVia) parts.push({ onboardedVia: query.onboardedVia });
+  if (query.onboardedById) parts.push({ onboardedById: query.onboardedById });
+  if (query.kycState) parts.push(kycRosterStateWhere(query.kycState, true));
+  if (query.type) parts.push({ type: query.type });
+  if (query.city) {
+    // Lot X-B: by the key when the facet resolved to one, the spelling catching only the rows whose key is null.
+    const spelling = { equals: query.city, mode: 'insensitive' as const };
+    parts.push(query.cityId ? { OR: [{ cityId: query.cityId }, { cityId: null, city: spelling }] } : { cityId: null, city: spelling });
+  }
+  return { AND: parts };
+}
+
 async function listAdvertisers(query: AdvertiserRosterQuery) {
-  const rows = await prisma.advertiser.findMany({
-    where: {
-      ...(query.q
-        ? {
-            OR: [
-              { name: { contains: query.q, mode: 'insensitive' } },
-              { companyName: { contains: query.q, mode: 'insensitive' } },
-              { email: { contains: query.q, mode: 'insensitive' } },
-              { mobile: { contains: query.q } },
-              { displayId: { contains: query.q, mode: 'insensitive' } },
-            ],
-          }
-        : {}),
-      // QR-15: the roster's cuts — who onboarded, and how.
-      ...(query.onboardedVia ? { onboardedVia: query.onboardedVia } : {}),
-      ...(query.onboardedById ? { onboardedById: query.onboardedById } : {}),
-    },
-    orderBy: { createdAt: 'desc' },
-    ...pageArgs(query),
-  });
-  return toPage(rows, query);
+  // Account lifecycle (2 Oct 2026): the roster's default is the working accounts; ALL is everyone.
+  const status = query.status ?? 'ACTIVE';
+  const cuts = rosterWhere(query);
+  const where: Prisma.AdvertiserWhereInput = status === 'ALL' ? cuts : { AND: [cuts, advertiserStateWhere(status)] };
+  const [rows, total, perState] = await Promise.all([
+    prisma.advertiser.findMany({
+      where,
+      // 29 Sep 2026: the roster's activity — the campaigns, counted in the same query.
+      // Account lifecycle: the account behind the row, for its `accountState` (not sent on).
+      include: { _count: { select: { campaigns: true } }, user: { select: { isActive: true, closedAt: true } } },
+      orderBy: { createdAt: 'desc' },
+      ...pageArgs(query),
+    }),
+    prisma.advertiser.count({ where }),
+    // The status chips leave the status facet out, so each stays a way back in.
+    Promise.all(PARTY_ACCOUNT_STATES.map(async (state) => [state, await prisma.advertiser.count({ where: { AND: [cuts, advertiserStateWhere(state)] } })] as const)),
+  ]);
+  const page = toPage(
+    rows.map(({ _count, user, ...row }) => ({ ...row, campaignCount: _count.campaigns, accountState: accountStateOf({ user, suspensionScopes: row.suspensionScopes }) })),
+    query,
+  );
+  return { ...page, total, statusCounts: Object.fromEntries(perState) as Record<PartyAccountState, number> };
 }
 
 /**
@@ -844,6 +900,7 @@ export const prismaAdvertisersRepository: AdvertisersRepository = {
   updateAccount,
   findAdvertiserById,
   findKycSummary,
+  findKycSummaries,
   findAdvertiserByMobile,
   findAdvertiserByUserId,
   findAdvertiserLabelsByUserIds,

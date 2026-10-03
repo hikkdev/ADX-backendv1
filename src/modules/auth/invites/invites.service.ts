@@ -5,10 +5,10 @@ import { ApiError } from '../../../shared/errors';
 import { logger } from '../../../shared/logging';
 import { notify } from '../../notifications';
 import { upperEnum } from '../../../shared/validation';
-import type { AdminInvite, AdminInviteMethod, Role } from '../../../shared/database';
-import { normalizeMobile, sendOtp, verifyOtp } from '../otp/otp.service';
+import type { AdminInviteMethod, Role } from '../../../shared/database';
+import { normalizeMobile, sendOtp, verifyOtp, stampProvenEmail } from '../otp/otp.service';
 import { hashPassword } from '../password/password.service';
-import { prismaInvitesRepository as repository, type InviteRow } from './prisma-invites.repository';
+import { prismaInvitesRepository as repository, type InviteRecord, type InviteRow } from './prisma-invites.repository';
 
 /**
  * Invitations to the console — Lot A, Q26.
@@ -80,14 +80,14 @@ function hashToken(raw: string): string {
   return crypto.createHash('sha256').update(raw).digest('hex');
 }
 
-function statusOf(invite: AdminInvite, now = new Date()): InviteView['status'] {
+function statusOf(invite: InviteRecord, now = new Date()): InviteView['status'] {
   if (invite.acceptedAt) return 'ACCEPTED';
   if (invite.revokedAt) return 'REVOKED';
   if (invite.expiresAt <= now) return 'EXPIRED';
   return 'OPEN';
 }
 
-function view(invite: AdminInvite | InviteRow): InviteView {
+function view(invite: InviteRecord | InviteRow): InviteView {
   return {
     id: invite.id,
     email: invite.email,
@@ -102,7 +102,7 @@ function view(invite: AdminInvite | InviteRow): InviteView {
   };
 }
 
-async function deliver(invite: AdminInvite, rawToken: string): Promise<void> {
+async function deliver(invite: InviteRecord, rawToken: string): Promise<void> {
   const url = `${env.INVITE_ACCEPT_URL.replace(/\/$/, '')}?token=${rawToken}`;
   const how =
     invite.method === 'GOOGLE'
@@ -164,7 +164,7 @@ export async function revokeInvite(id: string): Promise<InviteView> {
   return view(await repository.revoke(invite.id));
 }
 
-async function requireOpenInvite(id: string): Promise<AdminInvite> {
+async function requireOpenInvite(id: string): Promise<InviteRecord> {
   const invite = await repository.findById(id);
   if (!invite) throw new ApiError(404, 'NOT_FOUND', 'Invitation not found');
   if (invite.acceptedAt) throw new ApiError(409, 'CONFLICT', 'That invitation has already been accepted.');
@@ -253,6 +253,9 @@ export async function acceptInvite(input: AcceptInviteInput): Promise<AcceptResu
     passwordHash: input.password ? await hashPassword(input.password) : null,
     roleConfigId: invite.roleConfigId,
   });
+
+  // ED-1: the invitation came to this mailbox and was opened from it — proved.
+  await stampProvenEmail(user.id, invite.email);
 
   logger.info('Console invitation accepted', { inviteId: invite.id, userId: user.id });
   return {

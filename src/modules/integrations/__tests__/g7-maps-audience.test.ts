@@ -267,15 +267,15 @@ describe('Z-B: OpenStreetMap on the maps section', () => {
     config.getIntegrationsConfig.mockResolvedValue({
       maps: {
         provider: 'OSM',
-        osm: { contactEmail: 'maps@adx.example', nominatimBaseUrl: 'https://nominatim.adx.internal/', tileUrlTemplate: 'https://api.maptiler.com/maps/streets-v2/{z}/{x}/{y}.png?key={key}', tileApiKey: 'maptiler-key-9876', tileMaxZoom: 20, publicTiles: false },
+        osm: { contactEmail: 'maps@adx.in', nominatimBaseUrl: 'https://nominatim.adx.internal/', tileUrlTemplate: 'https://api.maptiler.com/maps/streets-v2/{z}/{x}/{y}.png?key={key}', tileApiKey: 'maptiler-key-9876', tileMaxZoom: 20, publicTiles: false },
       },
     });
     const res = await request(app()).get('/api/v1/integrations').set('Authorization', `Bearer ${admin}`);
     expect(res.body.data.maps.provider).toBe('OSM');
     expect(res.body.data.maps.osm).toMatchObject({
       nominatimBaseUrl: 'https://nominatim.adx.internal',
-      contactEmail: 'maps@adx.example',
-      userAgent: 'ADX/1.0.0 (maps@adx.example)',
+      contactEmail: 'maps@adx.in',
+      userAgent: 'ADX/1.0.0 (maps@adx.in)',
       tileUrlTemplate: 'https://api.maptiler.com/maps/streets-v2/{z}/{x}/{y}.png?key={key}',
       tileApiKey: '••••9876',
       tileMaxZoom: 20,
@@ -286,7 +286,7 @@ describe('Z-B: OpenStreetMap on the maps section', () => {
 
   it('AC-B1 GET: under OSM the section says what the phones need — phoneEngine { engine: MAPBOX, tokenPresent } — with the token itself still masked and never the secret', async () => {
     config.getIntegrationsConfig.mockResolvedValue({
-      maps: { provider: 'OSM', mapboxPublicToken: 'pk.public-abcd', mapboxSecretToken: 'sk.secret-wxyz', osm: { contactEmail: 'maps@adx.example' } },
+      maps: { provider: 'OSM', mapboxPublicToken: 'pk.public-abcd', mapboxSecretToken: 'sk.secret-wxyz', osm: { contactEmail: 'maps@adx.in' } },
     });
     const withToken = await request(app()).get('/api/v1/integrations').set('Authorization', `Bearer ${admin}`);
     expect(withToken.status).toBe(200);
@@ -296,7 +296,7 @@ describe('Z-B: OpenStreetMap on the maps section', () => {
     expect(withToken.text).not.toContain('sk.secret');
 
     // No public token stored (and none in the test env): the phones cannot initialise the SDK yet. A secret alone does not count.
-    config.getIntegrationsConfig.mockResolvedValue({ maps: { provider: 'OSM', mapboxSecretToken: 'sk.secret-wxyz', osm: { contactEmail: 'maps@adx.example' } } });
+    config.getIntegrationsConfig.mockResolvedValue({ maps: { provider: 'OSM', mapboxSecretToken: 'sk.secret-wxyz', osm: { contactEmail: 'maps@adx.in' } } });
     const without = await request(app()).get('/api/v1/integrations').set('Authorization', `Bearer ${admin}`);
     expect(without.body.data.maps.phoneEngine).toEqual({ engine: 'MAPBOX', tokenPresent: false });
 
@@ -321,16 +321,16 @@ describe('Z-B: OpenStreetMap on the maps section', () => {
     const res = await request(app())
       .put('/api/v1/integrations')
       .set('Authorization', `Bearer ${admin}`)
-      .send({ section: 'maps', patch: { provider: 'OSM', osm: { contactEmail: 'maps@adx.example' } } });
+      .send({ section: 'maps', patch: { provider: 'OSM', osm: { contactEmail: 'maps@adx.in' } } });
     expect(res.status).toBe(200);
-    expect(config.updateIntegrationsConfig).toHaveBeenCalledWith('maps', { provider: 'OSM', osm: { contactEmail: 'maps@adx.example', publicTiles: true } });
+    expect(config.updateIntegrationsConfig).toHaveBeenCalledWith('maps', { provider: 'OSM', osm: { contactEmail: 'maps@adx.in', publicTiles: true } });
     const change = audit.logActivity.mock.calls.find((call) => call[1] === 'MAPS_PROVIDER_CHANGED');
     expect(change).toBeDefined();
     expect(JSON.stringify(change![2].diff)).toContain('OSM');
   });
 
   it('PUT: the sub-object is merged over the stored one — a tile change keeps the email, and a provider host clears publicTiles', async () => {
-    config.getIntegrationsConfig.mockResolvedValue({ maps: { provider: 'OSM', osm: { contactEmail: 'maps@adx.example', publicTiles: true } } });
+    config.getIntegrationsConfig.mockResolvedValue({ maps: { provider: 'OSM', osm: { contactEmail: 'maps@adx.in', publicTiles: true } } });
     const res = await request(app())
       .put('/api/v1/integrations')
       .set('Authorization', `Bearer ${admin}`)
@@ -338,7 +338,7 @@ describe('Z-B: OpenStreetMap on the maps section', () => {
     expect(res.status).toBe(200);
     expect(config.updateIntegrationsConfig).toHaveBeenCalledWith('maps', {
       osm: {
-        contactEmail: 'maps@adx.example',
+        contactEmail: 'maps@adx.in',
         tileUrlTemplate: 'https://tiles.stadiamaps.com/tiles/osm_bright/{z}/{x}/{y}.png',
         tileApiKey: 'stadia-key',
         tileAttribution: '(c) Stadia Maps (c) OpenStreetMap contributors',
@@ -352,13 +352,13 @@ describe('Z-B: OpenStreetMap on the maps section', () => {
   });
 
   it('PUT: clearing the email while on OSM is refused; clearing it while on Google is fine', async () => {
-    config.getIntegrationsConfig.mockResolvedValue({ maps: { provider: 'OSM', osm: { contactEmail: 'maps@adx.example' } } });
+    config.getIntegrationsConfig.mockResolvedValue({ maps: { provider: 'OSM', osm: { contactEmail: 'maps@adx.in' } } });
     const onOsm = await request(app())
       .put('/api/v1/integrations')
       .set('Authorization', `Bearer ${admin}`)
       .send({ section: 'maps', patch: { osm: { contactEmail: null } } });
     expect(onOsm.status).toBe(400);
-    config.getIntegrationsConfig.mockResolvedValue({ maps: { provider: 'GOOGLE', osm: { contactEmail: 'maps@adx.example' } } });
+    config.getIntegrationsConfig.mockResolvedValue({ maps: { provider: 'GOOGLE', osm: { contactEmail: 'maps@adx.in' } } });
     const onGoogle = await request(app())
       .put('/api/v1/integrations')
       .set('Authorization', `Bearer ${admin}`)
@@ -369,12 +369,12 @@ describe('Z-B: OpenStreetMap on the maps section', () => {
 
   it('PUT: the sub-object is strict — a stray key, a bad email, a template without {z}/{x}/{y}, a zoom off the scale, publicTiles from the screen', async () => {
     for (const osm of [
-      { contactEmail: 'maps@adx.example', weird: 1 },
+      { contactEmail: 'maps@adx.in', weird: 1 },
       { contactEmail: 'not-an-email' },
-      { contactEmail: 'maps@adx.example', tileUrlTemplate: 'https://tiles.example.com/{z}/{x}.png' },
-      { contactEmail: 'maps@adx.example', nominatimBaseUrl: 'ftp://nominatim' },
-      { contactEmail: 'maps@adx.example', tileMaxZoom: 30 },
-      { contactEmail: 'maps@adx.example', publicTiles: false },
+      { contactEmail: 'maps@adx.in', tileUrlTemplate: 'https://tiles.example.com/{z}/{x}.png' },
+      { contactEmail: 'maps@adx.in', nominatimBaseUrl: 'ftp://nominatim' },
+      { contactEmail: 'maps@adx.in', tileMaxZoom: 30 },
+      { contactEmail: 'maps@adx.in', publicTiles: false },
     ]) {
       const bad = await request(app()).put('/api/v1/integrations').set('Authorization', `Bearer ${admin}`).send({ section: 'maps', patch: { provider: 'OSM', osm } });
       expect(bad.status, JSON.stringify(osm)).toBe(400);

@@ -100,6 +100,11 @@ export interface OrderMilestonesRepository {
     }[],
   ): Promise<unknown>;
   findWithOrderStatus(milestoneId: string): Promise<MilestoneWithOrderStatus | null>;
+  /**
+   * The spot an order is on and its site-QR token — read only to check a
+   * scanned code at sign-off, never returned to anyone (3 Oct 2026).
+   */
+  findSiteCode(orderId: string): Promise<{ listingId: string; qrToken: string } | null>;
   updateMilestone(milestoneId: string, patch: OrderMilestonePatch): Promise<unknown>;
   /** Deletes only while still PENDING or DISPATCHED; returns rows removed. */
   deleteIfRemovable(milestoneId: string): Promise<number>;
@@ -134,4 +139,10 @@ export interface OrderMilestonesRepository {
   findOfferExpired(windowStart: Date, now: Date): Promise<{ id: string; orderId: string; assignedAgentId: string | null }[]>;
   /** Starts other milestones on the order already hold, so two visits are not booked into one band. */
   findScheduledStartsForOrder(orderId: string, exceptMilestoneId: string): Promise<Date[]>;
+  /**
+   * ST-2: whether this agent holds — or finished since `since` — a visit on
+   * an order for this listing, or is that order's own agent while it is live
+   * or since `since`.
+   */
+  agentHasWorkOnListing(agentId: string, listingId: string, since: Date): Promise<boolean>;
 }

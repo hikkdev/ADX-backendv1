@@ -202,6 +202,10 @@ describe('executing', () => {
       agentProfileId: 'agt_1',
       // AdvertiserKyc is keyed by User.id, not by Advertiser.id.
       advertiserKycUserId: USER,
+      // Account lifecycle (2 Oct 2026): the print shop and the HR record (none here), and the moment stamped as User.erasedAt.
+      printPartnerId: null,
+      employeeId: null,
+      erasedAt: expect.any(Date),
     });
   });
 

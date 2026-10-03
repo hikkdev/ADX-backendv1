@@ -51,7 +51,7 @@ const calledInit = (fetchMock: ReturnType<typeof vi.fn>, call = 0) => fetchMock.
 function osmSelected(osm: Record<string, unknown> = {}) {
   integrations.getEffectiveMapsConfig.mockResolvedValue({
     provider: 'OSM',
-    osm: resolveOsmConfig({ contactEmail: 'maps@adx.example', ...osm }),
+    osm: resolveOsmConfig({ contactEmail: 'maps@adx.in', ...osm }),
   });
 }
 
@@ -162,19 +162,19 @@ describe('geocoding an address (Nominatim /search)', () => {
     expect(url.searchParams.get('countrycodes')).toBe('in');
     expect(url.searchParams.get('limit')).toBe('1');
     expect(url.searchParams.get('addressdetails')).toBe('1');
-    expect(url.searchParams.get('email')).toBe('maps@adx.example');
+    expect(url.searchParams.get('email')).toBe('maps@adx.in');
     const init = calledInit(fetchMock);
-    expect((init.headers as Record<string, string>)['User-Agent']).toBe('ADX/1.0.0 (maps@adx.example)');
+    expect((init.headers as Record<string, string>)['User-Agent']).toBe('ADX/1.0.0 (maps@adx.in)');
     expect((init.headers as Record<string, string>)['Accept-Language']).toBe('en');
     expect(init.signal).toBeInstanceOf(AbortSignal);
     expect(OSM_TIMEOUT_MS).toBe(8_000);
   });
 
   it('sends the User-Agent ops wrote when there is one', async () => {
-    osmSelected({ userAgent: 'ADX Maps Bot/2 (ops@adx.example)' });
+    osmSelected({ userAgent: 'ADX Maps Bot/2 (ops@adx.in)' });
     const fetchMock = stubOsm(NOMINATIM_SEARCH);
     await geocodeAddress('MG Road');
-    expect((calledInit(fetchMock).headers as Record<string, string>)['User-Agent']).toBe('ADX Maps Bot/2 (ops@adx.example)');
+    expect((calledInit(fetchMock).headers as Record<string, string>)['User-Agent']).toBe('ADX Maps Bot/2 (ops@adx.in)');
   });
 
   it('is null for an empty array — asked correctly, nothing there', async () => {

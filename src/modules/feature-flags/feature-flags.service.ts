@@ -50,7 +50,12 @@ export const FLAG_STATE_CACHE_KEY = 'feature-flags:state';
 export const FLAG_STATE_TTL_SECONDS = 30;
 export const CHANGE_HISTORY_LIMIT = 50;
 
-const APP_SURFACES: readonly FeatureSurface[] = ['APP_USER', 'APP_AGENT'];
+/**
+ * The surfaces that read `GET /app/flags`: the two apps and — since 28 Sep
+ * 2026, when the website got its own manifest — adx.in, which makes the same
+ * read, so a website-only feature (`website.studio`) is answered to it too.
+ */
+const APP_SURFACES: readonly FeatureSurface[] = ['APP_USER', 'APP_AGENT', 'WEBSITE'];
 
 export type { FlagAnswer, FlagState, FlagSubject, Rollout } from './feature-flags.types';
 
@@ -209,9 +214,10 @@ export async function featureAnswer(key: string, subject: FlagSubject): Promise<
 }
 
 /**
- * Every flag as this caller sees it — what the apps boot with.
+ * Every flag as this caller sees it — what the apps and the website boot with.
  *
- * `{ key: { enabled, variant } }` for every feature on an app surface (or a
+ * `{ key: { enabled, variant } }` for every feature on an app or website
+ * surface (or a
  * row with no surface at all, which is a manual row nobody classified and
  * should stay visible), plus the flat boolean under each legacy alias
  * (`instant-booking: true`) for one release, because the shipped apps read

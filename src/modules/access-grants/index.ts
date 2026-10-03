@@ -32,6 +32,8 @@ export { openOnboardingGrant, closeOnboardingGrants, hasLiveOnboardingGrant } fr
 export { accessLogFor } from './access-grants.service';
 // AG-5: an exited agent's live grants closed by ADX, for the agents port in bootstrap.
 export { revokeLiveGrantsForAgent } from './access-grants.service';
+/** Account lifecycle (2 Oct 2026): the live grants on a suspended or closed publisher's or advertiser's account, closed — `suspension` asks. */
+export { revokeLiveGrantsOnParty } from './access-grants.service';
 /** K-B1: by grant id, for the QR desk (registered on qr's ref-label port by bootstrap). */
 export { findAccessGrantLabels } from './access-grants.service';
 export type { AccessLogView } from './access-grants.service';

@@ -268,6 +268,29 @@ port, nothing else to fill. Press the test to confirm before switching the
 primary or the mode; a refused app password comes back as the verdict's
 sentence (`535-5.7.8 Username and Password not accepted`).
 
+## The Digio workflows — Phase D (1 Oct 2026)
+
+A Digio KYC request names its workflow by `template_id`. The twenty-five the
+owner built (one for agents, one per legal form for publishers, advertisers
+and print partners, two for employees, three for spots) ship as defaults in
+`shared/integrations/digio-workflows.ts`, copied from the owner's "ADX Digio
+KYC Workflows" document; this section can override any of them.
+
+- `GET /integrations` → `kyc.workflows: [{ key, label, templateId, source:
+  'DEFAULT' | 'OVERRIDE' }]`, all twenty-five in the document's order. The
+  ids are not secrets and are shown whole.
+- `PUT /integrations { section: 'kyc' | 'digio', patch: { workflowTemplates:
+  { <key>: <id> | null | '' } } }` — known keys only (a stray key is 400), an
+  id of the shape `KTP` + capital letters and digits (≤ 64); merged over the
+  stored overrides key by key: blank keeps, `null` goes back to the default.
+  Audited `KYC_WORKFLOW_TEMPLATES_CHANGED` with the ids before and after.
+- `kyc.templateName`, `kyc.templates` and the `DIGIO_KYC_TEMPLATE*` env
+  values are gone: they named one template per party, by name. The body
+  ignores them, the read no longer answers them, and the first `kyc` write
+  clears them off a row that still holds them.
+
+Pinned in `__tests__/phase-d-digio-workflows.test.ts`.
+
 ## The brand (QR-9, 17 Sep 2026; QR-11 — draft and releases)
 
 **QR-11:** the `branding` section is now the DRAFT. What every surface
@@ -342,3 +365,14 @@ npx vitest run src/modules/integrations
 ## Suggested ownership
 
 Platform team. Credential handling — review changes to the mapper carefully.
+
+## Cashfree Phase 1 (1 Oct 2026): secrets at rest, the Secure ID card, the routing card
+
+Every secret field of the row (the ones this screen masks, plus `secureId.clientSecret` and `secureId.publicKey`) is sealed with AES-256-GCM under `INTEGRATIONS_ENCRYPTION_KEY` on every write (`shared/integrations/secret-box.ts`) and opened only in memory on the read; the database and the Redis cache hold `enc:v1:<iv>:<tag>:<ciphertext>`. A value without the prefix is read as plaintext and sealed on the next write (`npm run integrations:encrypt -- --check | --write` does the lot). No key: development keeps plaintext and warns once per boot; production refuses to save a secret — 503 `ENCRYPTION_KEY_MISSING` — but still saves a patch carrying none.
+
+| Method | Path | Guard |
+| --- | --- | --- |
+| GET | `/api/v1/integrations` → `secureId` | `{ clientId, clientSecret (masked), publicKey ('••••' \| null), publicKeyFingerprint (sha256 prefix of the PEM, or null), testMode, configured, signing: 'PUBLIC_KEY' \| 'IP_WHITELIST', baseUrl, source: 'SETTINGS' \| 'ENV' \| null }` — env fallbacks `CASHFREE_VERIFICATION_CLIENT_ID/_SECRET/_TEST_MODE/_PUBLIC_KEY`, then the payouts client pair |
+| PUT | `/api/v1/integrations` `{ section: 'secureId', patch }` | strict: `clientId`, `clientSecret` (blank keeps), `publicKey` (the PEM text — must parse as an RSA public key; `null` removes it, back to IP whitelisting), `testMode`. Audited `SECURE_ID_CONFIG_UPDATED` (`testMode` and whether a key is set, before and after — never a key) |
+| GET | `/api/v1/integrations` → `verificationRouting` | the settings in force, defaults filled in: `{ checks: { <CheckType>: { primary, fallbacks[] } }, breaker: { failures, windowMinutes, cooldownMinutes }, composites: { <DigioWorkflowKey>: [{ step, required }] }, nameMatchMin, upiCheck: NONE \| PENNY_DROP \| REVERSE_PENNY_DROP, hostedKycBackup: ON \| OFF, catalogue: { checks, providers: [{ name, label, capabilities }], steps, upiChecks } }` |
+| PUT | `/api/v1/integrations` `{ section: 'verificationRouting', patch }` | strict; `checks`, `breaker`, `composites` merged key by key over the stored ones (`null` on a key → back to its default); a route is `{ primary, fallbacks? (≤ 2, never the primary) }`; a composite is an ordered list of `{ step, required? }` (no step twice); `nameMatchMin` 0–100; `breaker` ints. Audited `VERIFICATION_ROUTING_CHANGED` with the resolved settings before and after |

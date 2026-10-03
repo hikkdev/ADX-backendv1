@@ -13,6 +13,8 @@ import { prismaFraudSignalsIndex as index } from './prisma-fraud-signals.reposit
 import { openCaseRecord, type Actor } from './fraud.service';
 import { SIGNAL_SCAN_KIND, type FraudSubjectType } from './fraud.schema';
 import { cleanCandidates, evaluateSignals, foldLinks, FRAUD_SIGNALS, type LinkedAccount, type LinkedParty, type ResolvedSubject, type StoredSignal } from './signals';
+import { sharedAttributes, type SharedAttribute } from './signals/shared-attributes';
+import { SIGN_IN_WINDOW_DAYS } from './signals/shared-ip-subnet.signal';
 
 /**
  * Fraud signals and the score — Lot G (Q118/138).
@@ -83,6 +85,8 @@ export type LinkedAccountExposure = LinkedAccount & {
   walletBalance: Money | null;
   /** Its non-terminal orders. */
   openBookings: number;
+  /** 28 Sep 2026: the party's KYC status, for the graph's hover card; null when it has none or no longer resolves. */
+  kycStatus: string | null;
 };
 
 /** G13-B: a party the last scoring compared the subject against and did not link — a "Clean" node. */
@@ -97,6 +101,12 @@ export type LinkedAccountsRead = {
    * anything linked now taken out. Empty on a case never scored.
    */
   evaluated: EvaluatedAccount[];
+  /**
+   * 28 Sep 2026: the graph's shared-attribute nodes — one per linking signal
+   * that tied the subject to somebody, with a masked display value
+   * (`signals/shared-attributes.ts`) and how many linked accounts share it.
+   */
+  attributes: SharedAttribute[];
   /** G11-1: every linked wallet's balance plus every linked open order's value, as money. */
   valueAtRisk: Money;
   computedAt: Date;
@@ -108,15 +118,37 @@ export type LinkedAccountsRead = {
  * orders hang off their own id; an advertiser's off its login, which the
  * index resolves (`Order.advertiserId` is a User id) — none, no orders.
  */
-async function exposureOf(party: LinkedParty): Promise<{ walletBalance: Money | null; openBookings: number; openValue: Decimal }> {
+async function exposureOf(party: LinkedParty): Promise<{ walletBalance: Money | null; openBookings: number; openValue: Decimal; kycStatus: string | null }> {
+  // 28 Sep 2026: every party is resolved once — its KYC status for the hover card, and an advertiser's login for its orders.
+  const resolved = await index.resolveSubject({ type: party.type, id: party.id }).catch(() => null);
   const scope: OpenOrderScope | null =
     party.type === 'PUBLISHER'
       ? { publisherId: party.id }
       : party.type === 'AGENT'
         ? { agentId: party.id }
-        : await index.resolveSubject({ type: 'ADVERTISER', id: party.id }).then((resolved) => (resolved?.userId ? { advertiserUserId: resolved.userId } : null));
+        : resolved?.userId
+          ? { advertiserUserId: resolved.userId }
+          : null;
   const [wallet, orders] = await Promise.all([findWalletFor({ kind: party.type, id: party.id }), scope ? openOrderExposureFor(scope) : Promise.resolve({ count: 0, value: money(0) })]);
-  return { walletBalance: wallet ? money(wallet.balance) : null, openBookings: orders.count, openValue: new Decimal(orders.value) };
+  return { walletBalance: wallet ? money(wallet.balance) : null, openBookings: orders.count, openValue: new Decimal(orders.value), kycStatus: resolved?.kycStatus ?? null };
+}
+
+/**
+ * 28 Sep 2026: the shared attributes, masked. Only the handles of a signal
+ * that linked somebody are read — the payout methods for SHARED_BANK, the
+ * sign-in subnets (the signal's own thirty-day window) for SHARED_IP_SUBNET,
+ * the device tokens for SHARED_DEVICE; the PAN and mobile are on the subject.
+ */
+async function attributesOf(subject: ResolvedSubject, signals: readonly StoredSignal[], now: Date): Promise<SharedAttribute[]> {
+  const linking = new Set(signals.filter((signal) => signal.links?.length).map((signal) => signal.key));
+  const userId = subject.userId;
+  const since = new Date(now.getTime() - SIGN_IN_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  const [payout, subnets, deviceTokens] = await Promise.all([
+    linking.has('SHARED_BANK') && userId ? index.payoutHandlesFor(userId).catch(() => []) : Promise.resolve([]),
+    linking.has('SHARED_IP_SUBNET') && userId ? index.signInSubnetsFor(userId, since).catch(() => []) : Promise.resolve([]),
+    linking.has('SHARED_DEVICE') && userId ? index.deviceTokensFor(userId).catch(() => []) : Promise.resolve([]),
+  ]);
+  return sharedAttributes(signals, { pan: subject.pan, mobile: subject.mobile, payout, subnets, deviceTokens });
 }
 
 /**
@@ -133,17 +165,17 @@ export async function linkedAccounts(caseId: string, now = new Date()): Promise<
   const subject = await resolveOr404(fraudCase.subjectType, fraudCase.subjectId);
   const { signals } = await evaluateSignals(subject, { index, now }, LINKING_SIGNALS);
   const folded = foldLinks(signals);
-  const exposures = await Promise.all(folded.map((account) => exposureOf(account.party)));
+  const [exposures, attributes] = await Promise.all([Promise.all(folded.map((account) => exposureOf(account.party))), attributesOf(subject, signals, now)]);
   let valueAtRisk = ZERO;
   const linked = folded.map((account, i) => {
-    const { walletBalance, openBookings, openValue } = exposures[i]!;
+    const { walletBalance, openBookings, openValue, kycStatus } = exposures[i]!;
     valueAtRisk = valueAtRisk.plus(walletBalance ?? 0).plus(openValue);
-    return { ...account, walletBalance, openBookings };
+    return { ...account, walletBalance, openBookings, kycStatus };
   });
   const stored = Array.isArray(fraudCase.signals) ? (fraudCase.signals as unknown as StoredSignal[]) : [];
   const self: LinkedAccount = { party: { type: subject.type, id: subject.id, name: subject.name }, via: [] };
   const evaluated: EvaluatedAccount[] = cleanCandidates(stored, [...folded, self]).map((party) => ({ party, linked: false }));
-  return { subject: summarise(subject), linked, evaluated, valueAtRisk: money(valueAtRisk), computedAt: now };
+  return { subject: summarise(subject), linked, evaluated, attributes, valueAtRisk: money(valueAtRisk), computedAt: now };
 }
 
 /* ── the nightly scan ─────────────────────────────────────────────────────── */

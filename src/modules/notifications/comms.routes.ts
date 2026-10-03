@@ -37,8 +37,8 @@ commsRouter.use(authenticate, requireRole('ADMIN'));
  * so nothing here is order-sensitive against `/templates/:key`. */
 commsRouter.get('/events', requirePermission('comms.view'), asyncHandler(listEventsHandler));
 commsRouter.get('/sms-kinds', requirePermission('comms.view'), asyncHandler(smsKindsHandler));
-commsRouter.get('/templates', requirePermission('comms.view'), asyncHandler(listTemplatesHandler));
-commsRouter.post('/templates', requirePermission('comms.edit'), asyncHandler(createTemplateHandler));
+commsRouter.get('/templates', requirePermission('content.view'), requirePermission('comms.view'), asyncHandler(listTemplatesHandler));
+commsRouter.post('/templates', requirePermission('content.edit'), requirePermission('comms.edit'), asyncHandler(createTemplateHandler));
 commsRouter.get('/templates/:key', requirePermission('comms.view'), asyncHandler(getTemplateHandler));
 commsRouter.patch('/templates/:key', requirePermission('comms.edit'), asyncHandler(updateTemplateHandler));
 /* Lot G (Q117): the template to the operator's own inbox / phone with sample variables. */

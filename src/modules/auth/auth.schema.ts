@@ -10,13 +10,16 @@ export const verifyOtpSchema = z.object({
   // accepted.
   mobile: z.string(),
   otp: z.string().length(6),
+  /** ED-1: the proof of the address read first, when this phone step ends an email sign-up. */
+  signupToken: z.string().min(1).optional(),
 });
 
 export const sendOtpEmailSchema = z.object({ email: z.string().email() });
 
 export const verifyOtpEmailSchema = z.object({
   email: z.string().email(),
-  otp: z.string().length(6),
+  /** EC-8: eight capital letters, typed in any case; a six-digit code still live from before is taken too. */
+  otp: z.string().trim().min(6).max(8),
 });
 
 export const refreshSchema = z.object({ refreshToken: z.string().min(1) });
@@ -33,6 +36,9 @@ export const loginPasswordSchema = z.object({
 // A bare non-empty string keeps a malformed token a 401 from the verifier
 // rather than a 400 from Zod, so probing the endpoint yields one answer.
 export const googleLoginSchema = z.object({ idToken: z.string().min(1) });
+
+/** FB-1: the Facebook SDK's user access token; every claim in it is checked with Facebook in facebook.service. */
+export const facebookLoginSchema = z.object({ accessToken: z.string().min(1).max(4096) });
 
 export const forgotPasswordSchema = z.object({ email: z.string().email() });
 

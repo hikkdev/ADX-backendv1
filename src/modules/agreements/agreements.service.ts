@@ -566,6 +566,84 @@ export async function platformStanding(kind: AgreementKind, party: AcceptancePar
   };
 }
 
+/** One line of `GET /agreements/mine`. */
+export type MyAgreement = {
+  kind: AgreementKind;
+  label: string;
+  /** The version the account accepted. */
+  templateVersion: number;
+  acceptedAt: Date;
+  /** The live version of the kind, null when none is published. */
+  currentVersion: number | null;
+  /** The acceptance is the live version (or later): false means outdated, whether or not re-acceptance is enforced. */
+  current: boolean;
+  /** The live version demands acceptance again before transacting. */
+  requiresReacceptance: boolean;
+};
+
+/**
+ * 26 Sep 2026: `GET /agreements/mine` — the signed-in account's platform
+ * agreements, one line per platform-scope kind it has accepted, newest
+ * version first: the version, when, and whether that is still the live one.
+ * Per-deal acceptances (listing, insertion order, package, job terms) are
+ * not here — each is shown beside its deal. Kinds the account holds no
+ * acceptance for are left out; what they must still accept is the
+ * onboarding ladder's business.
+ */
+export async function myAgreements(userId: string): Promise<MyAgreement[]> {
+  const parties = await repository.partiesOfUser(userId);
+  const held: [PartyType, string | null][] = [
+    ['publisher', parties.publisherId],
+    ['advertiser', parties.advertiserId],
+    ['agent', parties.agentId],
+  ];
+  const lookups = held.flatMap(([type, id]) =>
+    id
+      ? (Object.keys(KIND_META) as AgreementKind[])
+          .filter((kind) => KIND_META[kind].scope === 'PLATFORM' && KIND_META[kind].party === type)
+          .map((kind) => ({ kind, party: { [PARTY_FIELD[type]]: id } as AcceptanceParty }))
+      : [],
+  );
+  const rows = await Promise.all(
+    lookups.map(async ({ kind, party }) => {
+      const [accepted, template] = await Promise.all([repository.findPlatformAcceptance(kind, party), repository.activeTemplate(kind)]);
+      if (!accepted) return null;
+      const line: MyAgreement = {
+        kind,
+        label: KIND_META[kind].label,
+        templateVersion: accepted.templateVersion,
+        acceptedAt: accepted.acceptedAt,
+        currentVersion: template?.version ?? null,
+        current: !template || accepted.templateVersion >= template.version,
+        requiresReacceptance: template?.requiresReacceptance ?? false,
+      };
+      return line;
+    }),
+  );
+  return rows.filter((row): row is MyAgreement => row !== null);
+}
+
+/** The platform-scope kinds a visitor may read the live text of, signed out. */
+export const PUBLIC_AGREEMENT_KINDS: readonly AgreementKind[] = (Object.keys(KIND_META) as AgreementKind[]).filter(
+  (kind) => KIND_META[kind].scope === 'PLATFORM' && ['publisher', 'advertiser', 'agent'].includes(KIND_META[kind].party),
+);
+
+/**
+ * 26 Sep 2026: `GET /legal/agreements/:kind` — the live text of a platform
+ * agreement for a visitor, before any sign-up: `{ id, kind, version, title,
+ * body, activatedAt }` and nothing else (no author, no counts, no drafts).
+ * Only the party-facing platform kinds; the employee's appointment letter
+ * and a partner's service agreement are not public. 404 when the kind is
+ * not one of those, or nothing is published.
+ */
+export async function publicAgreement(kind: string): Promise<{ id: string; kind: AgreementKind; version: number; title: string; body: string; activatedAt: Date | null }> {
+  const known = PUBLIC_AGREEMENT_KINDS.find((candidate) => candidate === kind);
+  if (!known) throw new ApiError(404, 'NOT_FOUND', 'No such agreement');
+  const template = await repository.activeTemplate(known);
+  if (!template) throw new ApiError(404, 'NO_ACTIVE_TEMPLATE', `No ${KIND_META[known].label.toLowerCase()} is published yet`);
+  return { id: template.id, kind: known, version: template.version, title: template.title, body: template.body, activatedAt: template.activatedAt ?? null };
+}
+
 /** `GET /agreements/stale?kind=` — who holds older platform terms than the live version. */
 export async function staleParties(kind: AgreementKind): Promise<{
   kind: AgreementKind;

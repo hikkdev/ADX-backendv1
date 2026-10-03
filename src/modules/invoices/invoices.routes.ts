@@ -23,28 +23,30 @@ invoiceFinanceRouter.use(authenticate);
 invoiceFinanceRouter.use(requireRole('ADMIN'));
 
 /* Who ADX is on every invoice. */
-invoiceFinanceRouter.get('/legal-entity', asyncHandler(h.getLegalEntityHandler));
-invoiceFinanceRouter.put('/legal-entity', asyncHandler(h.putLegalEntityHandler));
+invoiceFinanceRouter.get('/legal-entity', requirePermission('finance.view'), asyncHandler(h.getLegalEntityHandler));
+invoiceFinanceRouter.put('/legal-entity', requirePermission('finance.edit'), asyncHandler(h.putLegalEntityHandler));
 
 /* The register. */
-invoiceFinanceRouter.get('/invoices', asyncHandler(h.listInvoicesHandler));
-invoiceFinanceRouter.post('/invoices/issue', asyncHandler(h.issueInvoiceHandler));
-invoiceFinanceRouter.get('/invoices/:id', asyncHandler(h.getInvoiceHandler));
-invoiceFinanceRouter.get('/invoices/:id/pdf', asyncHandler(h.invoicePdfHandler));
+invoiceFinanceRouter.get('/invoices', requirePermission('finance.view'), asyncHandler(h.listInvoicesHandler));
+invoiceFinanceRouter.post('/invoices/issue', requirePermission('finance.edit'), asyncHandler(h.issueInvoiceHandler));
+invoiceFinanceRouter.get('/invoices/:id', requirePermission('finance.view'), asyncHandler(h.getInvoiceHandler));
+invoiceFinanceRouter.get('/invoices/:id/pdf', requirePermission('finance.view'), asyncHandler(h.invoicePdfHandler));
 invoiceFinanceRouter.post('/invoices/:id/void', requirePermission('finance.approve'), asyncHandler(h.voidInvoiceHandler));
 
 /* What publishers billed ADX. */
-invoiceFinanceRouter.get('/publisher-invoices', asyncHandler(h.listPublisherInvoicesHandler));
-invoiceFinanceRouter.patch('/publisher-invoices/:id', asyncHandler(h.reviewPublisherInvoiceHandler));
+invoiceFinanceRouter.get('/publisher-invoices', requirePermission('finance.view'), asyncHandler(h.listPublisherInvoicesHandler));
+invoiceFinanceRouter.patch('/publisher-invoices/:id', requirePermission('finance.edit'), asyncHandler(h.reviewPublisherInvoiceHandler));
 
 /* The monthly run, by hand. */
-invoiceFinanceRouter.post('/statements/run', asyncHandler(h.runStatementsHandler));
+invoiceFinanceRouter.post('/statements/run', requirePermission('system.jobs'), asyncHandler(h.runStatementsHandler));
 
 /* ── /advertisers/:id/invoices — the advertiser's own paper ─────────── */
 
 export const advertiserInvoiceRouter = Router();
 advertiserInvoiceRouter.use(authenticate);
 advertiserInvoiceRouter.get('/:id/invoices', asyncHandler(h.advertiserInvoicesHandler));
+/* WG-1 (DR 12 board 07): the invoice itself, lines and all — the same shape the desk reads. */
+advertiserInvoiceRouter.get('/:id/invoices/:invoiceId', asyncHandler(h.advertiserInvoiceHandler));
 advertiserInvoiceRouter.get('/:id/invoices/:invoiceId/pdf', asyncHandler(h.advertiserInvoicePdfHandler));
 
 /* ── /publishers/me/invoices — a publisher billing ADX ───────────────── */

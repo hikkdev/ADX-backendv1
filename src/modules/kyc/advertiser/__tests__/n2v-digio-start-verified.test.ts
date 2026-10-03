@@ -15,14 +15,16 @@ const { repository, digio } = vi.hoisted(() => ({
 
 vi.mock('../prisma-advertiser-kyc.repository', () => ({ prismaAdvertiserKycRepository: repository }));
 vi.mock('../../../../shared/integrations/digio-client', () => digio);
-vi.mock('../../../advertisers', () => ({ applyKycDecision: vi.fn(), applyKycDecisionByUserId: vi.fn(), getAdvertiserForUser: vi.fn(), findAdvertiser: vi.fn() }));
+vi.mock('../../../advertisers', () => ({ applyKycDecision: vi.fn(), applyKycDecisionByUserId: vi.fn(), getAdvertiserForUser: vi.fn(), findAdvertiser: vi.fn(), setAdvertiserEntityType: vi.fn() }));
 vi.mock('../../../notifications', () => ({ createNotification: vi.fn() }));
-vi.mock('../../../../shared/audit', () => ({ logActivity: vi.fn() }));
+vi.mock('../../../../shared/audit', () => ({ logActivity: vi.fn(), auditDiff: vi.fn(() => ({})) }));
 
 import { initiateAdvertiserDigioKyc } from '../advertiser-digio.service';
 
 // N3-B: the session is keyed by the profile.
-const PROFILE = { id: 'adv_1', userId: 'usr_adv', name: 'Meera S', companyName: null, email: 'meera@example.in', mobile: '+919812340001' };
+// Phase D: an INDIVIDUAL's legal form is settled by the legacy type, so the start asks nothing.
+const PROFILE = { id: 'adv_1', userId: 'usr_adv', name: 'Meera S', companyName: null, email: 'meera@example.in', mobile: '+919812340001', type: 'INDIVIDUAL', entityType: null, kycStatus: 'PENDING' } as const;
+const BY = { byUserId: 'usr_adv' };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -34,16 +36,16 @@ beforeEach(() => {
 describe('starting Digio on a verified advertiser', () => {
   it('is 409 KYC_ALREADY_VERIFIED before Digio is asked or the row touched', async () => {
     repository.findByAdvertiserId.mockResolvedValue({ id: 'row_1', advertiserId: 'usr_adv', advertiserProfileId: 'adv_1', status: 'VERIFIED', method: 'MANUAL' });
-    await expect(initiateAdvertiserDigioKyc(PROFILE)).rejects.toMatchObject({ statusCode: 409, code: 'KYC_ALREADY_VERIFIED' });
+    await expect(initiateAdvertiserDigioKyc(PROFILE, BY)).rejects.toMatchObject({ statusCode: 409, code: 'KYC_ALREADY_VERIFIED' });
     expect(digio.requestDigioKyc).not.toHaveBeenCalled();
     expect(repository.upsertDigio).not.toHaveBeenCalled();
   });
 
   it('still opens a session with no row, or a row that is not verified', async () => {
     repository.findByAdvertiserId.mockResolvedValue(null);
-    await expect(initiateAdvertiserDigioKyc(PROFILE)).resolves.toMatchObject({ kycId: 'kyc_9' });
+    await expect(initiateAdvertiserDigioKyc(PROFILE, BY)).resolves.toMatchObject({ kycId: 'kyc_9' });
     repository.findByAdvertiserId.mockResolvedValue({ id: 'row_1', advertiserId: 'usr_adv', advertiserProfileId: 'adv_1', status: 'REJECTED', method: 'DIGIO' });
-    await expect(initiateAdvertiserDigioKyc(PROFILE)).resolves.toMatchObject({ kycId: 'kyc_9' });
+    await expect(initiateAdvertiserDigioKyc(PROFILE, BY)).resolves.toMatchObject({ kycId: 'kyc_9' });
     expect(repository.upsertDigio).toHaveBeenCalledTimes(2);
   });
 });

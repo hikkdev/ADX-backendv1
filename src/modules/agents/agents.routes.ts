@@ -1,6 +1,7 @@
 import { Router } from 'express';
+import * as compensation from './compensation/compensation.controller';
 import { asyncHandler } from '../../shared/http';
-import { authenticate, requireRole } from '../../shared/auth';
+import { authenticate, requireRole, requirePermission } from '../../shared/auth';
 import {
   createAgentHandler,
   getAllAgentsHandler,
@@ -71,9 +72,9 @@ agentRouter.get('/me/tier', asyncHandler(getMyTierHandler));
 agentRouter.post('/me/tier/ack', asyncHandler(acknowledgeTierHandler));
 agentRouter.get('/me/leaderboard', asyncHandler(getMyLeaderboardHandler));
 // The thresholds and support lines, from the desk. Declared before '/:id'.
-agentRouter.get('/tier-ladder', requireRole('ADMIN'), asyncHandler(getLadderHandler));
-agentRouter.put('/tier-ladder', requireRole('ADMIN'), asyncHandler(putLadderHandler));
-agentRouter.get('/leaderboard', requireRole('ADMIN'), asyncHandler(getCityLeaderboardHandler));
+agentRouter.get('/tier-ladder', requireRole('ADMIN'), requirePermission('agents.view'), asyncHandler(getLadderHandler));
+agentRouter.put('/tier-ladder', requireRole('ADMIN'), requirePermission('agents.edit'), asyncHandler(putLadderHandler));
+agentRouter.get('/leaderboard', requireRole('ADMIN'), requirePermission('agents.view'), asyncHandler(getCityLeaderboardHandler));
 agentRouter.get('/me/preferences', asyncHandler(getMyPreferencesHandler));
 agentRouter.patch('/me/preferences', asyncHandler(updateMyPreferencesHandler));
 
@@ -89,49 +90,58 @@ agentRouter.post('/me/application/agreement', asyncHandler(acceptMyAgreementHand
 agentRouter.post('/me/application/submit', asyncHandler(submitMyApplicationHandler));
 agentRouter.post('/me/application/withdraw', asyncHandler(withdrawMyApplicationHandler));
 // The desk's queue — before `/:id` so "applications" is never read as an id.
-agentRouter.get('/applications', requireRole('ADMIN'), asyncHandler(listApplicationsHandler));
+agentRouter.get('/applications', requireRole('ADMIN'), requirePermission('agents.view'), asyncHandler(listApplicationsHandler));
 // AG-4: the paper-expiry sweep, run by hand (the job runs it every six hours).
-agentRouter.post('/applications/expiry-sweep', requireRole('ADMIN'), asyncHandler(documentExpirySweepHandler));
+agentRouter.post('/applications/expiry-sweep', requireRole('ADMIN'), requirePermission('system.jobs'), asyncHandler(documentExpirySweepHandler));
 // AG-5: routing by grade — the bands-to-grades settings; fleet partners and their invites. Before `/:id`.
-agentRouter.get('/routing-settings', requireRole('ADMIN'), asyncHandler(getRoutingSettingsHandler));
-agentRouter.put('/routing-settings', requireRole('ADMIN'), asyncHandler(saveRoutingSettingsHandler));
-agentRouter.get('/fleet-partners', requireRole('ADMIN'), asyncHandler(listFleetPartnersHandler));
-agentRouter.post('/fleet-partners', requireRole('ADMIN'), asyncHandler(createFleetPartnerHandler));
-agentRouter.get('/fleet-partners/:partnerId', requireRole('ADMIN'), asyncHandler(getFleetPartnerHandler));
-agentRouter.patch('/fleet-partners/:partnerId', requireRole('ADMIN'), asyncHandler(updateFleetPartnerHandler));
-agentRouter.post('/fleet-partners/:partnerId/invites', requireRole('ADMIN'), asyncHandler(inviteFleetHandler));
+agentRouter.get('/routing-settings', requireRole('ADMIN'), requirePermission('agents.view'), asyncHandler(getRoutingSettingsHandler));
+agentRouter.put('/routing-settings', requireRole('ADMIN'), requirePermission('agents.edit'), asyncHandler(saveRoutingSettingsHandler));
+agentRouter.get('/fleet-partners', requireRole('ADMIN'), requirePermission('agents.view'), asyncHandler(listFleetPartnersHandler));
+agentRouter.post('/fleet-partners', requireRole('ADMIN'), requirePermission('agents.edit'), asyncHandler(createFleetPartnerHandler));
+agentRouter.get('/fleet-partners/:partnerId', requireRole('ADMIN'), requirePermission('agents.view'), asyncHandler(getFleetPartnerHandler));
+agentRouter.patch('/fleet-partners/:partnerId', requireRole('ADMIN'), requirePermission('agents.edit'), asyncHandler(updateFleetPartnerHandler));
+agentRouter.post('/fleet-partners/:partnerId/invites', requireRole('ADMIN'), requirePermission('agents.edit'), asyncHandler(inviteFleetHandler));
 
-agentRouter.get('/', requireRole('ADMIN'), asyncHandler(getAllAgentsHandler));
-agentRouter.get('/:id', requireRole('ADMIN'), asyncHandler(getAgentByIdHandler));
+agentRouter.get('/', requireRole('ADMIN'), requirePermission('agents.view'), asyncHandler(getAllAgentsHandler));
+agentRouter.get('/:id', requireRole('ADMIN'), requirePermission('agents.view'), asyncHandler(getAgentByIdHandler));
 // D5: the same rating ops read beside the offer lane.
-agentRouter.get('/:id/rating', requireRole('ADMIN'), asyncHandler(getAgentRatingHandler));
+agentRouter.get('/:id/rating', requireRole('ADMIN'), requirePermission('agents.view'), asyncHandler(getAgentRatingHandler));
 // DR 05: any agent's milestone board, derived the same way the agent's own is.
-agentRouter.get('/:id/milestones', requireRole('ADMIN'), asyncHandler(getAgentMilestonesHandler));
+agentRouter.get('/:id/milestones', requireRole('ADMIN'), requirePermission('agents.view'), asyncHandler(getAgentMilestonesHandler));
 // DR 05: the tier with its history; the explicit door for pinning one, with a reason.
-agentRouter.get('/:id/tier', requireRole('ADMIN'), asyncHandler(getAgentTierHandler));
-agentRouter.patch('/:id/tier', requireRole('ADMIN'), asyncHandler(pinTierHandler));
+agentRouter.get('/:id/tier', requireRole('ADMIN'), requirePermission('agents.view'), asyncHandler(getAgentTierHandler));
+agentRouter.patch('/:id/tier', requireRole('ADMIN'), requirePermission('agents.edit'), asyncHandler(pinTierHandler));
 // D5: territory, business, preferences and whether they are offered work — from the desk.
-agentRouter.patch('/:id', requireRole('ADMIN'), asyncHandler(updateAgentHandler));
+agentRouter.patch('/:id', requireRole('ADMIN'), requirePermission('agents.edit'), asyncHandler(updateAgentHandler));
+
+/* CP-1: what the agent is paid and how much of their work it covers. ADMIN
+ * only — a salary is a money term, recorded with an effective date and
+ * audited, never edited in place. The standing read is the quota's own
+ * arithmetic: what today's quota is and how much of it is used. */
+agentRouter.get('/compensation/defaults', requireRole('ADMIN'), requirePermission('finance.view'), asyncHandler(compensation.compensationDefaultsHandler));
+agentRouter.get('/:id/compensation', requireRole('ADMIN'), requirePermission('finance.view'), asyncHandler(compensation.getCompensationHandler));
+agentRouter.post('/:id/compensation', requireRole('ADMIN'), requirePermission('finance.edit'), asyncHandler(compensation.setCompensationHandler));
+agentRouter.get('/:id/standing', requireRole('ADMIN'), requirePermission('agents.view'), asyncHandler(compensation.agentStandingHandler));
 // AG-1: the desk's side of the application — the record, a paper filed for
 // them, each paper's decision, the decision itself, the grade, the exit.
-agentRouter.get('/:id/application', requireRole('ADMIN'), asyncHandler(getApplicationHandler));
-agentRouter.put('/:id/application/documents/:kind', requireRole('ADMIN'), asyncHandler(fileDocumentAtDeskHandler));
+agentRouter.get('/:id/application', requireRole('ADMIN'), requirePermission('agents.view'), asyncHandler(getApplicationHandler));
+agentRouter.put('/:id/application/documents/:kind', requireRole('ADMIN'), requirePermission('agents.edit'), asyncHandler(fileDocumentAtDeskHandler));
 // AG-3: the desk runs the same ladder for a person in front of it.
-agentRouter.patch('/:id/application/profile', requireRole('ADMIN'), asyncHandler(updateProfileAtDeskHandler));
-agentRouter.post('/:id/application/agreement', requireRole('ADMIN'), asyncHandler(acceptAgreementAtDeskHandler));
-agentRouter.post('/:id/application/submit', requireRole('ADMIN'), asyncHandler(submitAtDeskHandler));
-agentRouter.patch('/:id/application/documents/:kind/review', requireRole('ADMIN'), asyncHandler(reviewDocumentHandler));
-agentRouter.post('/:id/application/decision', requireRole('ADMIN'), asyncHandler(decideApplicationHandler));
+agentRouter.patch('/:id/application/profile', requireRole('ADMIN'), requirePermission('agents.edit'), asyncHandler(updateProfileAtDeskHandler));
+agentRouter.post('/:id/application/agreement', requireRole('ADMIN'), requirePermission('agents.edit'), asyncHandler(acceptAgreementAtDeskHandler));
+agentRouter.post('/:id/application/submit', requireRole('ADMIN'), requirePermission('agents.edit'), asyncHandler(submitAtDeskHandler));
+agentRouter.patch('/:id/application/documents/:kind/review', requireRole('ADMIN'), requirePermission('agents.approve'), asyncHandler(reviewDocumentHandler));
+agentRouter.post('/:id/application/decision', requireRole('ADMIN'), requirePermission('agents.approve'), asyncHandler(decideApplicationHandler));
 // AG-4: screening — the interviews the desk books and decides, its own tick, and Cashfree's vehicle-RC check.
-agentRouter.post('/:id/application/interviews', requireRole('ADMIN'), asyncHandler(scheduleInterviewHandler));
-agentRouter.patch('/:id/application/interviews/:interviewId', requireRole('ADMIN'), asyncHandler(recordInterviewOutcomeHandler));
-agentRouter.post('/:id/application/screen', requireRole('ADMIN'), asyncHandler(screenAtDeskHandler));
-agentRouter.post('/:id/application/documents/VEHICLE_RC/verify', requireRole('ADMIN'), asyncHandler(verifyVehicleRcHandler));
-agentRouter.patch('/:id/grade', requireRole('ADMIN'), asyncHandler(setGradeHandler));
-agentRouter.post('/:id/exit', requireRole('ADMIN'), asyncHandler(exitAgentHandler));
+agentRouter.post('/:id/application/interviews', requireRole('ADMIN'), requirePermission('agents.edit'), asyncHandler(scheduleInterviewHandler));
+agentRouter.patch('/:id/application/interviews/:interviewId', requireRole('ADMIN'), requirePermission('agents.edit'), asyncHandler(recordInterviewOutcomeHandler));
+agentRouter.post('/:id/application/screen', requireRole('ADMIN'), requirePermission('agents.approve'), asyncHandler(screenAtDeskHandler));
+agentRouter.post('/:id/application/documents/VEHICLE_RC/verify', requireRole('ADMIN'), requirePermission('agents.edit'), asyncHandler(verifyVehicleRcHandler));
+agentRouter.patch('/:id/grade', requireRole('ADMIN'), requirePermission('agents.edit'), asyncHandler(setGradeHandler));
+agentRouter.post('/:id/exit', requireRole('ADMIN'), requirePermission('agents.suspend'), asyncHandler(exitAgentHandler));
 
 // The desk's create. Before AG-1 this was the only way an agent came to exist;
 // it still makes a working (ACTIVE) agent in one step for the desk that met
 // the person and saw their papers, and with `asApplication: true` it starts
 // an application at PROFILE instead — the same ladder the app climbs.
-agentRouter.post('/', requireRole('ADMIN'), asyncHandler(createAgentHandler));
+agentRouter.post('/', requireRole('ADMIN'), requirePermission('agents.edit'), asyncHandler(createAgentHandler));

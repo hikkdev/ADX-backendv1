@@ -47,6 +47,8 @@ export type ProfilePatch = Partial<{
   currentAddress: string | null;
   currentLatitude: number | null;
   currentLongitude: number | null;
+  /** Onboarding addresses (1 Oct 2026): the current address's PIN code. */
+  currentPostalCode: string | null;
   permanentAddress: string | null;
   emergencyContactName: string | null;
   emergencyContactRelation: string | null;
@@ -220,4 +222,12 @@ export interface ApplicationRepository {
   agentsForPurge(before: Date): Promise<{ id: string; exitedAt: Date | null; exitedById: string | null; documents: { id: string; url: string }[] }[]>;
   /** The rows go; the profile is stamped. */
   purgeDocuments(agentId: string, at: Date): Promise<void>;
+  /**
+   * Account lifecycle (2 Oct 2026): what else this account works as — a
+   * publisher or advertiser not blocked from new work, an HR record on, a
+   * print shop on the roster. An exited agent with any of these keeps signing in.
+   */
+  otherWorkingRoles(userId: string): Promise<('PUBLISHER' | 'ADVERTISER' | 'EMPLOYEE' | 'PRINT_PARTNER')[]>;
+  /** Account lifecycle: the account's sign-in switch, off — an exited agent paid out. */
+  switchOffSignIn(userId: string): Promise<void>;
 }

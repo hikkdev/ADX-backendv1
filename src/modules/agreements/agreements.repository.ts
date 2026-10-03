@@ -172,4 +172,6 @@ export interface AgreementsRepository {
   /* Parties — read-only; the rows belong to publishers and advertisers. */
   searchParties(query: string, limitPerType: number): Promise<PartySummary[]>;
   findParty(type: PartyType, id: string): Promise<PartySummary | null>;
+  /** 26 Sep 2026: the party profiles a signed-in account holds — for `GET /agreements/mine`. */
+  partiesOfUser(userId: string): Promise<{ publisherId: string | null; advertiserId: string | null; agentId: string | null }>;
 }

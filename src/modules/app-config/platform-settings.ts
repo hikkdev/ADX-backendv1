@@ -3,6 +3,7 @@ import { DEFAULT_ESIGN_POLICY, esignPolicySchema } from '../../shared/esign';
 import { DEFAULT_LEAD_SCORING, leadScoringSchema } from '../../shared/lead-scoring';
 import { invalidate, readThrough } from '../../shared/cache';
 import { getConfigObject, saveConfigObject } from './app-config.service';
+import { ApiError } from '../../shared/errors';
 
 /**
  * The platform settings row — Lot A, Q31.
@@ -160,6 +161,41 @@ const workloadThresholdsSchema = z
   })
   .refine((value) => value.high > value.medium, { message: 'high must be above medium', path: ['high'] });
 
+/**
+ * Order fraud screening (2 Oct 2026): `fraud.orderScreening`. The thresholds
+ * are on the 0–1 score; the hold threshold may not sit below the review
+ * threshold — checked on the whole document (`orderScreeningProblem`), since
+ * a patch may carry only one of them.
+ */
+export const orderScreeningSchema = z.object({
+  enabled: z.boolean(),
+  reviewThreshold: z.number().min(0).max(1),
+  holdThreshold: z.number().min(0).max(1),
+  autoHold: z.boolean(),
+  newAccountDays: z.number().int().min(1).max(365),
+  bigOrderAmount: z.number().min(0).max(100_000_000),
+  velocityCount: z.number().int().min(1).max(1_000),
+  velocityMinutes: z.number().int().min(1).max(7 * 24 * 60),
+});
+export type OrderScreeningSettings = z.infer<typeof orderScreeningSchema>;
+
+/** Watch mode first: flag only, the hold switch OFF (the owner, 2 Oct 2026). */
+export const DEFAULT_ORDER_SCREENING: OrderScreeningSettings = {
+  enabled: true,
+  reviewThreshold: 0.5,
+  holdThreshold: 0.8,
+  autoHold: false,
+  newAccountDays: 7,
+  bigOrderAmount: 100_000,
+  velocityCount: 5,
+  velocityMinutes: 60,
+};
+
+/** The cross-field rule a Zod object cannot carry through `.partial()`: null when the section holds together. */
+export function orderScreeningProblem(settings: OrderScreeningSettings): string | null {
+  return settings.holdThreshold < settings.reviewThreshold ? 'The hold threshold cannot be below the review threshold.' : null;
+}
+
 export const platformSettingsSchema = z.object({
   kyc: z.object({
     /** Hours from submission before a pending review counts as breached. */
@@ -178,6 +214,17 @@ export const platformSettingsSchema = z.object({
   fraud: z.object({
     scanThreshold: z.number().min(0).max(1),
     scanLimitPerType: z.number().int().min(1).max(20_000),
+    /**
+     * Order fraud screening (the owner, 2 Oct 2026). Every order is scored on
+     * placement, on payment and nightly; at `reviewThreshold` it is flagged
+     * for the desk. `autoHold` ships OFF — watch mode: flags only, nothing
+     * is paused. With it on, a score at `holdThreshold` also holds the order
+     * (reversibly). Nothing automatic ever cancels or suspends. The four
+     * numbers below tune the order signals: an account younger than
+     * `newAccountDays` placing more than `bigOrderAmount` (₹), and more than
+     * `velocityCount` orders by one advertiser in `velocityMinutes`.
+     */
+    orderScreening: orderScreeningSchema,
   }),
   listings: z.object({
     /** A first accepted site verification takes the listing ACTIVE on its own. */
@@ -187,6 +234,24 @@ export const platformSettingsSchema = z.object({
     /** The floor under every listing's own `minBookingDays`. */
     minBookingDays: z.number().int().min(1).max(365),
     maxMarketsPerCampaign: z.number().int().min(1).max(50),
+  }),
+  /**
+   * RF-1 (the owner, 25 Sep 2026): the reservation fee on a big checkout.
+   * A booking at or above `minCheckoutValue` may be reserved: the spots are
+   * held for `holdHours` once `feePct` of the total is paid, and the fee has
+   * to be paid within `payWithinMinutes` of reserving. It is folded into the
+   * checkout when the advertiser goes ahead; `retainPct` of it is kept when
+   * they do not, and the rest stays in their wallet.
+   */
+  booking: z.object({
+    reservationFee: z.object({
+      enabled: z.boolean(),
+      minCheckoutValue: z.number().min(0),
+      feePct: z.number().min(0).max(100),
+      payWithinMinutes: z.number().int().min(5).max(24 * 60),
+      holdHours: z.number().int().min(1).max(24 * 14),
+      retainPct: z.number().min(0).max(100),
+    }),
   }),
   publisher: z.object({
     spotInsightsVisible: z.boolean(),
@@ -265,6 +330,46 @@ export const platformSettingsSchema = z.object({
    */
   hr: z.object({
     workloadThresholds: workloadThresholdsSchema,
+  }),
+  /**
+   * CP-1: what the desk starts from when it records an agent's pay.
+   *
+   * These are DEFAULTS, not the figures anything is paid on — every agent
+   * carries their own `AgentCompensation` record, effective-dated, and that
+   * is what the commission reads. These fill the form.
+   *
+   * The days differ by grade because the work does: a field agent walking a
+   * market can work six days a week, while anyone selling to offices loses
+   * Saturday and Sunday — so G3 and G4 plan on twenty-two days, and their
+   * onboardings cost more each for exactly that reason.
+   */
+  agents: z.object({
+    compensation: z.object({
+      /** What an onboarding beyond the day's quota pays, as a percentage ON TOP of the planned unit cost. */
+      commissionUpliftPct: z.number().min(0).max(200),
+      byGrade: z.object({
+        G1: z.object({
+  monthlySalary: z.number().min(0).max(10_000_000),
+  dailyQuota: z.number().int().min(1).max(100),
+  workingDaysPerMonth: z.number().int().min(1).max(31),
+}),
+        G2: z.object({
+  monthlySalary: z.number().min(0).max(10_000_000),
+  dailyQuota: z.number().int().min(1).max(100),
+  workingDaysPerMonth: z.number().int().min(1).max(31),
+}),
+        G3: z.object({
+  monthlySalary: z.number().min(0).max(10_000_000),
+  dailyQuota: z.number().int().min(1).max(100),
+  workingDaysPerMonth: z.number().int().min(1).max(31),
+}),
+        G4: z.object({
+  monthlySalary: z.number().min(0).max(10_000_000),
+  dailyQuota: z.number().int().min(1).max(100),
+  workingDaysPerMonth: z.number().int().min(1).max(31),
+}),
+      }),
+    }),
   }),
   /** Lot G (Q130): what the status page calls degraded — read by `ops` over the five-minute samples. */
   health: z.object({
@@ -364,15 +469,30 @@ export const platformSettingsSchema = z.object({
       monthlyCap: z.number().min(0).max(100_000_000),
     }),
   }),
+  /**
+   * ST-3 / ST-4 (28 Sep 2026): the weekly sweep of files nothing on the
+   * platform refers to. It always MARKS; it removes a file only when
+   * `removeUnreferenced` is on and the file has stayed unreferenced for
+   * `graceDays`. Off by default — the owner turns it on after reviewing the
+   * list on Settings › Storage, because a wrong reference index must never
+   * delete a live file. The retention-governed purposes are never removed
+   * whatever this says (`uploads/sweep.service.ts`, `PROTECTED_PURPOSES`).
+   */
+  storage: z.object({
+    removeUnreferenced: z.boolean(),
+    graceDays: z.number().int().min(7).max(365),
+  }),
 });
 
 export type PlatformSettings = z.infer<typeof platformSettingsSchema>;
 
 export const DEFAULT_PLATFORM_SETTINGS: PlatformSettings = {
   kyc: { reviewSlaHours: 48, escalationSlaMultiplier: 2, printPartnerActivationRequiresKyc: false },
-  fraud: { scanThreshold: 0.6, scanLimitPerType: 500 },
+  fraud: { scanThreshold: 0.6, scanLimitPerType: 500, orderScreening: DEFAULT_ORDER_SCREENING },
   listings: { autoPublishOnVerification: true },
   marketplace: { minBookingDays: 1, maxMarketsPerCampaign: 3 },
+  // RF-1: the threshold is the owner's open figure; 5% / 60 min / 24 h / 10% are their answer of 25 Sep 2026.
+  booking: { reservationFee: { enabled: true, minCheckoutValue: 100_000, feePct: 5, payWithinMinutes: 60, holdHours: 24, retainPct: 10 } },
   publisher: { spotInsightsVisible: false },
   retention: { financialYears: 8, kycYears: 8 },
   support: {
@@ -414,6 +534,21 @@ export const DEFAULT_PLATFORM_SETTINGS: PlatformSettings = {
     criticalCount: 10,
   },
   hr: { workloadThresholds: { medium: 10, high: 25 } },
+  agents: {
+    compensation: {
+      commissionUpliftPct: 10,
+      byGrade: {
+        // G1 Field — autos and shop fronts, six-day week, the intern band.
+        G1: { monthlySalary: 12_000, dailyQuota: 10, workingDaysPerMonth: 26 },
+        // G2 Senior field — the same walk, a full salary.
+        G2: { monthlySalary: 25_000, dailyQuota: 10, workingDaysPerMonth: 26 },
+        // G3 Key accounts — advertisers, so offices: five-day week, thirty minutes each.
+        G3: { monthlySalary: 25_000, dailyQuota: 12, workingDaysPerMonth: 22 },
+        // G4 Enterprise — offices too, and the hour a real sale takes.
+        G4: { monthlySalary: 25_000, dailyQuota: 10, workingDaysPerMonth: 22 },
+      },
+    },
+  },
   health: { apiP95DegradedMs: 1500, sampleStaleMinutes: 15 },
   subscriptions: {
     publisher: {
@@ -462,6 +597,8 @@ export const DEFAULT_PLATFORM_SETTINGS: PlatformSettings = {
     referralCredit: 250,
     priority: { topUp: 200, monthlyCap: 25_000 },
   },
+  // ST-3: marking only, until the owner has looked at the list — removal is OFF by default.
+  storage: { removeUnreferenced: false, graceDays: 30 },
 };
 
 /**
@@ -481,9 +618,15 @@ const subscriptionPolicyPatch = subscriptionPolicySchema
   });
 export const platformSettingsPatchSchema = z.strictObject({
   kyc: sections.kyc.partial().strict().optional(),
-  fraud: sections.fraud.partial().strict().optional(),
+  /* Order fraud screening: the section's own fields merged one by one, so a desk saving the hold switch does not resend the thresholds. */
+  fraud: sections.fraud
+    .partial()
+    .strict()
+    .extend({ orderScreening: orderScreeningSchema.partial().strict().optional() })
+    .optional(),
   listings: sections.listings.partial().strict().optional(),
   marketplace: sections.marketplace.partial().strict().optional(),
+  booking: z.strictObject({ reservationFee: sections.booking.shape.reservationFee.partial().strict().optional() }).optional(),
   publisher: sections.publisher.partial().strict().optional(),
   retention: sections.retention.partial().strict().optional(),
   support: z
@@ -516,6 +659,25 @@ export const platformSettingsPatchSchema = z.strictObject({
     .strictObject({ workloadThresholds: z.strictObject({ medium: z.number().min(0).optional(), high: z.number().min(0).optional() }).optional() })
     .optional(),
   health: sections.health.partial().strict().optional(),
+  /* CP-1: the pay defaults, per grade — a partial patch per grade so a desk
+     saving one band does not have to resend the other three. */
+  agents: z
+    .strictObject({
+      compensation: z
+        .strictObject({
+          commissionUpliftPct: z.number().min(0).max(200).optional(),
+          byGrade: z
+            .strictObject({
+              G1: sections.agents.shape.compensation.shape.byGrade.shape.G1.partial().strict().optional(),
+              G2: sections.agents.shape.compensation.shape.byGrade.shape.G2.partial().strict().optional(),
+              G3: sections.agents.shape.compensation.shape.byGrade.shape.G3.partial().strict().optional(),
+              G4: sections.agents.shape.compensation.shape.byGrade.shape.G4.partial().strict().optional(),
+            })
+            .optional(),
+        })
+        .optional(),
+    })
+    .optional(),
   subscriptions: z
     .strictObject({ publisher: subscriptionPolicyPatch.optional(), advertiser: subscriptionPolicyPatch.optional() })
     .optional(),
@@ -546,6 +708,8 @@ export const platformSettingsPatchSchema = z.strictObject({
       priority: sections.leads.shape.priority.partial().strict().optional(),
     })
     .optional(),
+  /* ST-4: Settings › Storage — the removal switch and the grace days. */
+  storage: sections.storage.partial().strict().optional(),
 });
 export type PlatformSettingsPatch = z.infer<typeof platformSettingsPatchSchema>;
 
@@ -588,6 +752,9 @@ export async function updatePlatformSettings(
 ): Promise<{ before: PlatformSettings; after: PlatformSettings }> {
   const before = await loadPlatformSettings();
   const after = platformSettingsSchema.parse(deepMerge(before, patch as Record<string, unknown>));
+  // Order screening: the hold threshold may not sit below the review threshold, whichever side the patch moved.
+  const problem = orderScreeningProblem(after.fraud.orderScreening);
+  if (problem) throw new ApiError(400, 'VALIDATION_ERROR', problem, { field: 'fraud.orderScreening.holdThreshold' });
   await saveConfigObject(PLATFORM_SETTINGS_KEY, after);
   await invalidate(PLATFORM_SETTINGS_CACHE_KEY);
   return { before, after };

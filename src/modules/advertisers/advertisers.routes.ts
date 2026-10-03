@@ -70,8 +70,8 @@ export const advertiserRouter = Router();
 advertiserRouter.use(authenticate);
 
 /* Funnel — before /:id */
-advertiserRouter.get('/funnel', requireRole('ADMIN'), asyncHandler(funnelHandler));
-advertiserRouter.get('/funnel/rows', requireRole('ADMIN'), asyncHandler(funnelRowsHandler));
+advertiserRouter.get('/funnel', requireRole('ADMIN'), requirePermission('demand.view'), asyncHandler(funnelHandler));
+advertiserRouter.get('/funnel/rows', requireRole('ADMIN'), requirePermission('demand.view'), asyncHandler(funnelRowsHandler));
 
 /* The caller's own profile — before /:id, for the same reason as /funnel. */
 advertiserRouter.get('/me', asyncHandler(meHandler));
@@ -90,26 +90,26 @@ advertiserRouter.get('/mine', asyncHandler(advertiserBookHandler));
 
 /* Refund requests. Raised by support, decided by a different admin — the
    service refuses a decision from whoever raised it. Listed before /:id. */
-advertiserRouter.get('/refund-requests', requireRole('ADMIN'), asyncHandler(listRefundsHandler));
-advertiserRouter.patch('/refund-requests/:requestId/decide', requireRole('ADMIN'), asyncHandler(decideRefundHandler));
-advertiserRouter.patch('/refund-requests/:requestId/withdraw', requireRole('ADMIN'), asyncHandler(withdrawRefundHandler));
+advertiserRouter.get('/refund-requests', requireRole('ADMIN'), requirePermission('finance.view'), asyncHandler(listRefundsHandler));
+advertiserRouter.patch('/refund-requests/:requestId/decide', requireRole('ADMIN'), requirePermission('finance.approve'), asyncHandler(decideRefundHandler));
+advertiserRouter.patch('/refund-requests/:requestId/withdraw', requireRole('ADMIN'), requirePermission('finance.edit'), asyncHandler(withdrawRefundHandler));
 /* Lot B (Q41): finance paying an approved bank-transfer refund, or recording
    that the transfer bounced. Money out, so `finance.approve` on top of ADMIN. */
 advertiserRouter.post('/refund-requests/:requestId/mark-paid', requireRole('ADMIN'), requirePermission('finance.approve'), asyncHandler(markRefundPaidHandler));
 advertiserRouter.post('/refund-requests/:requestId/fail', requireRole('ADMIN'), requirePermission('finance.approve'), asyncHandler(failRefundHandler));
 
 /* Sweeps dormant credit. Idempotent, so a scheduler can run it freely. */
-advertiserRouter.post('/wallet/expire-credit', requireRole('ADMIN'), asyncHandler(expireCreditHandler));
+advertiserRouter.post('/wallet/expire-credit', requireRole('ADMIN'), requirePermission('finance.issue'), asyncHandler(expireCreditHandler));
 
 /* Accounts */
-advertiserRouter.get('/', requireRole('ADMIN'), asyncHandler(listAdvertisersHandler));
+advertiserRouter.get('/', requireRole('ADMIN'), requirePermission('demand.view'), asyncHandler(listAdvertisersHandler));
 advertiserRouter.post('/', asyncHandler(registerAdvertiserHandler));
 advertiserRouter.get('/:id', asyncHandler(getAdvertiserHandler));
 advertiserRouter.patch('/:id', asyncHandler(updateProfileHandler));
 // AG-5: the importance band — the agent grade's axis — set by the desk alone.
-advertiserRouter.patch('/:id/band', requireRole('ADMIN'), asyncHandler(setAdvertiserBandHandler));
+advertiserRouter.patch('/:id/band', requireRole('ADMIN'), requirePermission('demand.edit'), asyncHandler(setAdvertiserBandHandler));
 advertiserRouter.get('/:id/eligibility', asyncHandler(eligibilityHandler));
-advertiserRouter.patch('/:id/kyc', requireRole('ADMIN'), asyncHandler(kycDecisionHandler));
+advertiserRouter.patch('/:id/kyc', requireRole('ADMIN'), requirePermission('kyc.approve'), asyncHandler(kycDecisionHandler));
 
 /* Agreements */
 advertiserRouter.post('/:id/agreements/platform', asyncHandler(acceptPlatformHandler));
@@ -129,15 +129,15 @@ advertiserRouter.patch('/:id/brands/:brandId', asyncHandler(updateBrandHandler))
 /* Wallet */
 advertiserRouter.get('/:id/wallet', asyncHandler(walletHandler));
 advertiserRouter.get('/:id/wallet/statement', asyncHandler(statementHandler));
-advertiserRouter.post('/:id/wallet/top-up', requireRole('ADMIN'), asyncHandler(topUpHandler));
+advertiserRouter.post('/:id/wallet/top-up', requireRole('ADMIN'), requirePermission('finance.issue'), asyncHandler(topUpHandler));
 advertiserRouter.get('/:id/wallet/top-ups', asyncHandler(listTopUpsHandler));
-advertiserRouter.post('/:id/wallet/goodwill', requireRole('ADMIN'), asyncHandler(goodwillHandler));
-advertiserRouter.get('/:id/wallet/refundable', requireRole('ADMIN'), asyncHandler(refundableHandler));
-advertiserRouter.post('/:id/wallet/refund-requests', requireRole('ADMIN'), asyncHandler(requestRefundHandler));
+advertiserRouter.post('/:id/wallet/goodwill', requireRole('ADMIN'), requirePermission('finance.issue'), asyncHandler(goodwillHandler));
+advertiserRouter.get('/:id/wallet/refundable', requireRole('ADMIN'), requirePermission('finance.view'), asyncHandler(refundableHandler));
+advertiserRouter.post('/:id/wallet/refund-requests', requireRole('ADMIN'), requirePermission('finance.edit'), asyncHandler(requestRefundHandler));
 /* E6: the advertiser's own requests — owner or their agent, on the list contract. */
 advertiserRouter.get('/:id/wallet/refund-requests', asyncHandler(listAdvertiserRefundRequestsHandler));
 advertiserRouter.post('/:id/wallet/holds', asyncHandler(holdHandler));
-advertiserRouter.post('/:id/wallet/holds/:holdId/capture', requireRole('ADMIN'), asyncHandler(captureHoldHandler));
+advertiserRouter.post('/:id/wallet/holds/:holdId/capture', requireRole('ADMIN'), requirePermission('finance.edit'), asyncHandler(captureHoldHandler));
 advertiserRouter.post('/:id/wallet/holds/:holdId/release', asyncHandler(releaseHoldHandler));
 
 /**
@@ -148,7 +148,7 @@ advertiserRouter.post('/:id/wallet/holds/:holdId/release', asyncHandler(releaseH
  */
 export const refundDeskRouter = Router();
 refundDeskRouter.use(authenticate);
-refundDeskRouter.get('/', requireRole('ADMIN'), asyncHandler(refundDeskHandler));
+refundDeskRouter.get('/', requireRole('ADMIN'), requirePermission('finance.view'), asyncHandler(refundDeskHandler));
 
 /**
  * E6: the top-up register, mounted at /finance/top-ups for the same reason —
@@ -156,4 +156,4 @@ refundDeskRouter.get('/', requireRole('ADMIN'), asyncHandler(refundDeskHandler))
  */
 export const topUpDeskRouter = Router();
 topUpDeskRouter.use(authenticate);
-topUpDeskRouter.get('/', requireRole('ADMIN'), asyncHandler(topUpDeskHandler));
+topUpDeskRouter.get('/', requireRole('ADMIN'), requirePermission('finance.view'), asyncHandler(topUpDeskHandler));

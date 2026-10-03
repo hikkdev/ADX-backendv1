@@ -82,8 +82,8 @@ describe('the secret', () => {
   });
 
   it('is what the otpauth URI carries, with the issuer, digits and period every app reads', () => {
-    const uri = otpauthUri('asha.rao@adx.co', 'ABCDEFGHIJKLMNOP');
-    expect(uri.startsWith('otpauth://totp/ADX%3Aasha.rao%40adx.co?')).toBe(true);
+    const uri = otpauthUri('asha.rao@adx.in', 'ABCDEFGHIJKLMNOP');
+    expect(uri.startsWith('otpauth://totp/ADX%3Aasha.rao%40adx.in?')).toBe(true);
     const params = new URL(uri).searchParams;
     expect(params.get('secret')).toBe('ABCDEFGHIJKLMNOP');
     expect(params.get('issuer')).toBe('ADX');

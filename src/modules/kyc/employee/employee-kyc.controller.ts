@@ -1,5 +1,6 @@
 import type { Request, Response } from 'express';
 import { ApiError } from '../../../shared/errors';
+import { includesInactive } from '../../../shared/party-status';
 import type { KycStatus } from '../../../shared/database';
 import { kycRequestSchema, pagination, reviewSchema } from '../kyc.schema';
 import { employeeKycDocumentsSchema, employeeKycSearchSchema, employeeKycStateFilterSchema, employeeKycStatusFilterSchema } from './employee-kyc.schema';
@@ -22,6 +23,8 @@ export async function listEmployeeKycsHandler(req: Request, res: Response): Prom
   const where = {
     ...(state.data ? { state: state.data } : parsed.data ? { status: parsed.data as KycStatus } : {}),
     ...(q.success && q.data ? { q: q.data } : {}),
+    // Account lifecycle (2 Oct 2026): `?include=inactive` puts deactivated and closed staff back on the queue.
+    ...(includesInactive(req.query['include']) ? { includeInactive: true } : {}),
   };
   const { items, meta } = await listEmployeeKycs(where, page, pageSize);
   res.json({ success: true, data: items, meta });

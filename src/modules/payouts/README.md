@@ -239,7 +239,13 @@ controller: the shaped batch, its bank account, its lines, `createdBy`, `approve
 updates the batch it holds from the answer. `GET /finance/incentives` rows carry `publisherId` and `advertiserId` and the
 query takes `?event=` (comma list) and `?q=` (the note, the order id or the agent's name).
 `GET /finance/ledger` takes `?kind=` (comma list), `?from=&to=` (occurredAt) and `?amount=` (a leg of
-exactly that absolute value). `POST /finance/withdrawals/on-behalf` keeps its `note` on the row as
+exactly that absolute value), `?q=` (the transaction's reference or note, case-insensitive). With
+`?paged=1` it answers `{ rows, total, nextCursor, totals: { debit, credit } }` — each row adds `debit`
+(its negative legs as a positive figure), `reversesReference` and `reversedBy` — and without it the bare
+array as before. `GET /finance/ledger/export.csv` takes the same filters (no page) and writes one line
+per leg (`reference, kind, occurredAtIST, note, accountCode, accountName, debit, credit,
+reversesReference`), refused 422 with a sentence past 50,000 legs and audited `LEDGER_EXPORTED`
+(the filters and the leg count) before the first byte. `POST /finance/withdrawals/on-behalf` keeps its `note` on the row as
 `decisionNote` as well as in the audit metadata.
 
 **ADX bank accounts** — `GET`/`PUT /finance/bank-accounts`: what a batch is drawn on and a statement
@@ -305,6 +311,52 @@ incentive; nothing here credits a wallet.
 
 `incentiveSummary` counts the two new events (`installations`, `advertisersOnboarded`) the same way
 it counts the rest.
+
+## CP-4 (23 Sep 2026): lead rewards are advertiser-side, and a key can pay nothing
+
+The owner's decision: **lead rewards go to advertiser agents.** They are the
+ones bringing revenue; a publisher agent is paid to onboard, and CP-1's
+salary-and-quota model is what pays them for it.
+
+So each lead event is seeded twice — the advertiser's figure, and a
+`*:PUBLISHER` row that exists to pay nothing:
+
+| Event | `*:ADVERTISER` | `*:PUBLISHER` |
+| --- | --- | --- |
+| `LEAD_CONVERTED` | ₹100 | pays nothing |
+| `LEAD_ACTIVATED` | ₹750 | pays nothing |
+| `LEAD_RETAINED` | ₹100 | pays nothing |
+
+No unqualified `*` row survives for a lead event: one would pay both sides
+through the fallback.
+
+**Why a row rather than a zero.** Resolution runs `TIER:SIDE → TIER →
+`*:SIDE` → `*`, so only a narrower row can stop a broader one — switching a
+side off with no row at all does nothing wherever a `*` exists. And a row
+priced at `0.00` is indistinguishable from a price nobody has set yet.
+`IncentiveRate.paysNothing` is the difference between *free* and *off*.
+`rateFor` answers `null` for a switched-off key exactly as it does for an
+unpriced one, so every caller that already prints nothing and records nothing
+kept working without learning the flag exists.
+
+**The seed guard is now per KEY, not per event.** It used to skip an event
+that had any row at all — which on a database carrying the old
+`LEAD_CONVERTED *` row would have skipped BOTH new keys and left the hunt
+quietly paying publisher-side leads. By key, a platform gains exactly the
+keys it is missing and keeps every price the desk has set.
+
+**The check constraint had to be widened, and only a probe found it.**
+DR 04 put `CHECK ("amount" > 0)` on `IncentiveRate` — rightly: a rate of zero
+set by accident pays nobody and looks like a price. CP-4's off rows are zero
+on purpose and say so, so the constraint became
+`CHECK ("amount" > 0 OR "paysNothing")` rather than being dropped. Every unit
+test above this ran against a fake repository and passed while the real
+INSERT could not have succeeded; the first run against the database failed on
+the constraint. Migration `20260923130000_cp4_pays_nothing_constraint`.
+
+The desk switches a key off from Finance → Settings (the checkbox under the
+rate form); the row then prints "Pays nothing" rather than "₹0.00".
+Tests: `__tests__/cp4-lead-rewards-side.test.ts`.
 
 ## What is not built
 

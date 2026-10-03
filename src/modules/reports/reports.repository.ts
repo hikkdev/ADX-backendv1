@@ -9,7 +9,7 @@ import type { ListQuery } from '../../shared/pagination';
  * Two interfaces. `ReportsRepository` is this module's own tables — the
  * runs and the schedules — plus the one read outside them a schedule with
  * no recipients needs (the admins' addresses). `ReportData` is what the
- * catalogue's twelve queries read: a read-only walk across the other
+ * catalogue's thirteen queries read: a read-only walk across the other
  * modules' tables, the way `admin-overview` reads the ledger, because a
  * report is a join across domains and no module owns the join. Nothing in
  * here writes another module's row.
@@ -108,7 +108,7 @@ export interface ReportsRepository {
 /** G11-2: the reserved key `recordMailed` writes into `ReportRun.filters` — never a filter a kind declares. */
 export const MAILED_KEY = '$mailed';
 
-/* ── What the twelve reports read ────────────────────────────────── */
+/* ── What the thirteen reports read ────────────────────────────────── */
 
 export interface BookingRow {
   kind: 'CAMPAIGN' | 'PACKAGE';

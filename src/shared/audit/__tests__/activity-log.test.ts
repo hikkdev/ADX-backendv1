@@ -111,7 +111,7 @@ describe('logActivity', () => {
 describe('findActivity', () => {
   beforeEach(() => {
     prisma.activityLog.findMany.mockResolvedValue([
-      { id: 'a1', action: 'ORDER_APPROVED', module: 'orders', user: { id: 'u1', name: 'Asha', email: 'asha@adx.co' } },
+      { id: 'a1', action: 'ORDER_APPROVED', module: 'orders', user: { id: 'u1', name: 'Asha', email: 'asha@adx.in' } },
     ]);
     prisma.activityLog.count.mockResolvedValue(1);
     prisma.activityLog.groupBy.mockResolvedValue([
@@ -133,7 +133,7 @@ describe('findActivity', () => {
       pageSize: 10,
       counts: { orders: 7, '(none)': 2 },
     });
-    expect(page.items[0]).toMatchObject({ user: { name: 'Asha', email: 'asha@adx.co' } });
+    expect(page.items[0]).toMatchObject({ user: { name: 'Asha', email: 'asha@adx.in' } });
 
     const args = prisma.activityLog.findMany.mock.calls[0]![0];
     expect(args).toMatchObject({

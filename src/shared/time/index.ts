@@ -12,6 +12,16 @@
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * An instant as India reads it, ISO 8601 with the offset written out —
+ * `2026-09-09T15:30:00+05:30`. For files a person opens beside a bank
+ * statement, where a UTC `Z` would put a late-evening posting on the
+ * wrong day.
+ */
+export function isoIST(at: Date): string {
+  return new Date(at.getTime() + IST_OFFSET_MS).toISOString().slice(0, 19) + '+05:30';
+}
+
 export function dayWindowIST(now: Date): { start: Date; end: Date } {
   const shifted = new Date(now.getTime() + IST_OFFSET_MS);
   const midnight = Date.UTC(shifted.getUTCFullYear(), shifted.getUTCMonth(), shifted.getUTCDate());

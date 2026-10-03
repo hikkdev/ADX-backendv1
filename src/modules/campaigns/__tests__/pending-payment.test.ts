@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Decimal } from '../../../shared/money';
 
+/* AGE-1: the order gate, passing unless a test says otherwise (its own tests: shared/age-gate). */
+const ageGate = vi.hoisted(() => ({ assertPartyAdultForOrders: vi.fn(), assertAdultForOrders: vi.fn() }));
+vi.mock('../../../shared/age-gate', async (importOriginal) => ({ ...(await importOriginal<object>()), ...ageGate }));
+
 /**
  * Lot C (Q88): PENDING_PAYMENT made real.
  *
@@ -18,6 +22,7 @@ const {
   holdForCampaign,
   captureCampaignHold,
   placeOrder,
+  announceOrdersPaid,
   issueTrackingCodes,
   createNotification,
   listAdminUserIds,
@@ -37,6 +42,7 @@ const {
   holdForCampaign: vi.fn(),
   captureCampaignHold: vi.fn(),
   placeOrder: vi.fn(),
+  announceOrdersPaid: vi.fn(),
   issueTrackingCodes: vi.fn(),
   createNotification: vi.fn(),
   listAdminUserIds: vi.fn(),
@@ -56,7 +62,7 @@ vi.mock('../../advertisers', () => ({
   captureCampaignHold,
   releaseCampaignHold: vi.fn(),
 }));
-vi.mock('../../orders', () => ({ placeOrder, notifyAdmins: vi.fn() }));
+vi.mock('../../orders', () => ({ placeOrder, notifyAdmins: vi.fn(), announceOrdersPaid }));
 vi.mock('../tracking.service', () => ({ issueTrackingCodes }));
 vi.mock('../../agreements', () => ({
   transactionAcceptance: vi.fn(async (kind: string) => ({ kind, accepted: true, templateVersion: 1, currentVersion: 1, current: true })),

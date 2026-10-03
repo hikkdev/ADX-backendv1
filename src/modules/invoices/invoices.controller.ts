@@ -225,6 +225,14 @@ export async function advertiserInvoicesHandler(req: Request, res: Response): Pr
   res.json({ success: true, data: await listInvoicesForAdvertiser(advertiserId) });
 }
 
+/** WG-1: GET /advertisers/:id/invoices/:invoiceId — the invoice with its lines, as the desk's read shapes it. */
+export async function advertiserInvoiceHandler(req: Request, res: Response): Promise<void> {
+  const advertiserId = req.params['id'] as string;
+  await assertMayActFor(req, advertiserId, 'READ');
+  const invoice = await getInvoiceForAdvertiser(advertiserId, req.params['invoiceId'] as string);
+  res.json({ success: true, data: shapeInvoice(invoice) });
+}
+
 export async function advertiserInvoicePdfHandler(req: Request, res: Response): Promise<void> {
   const advertiserId = req.params['id'] as string;
   await assertMayActFor(req, advertiserId, 'READ');

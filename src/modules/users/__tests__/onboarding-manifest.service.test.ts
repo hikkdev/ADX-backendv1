@@ -54,7 +54,7 @@ describe('onboardingManifest', () => {
     expect(manifest).toMatchObject({ party: 'PUBLISHER', accountType: 'BUSINESS', mode: 'partial' });
     expect(manifest.steps.map((s) => s.key)).toEqual(['selfie', 'checklist']);
     expect(manifest.verification).toEqual({
-      digio: { available: false, provider: 'MANUAL', retryAfter: 3600 },
+      digio: { available: false, provider: 'MANUAL', retryAfter: 3600, backup: false },
       liveness: { required: true, status: 'PENDING' },
       kycStatus: 'NEEDS_INFO',
       reviewNote: 'Blurry',

@@ -8,7 +8,7 @@ import { findWorkingAgentProfile } from '../agents';
 import { listContentCategories } from '../listings';
 import { IMAGE_CACHE_CONTROL, clampSize } from '../qr';
 import { withSpotReviews } from './spot-review.port';
-import {
+import { analyseCreativesSchema,
   analyticsQuerySchema,
   authorizeSchema,
   bulkCreativeReviewSchema,
@@ -21,19 +21,18 @@ import {
   inventoryQuerySchema,
   landingPageListQuerySchema,
   landingPagePatchSchema,
+  launchQueueQuerySchema,
   listCampaignsQuerySchema,
   patchCampaignSchema,
   redemptionSchema,
   requestChangesSchema,
   reviewQueueQuerySchema,
   unpublishLandingPageSchema,
-  uploadCreativeSchema,
-} from './campaigns.schema';
+  uploadCreativeSchema, designQuoteSchema, designQuoteResponseSchema } from './campaigns.schema';
 import {
   generateLandingPage,
   getLandingPage,
   landingPageSummary,
-  listLandingPages,
   patchLandingPage,
   publishLandingPage,
   renderLandingPage,
@@ -43,12 +42,14 @@ import {
 import {
   acceptDesignedCreative,
   getCreativeForReview,
+  listDesignRequests,
   listReviewQueue,
   requestDesignChanges,
   reviewCreative,
   reviewCreatives,
   submitCreative,
 } from './moderation.service';
+import { analyseCreative, analyseCreatives, latestCreativeAnalysis } from './creative-analysis.service';
 import {
   createDraft,
   discardDraft,
@@ -60,9 +61,12 @@ import {
   withMarketWarning,
   type Actor,
 } from './campaigns.service';
-import { authorizeCampaign, authorizeOnBehalf, cancelCampaign, reviewCampaign, setCart, submitForPayment } from './checkout.service';
+import { applyPromoToCampaign, authorizeOnBehalf, checkoutCampaign, cancelCampaign, cancelImpact, quoteDesign, removePromoFromCampaign, respondToDesignQuote, reservationFeeOffer, reviewCampaign, setCart, submitForPayment } from './checkout.service';
+import { payReservationFeeFromWallet, reservationView, reserveCampaign } from './reservation.service';
+import { applyPromoCodeSchema } from '../promo-codes';
 import { matchingInventory } from './inventory.service';
-import { campaignAnalytics, portfolioAnalytics } from './analytics.service';
+import { campaignAnalytics, campaignPerformance, portfolioAnalytics } from './analytics.service';
+import { consoleDetailExtras, launchQueue, listLandingPagesForConsole, remindPayment } from './console.service';
 import { linkCodesToEngine, printedUrl, recordInteraction, recordRedemptions, resolveScan, trackingUrl } from './tracking.service';
 import { renderDynamic } from '../../shared/qr-engine';
 import type { CampaignAggregate } from './campaigns.repository';
@@ -167,13 +171,48 @@ async function campaignDetailView(campaign: CampaignAggregate) {
   // QR-16: what stops a paid campaign from going live — the advertiser's
   // verification — so the detail can say "paid; verify to launch".
   const launchBlockedBy = context?.kycStatus && context.kycStatus !== 'VERIFIED' ? ['KYC'] : [];
-  return { ...withTriggerPlan(marked), city: campaign.targetLocation, spotCount: campaign.spots.length, refund, landingPage, launchBlockedBy };
+  // RF-1: the reservation as it stands, or null.
+  return { ...withTriggerPlan(marked), city: campaign.targetLocation, spotCount: campaign.spots.length, refund, landingPage, launchBlockedBy, reservation: reservationView(campaign) };
 }
 
 export async function getCampaignHandler(req: Request, res: Response): Promise<void> {
   const actor = await resolveActor(req);
   const campaign = await getCampaign(req.params['id'] as string, actor);
-  res.json({ success: true, data: await campaignDetailView(campaign) });
+  const detail = await campaignDetailView(campaign);
+  // The Campaigns lot: ADX's page adds the "Placed by" line and the waiting
+  // banner (`placedBy`, `waitingOn`, `waitingFacts`, `paidAmount`, `daysLeft`).
+  res.json({ success: true, data: actor.isAdmin ? { ...detail, ...(await consoleDetailExtras(campaign.id)) } : detail });
+}
+
+/* ------------------------------------------------------------------ */
+/* The console (the Campaigns lot, 2 Oct 2026)                         */
+/* ------------------------------------------------------------------ */
+
+/** GET /campaigns/launch-queue — ADMIN: paid campaigns that cannot go live yet, oldest-waiting first. */
+export async function launchQueueHandler(req: Request, res: Response): Promise<void> {
+  const query = parse<z.infer<typeof launchQueueQuerySchema>>(launchQueueQuerySchema, req.query);
+  res.json({ success: true, data: await launchQueue(query) });
+}
+
+/** POST /campaigns/:id/remind-payment — ADMIN: nudge the advertiser to pay; once a day per campaign; audited. */
+export async function remindPaymentHandler(req: Request, res: Response): Promise<void> {
+  const actor = await resolveActor(req);
+  const campaign = await getCampaign(req.params['id'] as string, actor);
+  res.json({ success: true, data: await remindPayment(campaign, actor.userId, new Date(), req) });
+}
+
+/** GET /campaigns/:id/performance — the owner or ADX: lifetime and daily scans, views, CTA presses, enquiries. */
+export async function campaignPerformanceHandler(req: Request, res: Response): Promise<void> {
+  const actor = await resolveActor(req);
+  const campaign = await getCampaign(req.params['id'] as string, actor);
+  res.json({ success: true, data: await campaignPerformance(campaign) });
+}
+
+/** GET /campaigns/:id/cancel-impact — whoever may cancel: what the cancel would release, refund and forfeit; writes nothing. */
+export async function cancelImpactHandler(req: Request, res: Response): Promise<void> {
+  const actor = await resolveActor(req);
+  const campaign = await getCampaign(req.params['id'] as string, actor);
+  res.json({ success: true, data: await cancelImpact(campaign) });
 }
 
 /**
@@ -295,13 +334,33 @@ export async function requestCreativeChangesHandler(req: Request, res: Response)
 
 /* Lot D (Q44): the desk. ADMIN at the route. */
 
+// GET /campaigns/design-requests — CR-1: every campaign on the ADX Design
+// Agency path that ADX still owes a design, oldest flight first.
+export async function designRequestsHandler(_req: Request, res: Response): Promise<void> {
+  res.json({ success: true, data: { items: await listDesignRequests() } });
+}
+
 export async function reviewQueueHandler(req: Request, res: Response): Promise<void> {
   const query = parse<z.infer<typeof reviewQueueQuerySchema>>(reviewQueueQuerySchema, req.query);
   res.json({ success: true, data: await listReviewQueue(query) });
 }
 
 export async function getCreativeHandler(req: Request, res: Response): Promise<void> {
-  res.json({ success: true, data: await getCreativeForReview(req.params['creativeId'] as string) });
+  const creativeId = req.params['creativeId'] as string;
+  const [creative, analysis] = await Promise.all([getCreativeForReview(creativeId), latestCreativeAnalysis(creativeId)]);
+  // VA-1: the latest vision run rides with the desk's read; null when nobody has asked.
+  res.json({ success: true, data: { ...creative, analysis } });
+}
+
+/** VA-1: `POST /campaigns/creatives/:creativeId/analyse` — the desk asks the vision model. On demand, never on upload. */
+export async function analyseCreativeHandler(req: Request, res: Response): Promise<void> {
+  res.json({ success: true, data: await analyseCreative(req.params['creativeId'] as string, { userId: req.user!.sub, req }) });
+}
+
+/** VA-4: `POST /campaigns/creatives/analyse { creativeIds? }` — the queue's batch: the selection, or everything pending with no reading. */
+export async function analyseCreativesHandler(req: Request, res: Response): Promise<void> {
+  const body = parse<z.infer<typeof analyseCreativesSchema>>(analyseCreativesSchema, req.body ?? {});
+  res.json({ success: true, data: await analyseCreatives({ userId: req.user!.sub, req }, body.creativeIds) });
 }
 
 export async function reviewCreativeHandler(req: Request, res: Response): Promise<void> {
@@ -353,7 +412,24 @@ export async function deleteCreativeHandler(req: Request, res: Response): Promis
 export async function reviewHandler(req: Request, res: Response): Promise<void> {
   const actor = await resolveActor(req);
   const campaign = await getCampaign(req.params['id'] as string, actor);
-  res.json({ success: true, data: await reviewCampaign(campaign) });
+  const review = await reviewCampaign(campaign);
+  // RF-1: whether this checkout may be reserved for a fee, and on what terms.
+  res.json({ success: true, data: { ...review, reservationFee: await reservationFeeOffer(review.total) } });
+}
+
+/** PC-1: POST /campaigns/:id/promo { code } — the code goes on; answers the review re-priced. */
+export async function applyPromoHandler(req: Request, res: Response): Promise<void> {
+  const body = parse<z.infer<typeof applyPromoCodeSchema>>(applyPromoCodeSchema, req.body);
+  const actor = await resolveActor(req);
+  const campaign = await getCampaign(req.params['id'] as string, actor);
+  res.json({ success: true, data: await applyPromoToCampaign(campaign, body.code, actor.userId) });
+}
+
+/** PC-1: DELETE /campaigns/:id/promo — the code comes off; answers the review re-priced. */
+export async function removePromoHandler(req: Request, res: Response): Promise<void> {
+  const actor = await resolveActor(req);
+  const campaign = await getCampaign(req.params['id'] as string, actor);
+  res.json({ success: true, data: await removePromoFromCampaign(campaign, actor.userId) });
 }
 
 /**
@@ -387,7 +463,7 @@ export async function authorizeHandler(req: Request, res: Response): Promise<voi
   // audit row with the money and status columns before and after.
   const result = actor.isAdmin
     ? await authorizeOnBehalf(campaign, { confirm: body.confirm, approvedByUserId: body.approvedByUserId }, actor)
-    : await authorizeCampaign(campaign);
+    : await checkoutCampaign(campaign, actor);
   if (actor.isAdmin) {
     await logActivity(actor.userId, 'CAMPAIGN_AUTHORIZED_ON_BEHALF', {
       req,
@@ -620,7 +696,8 @@ export async function publishLandingPageHandler(req: Request, res: Response): Pr
 /** ADMIN: every page, by status — the review list. */
 export async function listLandingPagesHandler(req: Request, res: Response): Promise<void> {
   const query = parse<z.infer<typeof landingPageListQuerySchema>>(landingPageListQuerySchema, req.query);
-  const page = await listLandingPages(query);
+  // The Campaigns lot: each row with its address, title, advertiser and numbers; `q` searches.
+  const page = await listLandingPagesForConsole(query);
   res.json({ success: true, data: { ...page, page: query.page, pageSize: query.pageSize } });
 }
 
@@ -645,4 +722,40 @@ export async function interactionHandler(req: Request, res: Response): Promise<v
     city: req.get('cf-ipcity') ?? null,
   });
   res.json({ success: true, data: result });
+}
+
+/* ── DQ-1: ADX's design quote ─────────────────────────────────────── */
+
+/** POST /campaigns/:id/design-quote — the desk's price (ADMIN, content.edit). */
+export async function designQuoteHandler(req: Request, res: Response): Promise<void> {
+  const body = parse<z.infer<typeof designQuoteSchema>>(designQuoteSchema, req.body);
+  const actor = await resolveActor(req);
+  const campaign = await getCampaign(req.params['id'] as string, actor);
+  res.json({ success: true, data: await campaignDetailView(await quoteDesign(campaign, body, actor.userId)) });
+}
+
+/** POST /campaigns/:id/design-quote/respond { decision } — the advertiser's answer; answers the detail view. */
+export async function designQuoteResponseHandler(req: Request, res: Response): Promise<void> {
+  const body = parse<z.infer<typeof designQuoteResponseSchema>>(designQuoteResponseSchema, req.body);
+  const actor = await resolveActor(req);
+  const campaign = await getCampaign(req.params['id'] as string, actor);
+  res.json({ success: true, data: await campaignDetailView(await respondToDesignQuote(campaign, body.decision, actor.userId)) });
+}
+
+/* ── RF-1: the reservation fee ──────────────────────────────────── */
+
+/** POST /campaigns/:id/reserve — hold the spots against the fee. */
+export async function reserveHandler(req: Request, res: Response): Promise<void> {
+  const actor = await resolveActor(req);
+  const campaign = await getCampaign(req.params['id'] as string, actor);
+  const result = await reserveCampaign(campaign, actor);
+  res.json({ success: true, data: { campaign: await campaignDetailView(result.campaign), review: result.review, reservation: result.reservation } });
+}
+
+/** POST /campaigns/:id/reserve/pay — the fee, from the wallet balance. A gateway pays it through `POST /payments/intents { purpose: 'RESERVATION_FEE' }`. */
+export async function payReservationFeeHandler(req: Request, res: Response): Promise<void> {
+  const actor = await resolveActor(req);
+  const campaign = await getCampaign(req.params['id'] as string, actor);
+  const updated = await payReservationFeeFromWallet(campaign, actor);
+  res.json({ success: true, data: { campaign: await campaignDetailView(updated), reservation: reservationView(updated) } });
 }

@@ -81,7 +81,7 @@ workRouter.get('/tasks', asyncHandler(listTasksHandler));
 workRouter.post('/tasks', edit, asyncHandler(createTaskHandler));
 workRouter.get('/tasks/:taskId', asyncHandler(getTaskHandler));
 workRouter.patch('/tasks/:taskId', edit, asyncHandler(patchTaskHandler));
-workRouter.delete('/tasks/:taskId', edit, asyncHandler(deleteTaskHandler));
+workRouter.delete('/tasks/:taskId', edit, requirePermission('work.delete'), asyncHandler(deleteTaskHandler));
 workRouter.post('/tasks/:taskId/status', edit, asyncHandler(statusHandler));
 workRouter.post('/tasks/:taskId/review', asyncHandler(reviewHandler));
 workRouter.put('/tasks/:taskId/assignees', edit, asyncHandler(assigneesHandler));
@@ -89,6 +89,7 @@ workRouter.put('/tasks/:taskId/reviewers', edit, asyncHandler(reviewersHandler))
 workRouter.put('/tasks/:taskId/prerequisites', edit, asyncHandler(prerequisitesHandler));
 workRouter.post('/tasks/:taskId/comments', asyncHandler(commentHandler));
 workRouter.post('/tasks/:taskId/time-logs', asyncHandler(timeLogHandler));
+/* RP-3: not `work.delete` — a time log is the assignee's own, and the service lets its owner or work.edit remove it. */
 workRouter.delete('/tasks/:taskId/time-logs/:logId', asyncHandler(deleteTimeLogHandler));
 
 workRouter.get('/issues', asyncHandler(listIssuesHandler));

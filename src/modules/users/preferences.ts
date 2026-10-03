@@ -30,6 +30,11 @@ export const PREFERENCE_KEYS = {
   'app.dataSaver': { default: false as boolean | string },
   /** standard · satellite · terrain. */
   'app.mapStyle': { default: 'standard' as boolean | string },
+  /* GC-2 (23 Sep 2026): the GPS camera's two toggles, remembered like a real camera app remembers its flash. */
+  /** on · off · default — `default` is "not chosen", so each flow's own default stands (proofs on, listing photos off). */
+  'app.cameraGps': { default: 'default' as boolean | string },
+  /** off · on · auto. */
+  'app.cameraFlash': { default: 'off' as boolean | string },
 
   /* Quiet hours (Figma 4453:31) */
   'notifications.doNotDisturb': { default: false as boolean | string },

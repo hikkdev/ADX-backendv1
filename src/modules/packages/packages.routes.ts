@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { asyncHandler } from '../../shared/http';
-import { authenticate, requireRole } from '../../shared/auth';
+import { authenticate, requireRole, requirePermission } from '../../shared/auth';
 import { packageLinkLimiter } from '../../shared/security/rate-limit';
 import {
   acceptTermsHandler,
@@ -38,12 +38,16 @@ export const packageRouter = Router();
 packageRouter.use(authenticate);
 
 /* Steps 1 and 2: the catalogue, then what a choice costs. */
-packageRouter.get('/catalogue', asyncHandler(catalogueHandler));
+/* 26 Sep 2026: the party roles are admitted by role ahead of the permission
+   (the RP-2 pattern) — before this every advertiser and agent was refused
+   with 403 because a bare `requirePermission` is strict. An ADMIN still
+   needs `marketplace.view`. */
+packageRouter.get('/catalogue', requireRole('ADVERTISER', 'AGENT_ADVERTISER', 'ADMIN'), requirePermission('marketplace.view'), asyncHandler(catalogueHandler));
 /* Lot D (Q94): the catalogue editor. Sales keep their snapshot; entitlements
    stay copy. ADMIN, audited in the service. */
-packageRouter.patch('/catalogue/plans/:tier', requireRole('ADMIN'), asyncHandler(updatePlanHandler));
-packageRouter.post('/catalogue/add-ons', requireRole('ADMIN'), asyncHandler(createAddOnHandler));
-packageRouter.patch('/catalogue/add-ons/:code', requireRole('ADMIN'), asyncHandler(updateAddOnHandler));
+packageRouter.patch('/catalogue/plans/:tier', requireRole('ADMIN'), requirePermission('finance.edit'), asyncHandler(updatePlanHandler));
+packageRouter.post('/catalogue/add-ons', requireRole('ADMIN'), requirePermission('finance.edit'), asyncHandler(createAddOnHandler));
+packageRouter.patch('/catalogue/add-ons/:code', requireRole('ADMIN'), requirePermission('finance.edit'), asyncHandler(updateAddOnHandler));
 packageRouter.post('/quote', asyncHandler(quoteHandler));
 
 /* The advertiser's own live plan. Declared before /:id so it is not read as one. */
@@ -70,7 +74,7 @@ packageRouter.post('/sales/:id/accept-terms', asyncHandler(acceptTermsHandler));
 packageRouter.post('/sales/:id/pay', asyncHandler(payHandler));
 packageRouter.post(
   '/sales/:id/record-payment',
-  requireRole('ADMIN'),
+  requireRole('ADMIN'), requirePermission('finance.edit'),
   asyncHandler(recordPaymentHandler)
 );
 

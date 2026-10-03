@@ -217,6 +217,15 @@ export interface FlowPatchResult {
  * `version` other than the current one is a stale editor: 409.
  */
 export async function patchFlow(key: string, body: unknown): Promise<FlowPatchResult> {
+  // FL-1 (27 Sep 2026): a flow exists only when the code defines it — the
+  // apps render a flow through code that knows its key, so a key the code
+  // does not know would be stored and never drawn. Refused by name.
+  if (!KNOWN_FLOWS.some((flow) => flow.key === key)) {
+    throw new ApiError(400, 'UNKNOWN_FLOW', 'A flow exists when the code defines it — add it to KNOWN_FLOWS first', {
+      key,
+      known: KNOWN_FLOWS.map((flow) => flow.key),
+    });
+  }
   const next = parseFlow(key, body);
   const row = await repository.find();
   const document: ConfigDocument = isObject(row?.value) ? { ...(row!.value as ConfigDocument) } : { ...FALLBACK_CONFIG };

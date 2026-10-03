@@ -31,6 +31,16 @@ feature('publisher.dashboard', {
   routes: ['/api/v1/publishers/me/dashboard', '/api/v1/publishers/me/listings'],
 });
 
+feature('publisher.availability', {
+  surfaces: ['WEBSITE', 'APP_USER', 'BACKEND'],
+  owner: 'supply',
+  kind: 'FEATURE',
+  launch: 'on',
+  description:
+    'BD-1: the publisher\'s availability calendar — every spot over a window with its bookings, holds and blocked dates.',
+  routes: ['/api/v1/publishers/me/availability'],
+});
+
 feature('publisher.kyc-desk', {
   surfaces: ['APP_USER', 'CONSOLE'],
   owner: 'platform',

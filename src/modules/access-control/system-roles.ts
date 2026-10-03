@@ -20,8 +20,9 @@ import { permissionsOfGroup, permissionsOfTier } from '../../shared/auth';
 
 export const SUPER_ADMIN_ROLE = 'Super admin';
 
-/** view + edit + approve on one group. */
-const through = (...groups: string[]): string[] => groups.flatMap((group) => permissionsOfGroup(group));
+/** view + edit + approve on one group — the tiers, never its named powers. */
+const through = (...groups: string[]): string[] =>
+  groups.flatMap((group) => permissionsOfGroup(group).filter((id) => /\.(view|edit|approve)$/.test(id)));
 
 /** view only on the groups named. */
 const viewOf = (...groups: string[]): string[] =>
@@ -44,21 +45,38 @@ export const SYSTEM_ROLES: readonly SystemRoleSpec[] = [
   },
   {
     name: 'Ops manager',
-    description: 'Runs the marketplace day to day: supply, demand, orders, support, comms and the work desk. No money, no KYC sign-off, no roles.',
+    description:
+      'Runs the marketplace day to day: publishers and listings, pricing, print partners, agents, demand, orders, support, comms, content and the work desk — and may suspend, import and delete on those desks. No money, no KYC sign-off, no jobs, no roles.',
     isSystem: false,
     permissions: () => [
       // Lot AA: the work desk is the ops manager's — tasks, reviews and hours.
-      ...through('marketplace', 'supply', 'demand', 'comms', 'support', 'content', 'work'),
+      ...through('marketplace', 'supply', 'pricing', 'print', 'agents', 'demand', 'comms', 'support', 'content', 'work'),
       ...viewOf('finance', 'kyc', 'growth', 'settings'),
+      // RP-3: the powers the desks need day to day, none of the money or the system.
+      'supply.suspend',
+      'demand.suspend',
+      'agents.suspend',
+      'print.suspend',
+      'marketplace.import',
+      'supply.import',
+      'pricing.import',
+      'marketplace.delete',
+      'pricing.delete',
+      'content.delete',
+      'support.delete',
+      'work.delete',
+      'marketplace.export',
     ],
   },
   {
     name: 'Finance',
-    description: 'Payouts, refunds, wallets and the revenue settings — with sign-off. Reads the rest of the marketplace.',
+    description: 'Payouts, refunds, wallets and the revenue settings — with sign-off, credit issue and exports. Reads the rest of the marketplace.',
     isSystem: false,
     permissions: () => [
       ...through('finance'),
-      ...viewOf('marketplace', 'supply', 'demand', 'kyc', 'support', 'settings'),
+      'finance.issue',
+      'finance.export',
+      ...viewOf('marketplace', 'supply', 'pricing', 'print', 'agents', 'demand', 'kyc', 'support', 'settings'),
       'system.audit.export',
     ],
   },
@@ -66,7 +84,7 @@ export const SYSTEM_ROLES: readonly SystemRoleSpec[] = [
     name: 'KYC reviewer',
     description: 'The verification queues for every party, with sign-off. Reads the parties it verifies and nothing else.',
     isSystem: false,
-    permissions: () => [...through('kyc'), ...viewOf('supply', 'demand', 'marketplace', 'support')],
+    permissions: () => [...through('kyc'), ...viewOf('supply', 'print', 'agents', 'demand', 'marketplace', 'support')],
   },
   {
     name: 'Support',
@@ -74,7 +92,8 @@ export const SYSTEM_ROLES: readonly SystemRoleSpec[] = [
     isSystem: false,
     permissions: () => [
       ...through('support', 'comms'),
-      ...viewOf('marketplace', 'supply', 'demand', 'kyc', 'finance', 'growth'),
+      'support.delete',
+      ...viewOf('marketplace', 'supply', 'pricing', 'print', 'agents', 'demand', 'kyc', 'finance', 'growth'),
     ],
   },
   {

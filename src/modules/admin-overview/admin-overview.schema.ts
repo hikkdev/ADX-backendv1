@@ -49,5 +49,28 @@ export const breakdownQuerySchema = z.object({
 
 export const tilesQuerySchema = z.object({ from: isoDay, to: isoDay });
 
+/* ── AN-1: the registry-backed series ────────────────────────────────── */
+
+/**
+ * `?metrics=a,b,c&from=&to=&grain=&category=&city=`.
+ *
+ * `metrics` is a comma-separated list of registry keys. It is not an enum
+ * here on purpose: the registry is the contract, and the service refuses an
+ * unknown key with UNKNOWN_METRIC so the message names the metric rather
+ * than listing every one that exists.
+ */
+export const metricsSeriesQuerySchema = z.object({
+  from: isoDay,
+  to: isoDay,
+  grain: z.enum(GRANULARITIES).default('day'),
+  metrics: z
+    .string()
+    .trim()
+    .min(1)
+    .transform((value) => value.split(',').map((key) => key.trim()).filter(Boolean)),
+  category: listingCategory.optional(),
+  city: city.optional(),
+});
+
 /** G13-B: `/insights/:id/dismiss` — the id is a rule key; an unknown one is a 404 downstream, not a 400 here. */
 export const insightIdParamSchema = z.object({ id: z.string().trim().min(1).max(64) });

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { asyncHandler } from '../../shared/http';
-import { authenticate, requireRole } from '../../shared/auth';
+import { authenticate, requireRole, requirePermission } from '../../shared/auth';
 import {
   activateHandler,
   createHandler,
@@ -21,12 +21,12 @@ legalRouter.get('/', asyncHandler(indexHandler));
 
 const desk = Router();
 desk.use(authenticate, requireRole('ADMIN'));
-desk.get('/', asyncHandler(listHandler));
-desk.post('/', asyncHandler(createHandler));
-desk.get('/:id', asyncHandler(getHandler));
-desk.patch('/:id', asyncHandler(updateHandler));
-desk.delete('/:id', asyncHandler(deleteHandler));
-desk.post('/:id/activate', asyncHandler(activateHandler));
+desk.get('/', requirePermission('content.view'), asyncHandler(listHandler));
+desk.post('/', requirePermission('content.edit'), asyncHandler(createHandler));
+desk.get('/:id', requirePermission('content.view'), asyncHandler(getHandler));
+desk.patch('/:id', requirePermission('content.edit'), asyncHandler(updateHandler));
+desk.delete('/:id', requirePermission('content.delete'), asyncHandler(deleteHandler));
+desk.post('/:id/activate', requirePermission('content.approve'), asyncHandler(activateHandler));
 legalRouter.use('/documents', desk);
 
 legalRouter.get('/:kind', asyncHandler(currentHandler));

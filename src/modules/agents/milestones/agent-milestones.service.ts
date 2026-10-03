@@ -3,6 +3,11 @@ import { ApiError } from '../../../shared/errors';
 import { Decimal, money, type Money } from '../../../shared/money';
 import { recordIncentive } from '../../payouts';
 import { findAgentProfile, requireAgentProfile } from '../agents.service';
+/* CP-5: the quota tracker is the compensation module's standing, drawn on
+   this board. Same module, so it is a direct import; the money and the rules
+   behind it stay where they are owned. */
+import { standingFor } from '../compensation/compensation.service';
+import { isStretchTarget } from '../compensation/compensation.rules';
 import { prismaAgentMilestonesRepository as repository } from './prisma-agent-milestones.repository';
 import type {
   AgentMilestoneWithTemplate,
@@ -101,6 +106,44 @@ export type MilestoneCard = {
   /** Completed and not yet claimed. */
   claimable: boolean;
   link: MilestoneLink;
+  /**
+   * CP-5: true when the target is above the agent's planned month, so the
+   * bonus pays for work the salary did not already buy. False when it sits
+   * inside the quota — the desk is shown that, because such a milestone pays
+   * twice for the same onboardings. Null for an agent off the quota model,
+   * or for a milestone that does not count onboardings at all.
+   */
+  stretch: boolean | null;
+};
+
+/**
+ * CP-5: the day's quota, as the board shows it.
+ *
+ * This is a **tracker, not a milestone**. The owner's model pays the quota
+ * through the salary, so there is nothing to claim here and no reward field
+ * to fill in — and it is synthesised rather than stored as a
+ * `MilestoneTemplate` precisely so that nobody can attach a reward to it by
+ * editing a row. The work past the quota is what pays, and the tracker says
+ * what the next one earns.
+ *
+ * Null for an agent with no pay terms recorded: they are not on the quota
+ * model, their onboardings pay the flat rate, and a tracker measuring them
+ * against a quota nobody set would be fiction.
+ */
+export type QuotaTracker = {
+  /** The Indian day it resets on, `YYYY-MM-DD`. */
+  day: string;
+  target: number;
+  progress: number;
+  /** How many more today's salary still covers. */
+  leftToday: number;
+  pct: number;
+  /** Always false, and stated rather than implied: the salary is the reward. */
+  claimable: false;
+  /** What the next onboarding past the quota earns. Null when the terms cannot price one. */
+  commissionPerExtra: Money | null;
+  /** The month's planned onboardings — `dailyQuota x workingDaysPerMonth`, the figure a stretch target has to beat. */
+  plannedPerMonth: number;
 };
 
 export type MilestoneBoard = {
@@ -111,6 +154,8 @@ export type MilestoneBoard = {
   /** The pinned tracker: the first active milestone. */
   active: MilestoneCard | null;
   counts: Record<MilestoneChip, number>;
+  /** CP-5: the day's quota, above the claimable milestones. Null off the quota model. */
+  quota: QuotaTracker | null;
 };
 
 export type TemplateView = {
@@ -177,6 +222,8 @@ function toCard(
   derived: Derived,
   completedByAgent: number,
   now: Date,
+  /** CP-5: the agent's planned month, so an onboarding target can be judged against it. Null off the quota model. */
+  plannedPerMonth: number | null = null,
 ): MilestoneCard {
   const state = stateOf({ template: row.template, row, progress: derived.progress, completedByAgent, now });
   const { to } = windowOf(row.template, row);
@@ -197,6 +244,11 @@ function toCard(
     startsAt: row.template.startsAt?.toISOString() ?? null,
     deadline: to?.toISOString() ?? null,
     deadlineLabel: to ? deadlineLabel(to) : null,
+    /* CP-5: only an ONBOARDING target can be inside the quota — the quota
+       counts onboardings and nothing else, so a revenue or a quality target
+       is never double-paid by it and is left unjudged rather than
+       misjudged. */
+    stretch: row.template.type === 'ONBOARDING' ? isStretchTarget(row.template.target, plannedPerMonth) : null,
     completedAt: row.completedAt?.toISOString() ?? null,
     claimedAt: row.claimedAt?.toISOString() ?? null,
     claimable: state === 'COMPLETED',
@@ -208,7 +260,11 @@ function toCard(
  * Derives every row on the board, writes the cache where it moved, and
  * stamps `completedAt` the first time a derivation reaches the target.
  */
-async function deriveBoard(agent: { id: string; userId: string; tier: string }, now: Date): Promise<MilestoneCard[]> {
+async function deriveBoard(
+  agent: { id: string; userId: string; tier: string },
+  now: Date,
+  plannedPerMonth: number | null = null,
+): Promise<MilestoneCard[]> {
   const templates = await repository.findActiveTemplates();
   await Promise.all(templates.map((template) => repository.ensureAgentMilestone(agent.id, template.id)));
 
@@ -228,10 +284,34 @@ async function deriveBoard(agent: { id: string; userId: string; tier: string }, 
 
   // The unlock count is what the agent has finished, whatever they have claimed.
   const completedByAgent = rows.filter((row) => row.completedAt).length;
-  return rows.map((row, i) => toCard(row, derived[i]!, completedByAgent, now));
+  return rows.map((row, i) => toCard(row, derived[i]!, completedByAgent, now, plannedPerMonth));
 }
 
-function toBoard(tier: string, cards: MilestoneCard[], chip: MilestoneChip): MilestoneBoard {
+/**
+ * CP-5: the day's quota as a tracker.
+ *
+ * Read from the compensation module's own standing, so the board and the
+ * agent's pay card can never disagree about how many are done today. A
+ * failed read is null — a board must not fail over a tracker — and an agent
+ * with no terms is null too, because they are not on the quota model at all.
+ */
+async function quotaTracker(agentId: string, now: Date): Promise<QuotaTracker | null> {
+  const standing = await standingFor(agentId, now).catch(() => null);
+  if (!standing || !standing.onTheQuotaModel || standing.dailyQuota === null) return null;
+  const target = standing.dailyQuota;
+  return {
+    day: standing.day,
+    target,
+    progress: standing.doneToday,
+    leftToday: standing.quotaLeftToday ?? 0,
+    pct: pctOf(standing.doneToday, target),
+    claimable: false,
+    commissionPerExtra: standing.commissionPerExtra,
+    plannedPerMonth: target * (standing.workingDaysPerMonth ?? 0),
+  };
+}
+
+function toBoard(tier: string, cards: MilestoneCard[], chip: MilestoneChip, quota: QuotaTracker | null = null): MilestoneBoard {
   const counts: Record<MilestoneChip, number> = { ALL: cards.length, ACTIVE: 0, UPCOMING: 0, COMPLETED: 0 };
   for (const card of cards) {
     const filed = chipOf(card.state);
@@ -243,18 +323,23 @@ function toBoard(tier: string, cards: MilestoneCard[], chip: MilestoneChip): Mil
     claimable: cards.find((card) => card.claimable) ?? null,
     active: cards.find((card) => card.state === 'ACTIVE') ?? null,
     counts,
+    quota,
   };
 }
 
 export async function getMilestoneBoard(userId: string, chip: MilestoneChip = 'ALL', now = new Date()) {
   const agent = await requireAgentProfile(userId);
-  return toBoard(agent.tier, await deriveBoard({ id: agent.id, userId: agent.userId, tier: agent.tier }, now), chip);
+  const quota = await quotaTracker(agent.id, now);
+  const cards = await deriveBoard({ id: agent.id, userId: agent.userId, tier: agent.tier }, now, quota?.plannedPerMonth ?? null);
+  return toBoard(agent.tier, cards, chip, quota);
 }
 
 /** The console's read of any agent's board — the same derivation, by agent id. */
 export async function getMilestoneBoardForAgent(agentId: string, now = new Date()) {
   const agent = await findAgentProfileById(agentId);
-  return toBoard(agent.tier, await deriveBoard({ id: agent.id, userId: agent.userId, tier: agent.tier }, now), 'ALL');
+  const quota = await quotaTracker(agent.id, now);
+  const cards = await deriveBoard({ id: agent.id, userId: agent.userId, tier: agent.tier }, now, quota?.plannedPerMonth ?? null);
+  return toBoard(agent.tier, cards, 'ALL', quota);
 }
 
 async function findAgentProfileById(agentId: string) {

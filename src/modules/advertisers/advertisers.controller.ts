@@ -4,7 +4,7 @@ import { doorProvenance, selfProvenance } from '../../shared/onboarding';
 import type { ZodType } from 'zod';
 import { auditDiff, logActivity } from '../../shared/audit';
 import { ApiError } from '../../shared/errors';
-import { isVerifiedParty } from '../../shared/kyc-state';
+import { entityTypeFacts, isVerifiedParty } from '../../shared/kyc-state';
 import { money } from '../../shared/money';
 import { pageQueryFrom } from '../../shared/pagination';
 import { findAgentProfile } from '../agents';
@@ -237,6 +237,12 @@ export async function listAdvertisersHandler(req: Request, res: Response): Promi
       ...(q ? { q } : {}),
       ...(cuts.onboardedVia ? { onboardedVia: cuts.onboardedVia } : {}),
       ...(cuts.onboardedById ? { onboardedById: cuts.onboardedById } : {}),
+      // 29 Sep 2026: the same three cuts every party desk takes.
+      ...(cuts.kycState ? { kycState: cuts.kycState } : {}),
+      ...(cuts.type ? { type: cuts.type } : {}),
+      ...(cuts.city ? { city: cuts.city } : {}),
+      // Account lifecycle (2 Oct 2026): ACTIVE unless named; ALL for everyone.
+      ...(cuts.status ? { status: cuts.status } : {}),
     }),
   });
 }
@@ -256,7 +262,8 @@ export async function meHandler(req: Request, res: Response): Promise<void> {
   const advertiser = await getAdvertiserForUser(actor(req));
   // QR-3: the verified mark every external party earns the same way — the
   // app draws a tick beside the name on it.
-  res.json({ success: true, data: advertiser ? { ...advertiser, verified: isVerifiedParty(advertiser.kycStatus) } : advertiser });
+  // Phase D: and the legal form the KYC verifies (effective, null when it is still to be asked).
+  res.json({ success: true, data: advertiser ? { ...advertiser, ...entityTypeFacts('ADVERTISER', advertiser), verified: isVerifiedParty(advertiser.kycStatus) } : advertiser });
 }
 
 export async function registerAdvertiserHandler(req: Request, res: Response): Promise<void> {
@@ -285,7 +292,8 @@ async function resolveAgent(userId: string): Promise<string | null> {
 export async function updateProfileHandler(req: Request, res: Response): Promise<void> {
   await assertMayActFor(req, id(req), 'WRITE', 'ADVERTISER_PROFILE_UPDATED');
   const patch = parse(updateProfileSchema, req.body);
-  res.json({ success: true, data: await updateProfile(id(req), patch) });
+  const updated = await updateProfile(id(req), patch, { userId: actor(req), req });
+  res.json({ success: true, data: { ...updated, ...entityTypeFacts('ADVERTISER', updated) } });
 }
 
 export async function kycDecisionHandler(req: Request, res: Response): Promise<void> {

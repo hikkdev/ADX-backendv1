@@ -31,6 +31,16 @@ feature('users.profile', {
   routes: ['/api/v1/users/me'],
 });
 
+feature('users.email-verification', {
+  surfaces: ['APP_USER', 'APP_AGENT', 'WEBSITE', 'BACKEND'],
+  owner: 'senior',
+  kind: 'FEATURE',
+  launch: 'on',
+  description:
+    'ED-1: proving the account\'s own email with a code after a number-first sign-in — the address becomes the verified primary email.',
+  routes: ['/api/v1/users/me/email'],
+});
+
 feature('users.sessions', {
   surfaces: ['APP_USER', 'APP_AGENT', 'CONSOLE'],
   owner: 'senior',

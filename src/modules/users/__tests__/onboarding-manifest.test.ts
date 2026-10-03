@@ -39,7 +39,7 @@ describe('the publisher ladder', () => {
     expect(steps.findIndex((s) => s.key === 'liveness') + 1).toBe(11);
     expect(manifest.mode).toBe('full');
     expect(manifest.verification).toEqual({
-      digio: { available: true, provider: 'DIGIO', retryAfter: null },
+      digio: { available: true, provider: 'DIGIO', retryAfter: null, backup: false },
       liveness: { required: true, status: null },
       kycStatus: null,
       reviewNote: null,
@@ -184,7 +184,7 @@ describe('the partial ladder and the Digio switch', () => {
     });
     expect(manifest.mode).toBe('full');
     expect(manifest.steps).toHaveLength(10);
-    expect(manifest.verification.digio).toEqual({ available: false, provider: 'DEGRADED', retryAfter: 300 });
+    expect(manifest.verification.digio).toEqual({ available: false, provider: 'DEGRADED', retryAfter: 300, backup: false });
     expect(manifest.verification.liveness).toEqual({ required: true, status: 'PENDING' });
   });
 });

@@ -52,6 +52,11 @@ export function liveReservationsWhere(window: SlotWindow, options: SlotHoldOptio
   };
 }
 
+/** BD-1: the blocks the publisher laid over the window, as one Prisma clause. Days are inclusive at both ends. */
+export function blockedDatesWhere(window: SlotWindow): Prisma.ListingBlockedDateWhereInput {
+  return { from: { lte: window.to }, to: { gte: window.from } };
+}
+
 /**
  * G10: what the two hold queries answer, before the sum. An order holds the
  * quantity of the campaign spot behind it — one when it was placed on its
@@ -61,6 +66,8 @@ export function liveReservationsWhere(window: SlotWindow, options: SlotHoldOptio
 export type SlotHoldRows = {
   orders: readonly { listingId: string; campaignSpot: { quantity: number } | null }[];
   reservations: readonly { listingId: string; _sum: { quantity: number | null } }[];
+  /** BD-1: a block holds the spot's whole loop — `slotsTotal` of it; absent on the older callers. */
+  blocks?: readonly { listingId: string; listing: { slotsTotal: number } }[];
 };
 
 /**
@@ -75,7 +82,95 @@ export function sumSlotHolds(rows: SlotHoldRows): Map<string, number> {
   for (const group of rows.reservations) {
     if (group._sum.quantity) add(group.listingId, group._sum.quantity);
   }
+  // BD-1: a blocked day takes every slot; `slotsLeft` floors at zero, so a
+  // block beside a booking never counts below "none left".
+  for (const block of rows.blocks ?? []) add(block.listingId, Math.max(1, block.listing.slotsTotal));
   return held;
+}
+
+/* ------------------------------------------------------------------ */
+/* AV-1 (the owner, 27 Sep 2026): counted per day, not over the range   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * One hold on a listing with the days it covers. Dates are whole UTC days
+ * (a flight's `startDate`/`endDate` are the first and the LAST day, stored
+ * at midnight; a block's `from`/`to` are `@db.Date`), so a hold covers
+ * every day from `day(from)` to `day(to)` inclusive. A hold with no start
+ * or no end runs to that edge of the window, the way it always held the
+ * spot.
+ */
+export type DatedHold = { listingId: string; quantity: number; from: Date | null; to: Date | null; blocked?: boolean };
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** The UTC day number of an instant. */
+export const dayNumber = (instant: Date): number => Math.floor(instant.getTime() / DAY_MS);
+/** "2026-10-11" for a UTC day number. */
+export const dayKey = (day: number): string => new Date(day * DAY_MS).toISOString().slice(0, 10);
+
+/** The days a window covers, first and last inclusive. */
+export function windowDays(window: SlotWindow): { first: number; last: number } {
+  return { first: dayNumber(window.from), last: dayNumber(window.to) };
+}
+
+/**
+ * The held count of ONE listing on every day of the window — index 0 is
+ * the window's first day. A digital loop's slots are per day, so two
+ * bookings that never run together never add up (before AV-1 every hold
+ * touching the window was summed, and a billboard booked 1–10 Oct read
+ * "full" for all of October).
+ */
+export function dailyHolds(holds: readonly DatedHold[], window: SlotWindow): number[] {
+  const { first, last } = windowDays(window);
+  const length = Math.max(0, last - first + 1);
+  const diff = new Array<number>(length + 1).fill(0);
+  for (const hold of holds) {
+    const from = Math.max(first, hold.from ? dayNumber(hold.from) : first);
+    const to = Math.min(last, hold.to ? dayNumber(hold.to) : last);
+    if (to < from) continue;
+    diff[from - first]! += hold.quantity;
+    diff[to - first + 1]! -= hold.quantity;
+  }
+  const days: number[] = [];
+  let running = 0;
+  for (let index = 0; index < length; index += 1) {
+    running += diff[index]!;
+    days.push(running);
+  }
+  return days;
+}
+
+/** The days of the window a publisher block covers — index 0 is the first day. */
+export function blockedDays(holds: readonly DatedHold[], window: SlotWindow): boolean[] {
+  return dailyHolds(holds.filter((hold) => hold.blocked).map((hold) => ({ ...hold, quantity: 1 })), window).map((count) => count > 0);
+}
+
+/** Per listing, the busiest day of the window — what "slots held over these dates" means. */
+export function peakSlotHolds(holds: readonly DatedHold[], window: SlotWindow): Map<string, number> {
+  const byListing = new Map<string, DatedHold[]>();
+  for (const hold of holds) byListing.set(hold.listingId, [...(byListing.get(hold.listingId) ?? []), hold]);
+  const peak = new Map<string, number>();
+  for (const [listingId, own] of byListing) {
+    const days = dailyHolds(own, window);
+    const top = days.length ? Math.max(...days) : 0;
+    if (top > 0) peak.set(listingId, top);
+  }
+  return peak;
+}
+
+/** The rows the three hold reads answer, turned into dated holds (an order holds its spot's quantity, a block the whole loop). */
+export type DatedHoldRows = {
+  orders: readonly { listingId: string; startDate: Date | null; endDate: Date | null; campaignSpot: { quantity: number } | null }[];
+  reservations: readonly { listingId: string; quantity: number; startDate: Date | null; endDate: Date | null }[];
+  blocks: readonly { listingId: string; from: Date; to: Date; listing: { slotsTotal: number } }[];
+};
+
+export function datedHolds(rows: DatedHoldRows): DatedHold[] {
+  return [
+    ...rows.orders.map((order) => ({ listingId: order.listingId, quantity: Math.max(1, order.campaignSpot?.quantity ?? 1), from: order.startDate, to: order.endDate })),
+    ...rows.reservations.filter((spot) => spot.quantity > 0).map((spot) => ({ listingId: spot.listingId, quantity: spot.quantity, from: spot.startDate, to: spot.endDate })),
+    ...rows.blocks.map((block) => ({ listingId: block.listingId, quantity: Math.max(1, block.listing.slotsTotal), from: block.from, to: block.to, blocked: true })),
+  ];
 }
 
 /** The UTC day around an instant — what "today" means when no window is asked for. */

@@ -64,7 +64,7 @@ const record = (over: Record<string, unknown> = {}) => ({
   department: 'Ops',
   designation: 'Coordinator',
   isActive: true,
-  user: { id: 'usr_1', name: 'Asha', mobile: '+919845012210', email: 'asha@adx.co' },
+  user: { id: 'usr_1', name: 'Asha', mobile: '+919845012210', email: 'asha@adx.in' },
   ...over,
 });
 

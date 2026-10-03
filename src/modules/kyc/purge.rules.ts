@@ -21,24 +21,8 @@ export function maskPan(pan: string | null | undefined): string | null {
 }
 
 /**
- * The Digio payload with every field that could carry a document's contents
- * removed: names, dates of birth, id numbers. The decision and its timing
- * stay. An unrecognised shape is dropped to null rather than kept whole.
+ * The Digio payload trimmed to the decision — Phase D moved it beside the
+ * callback rules in `shared/integrations/digio-callback.ts`, where the
+ * upgrade's audit (three modules) reads it too; re-exported for the purge.
  */
-export function trimDigioPayload(payload: unknown): unknown {
-  if (!payload || typeof payload !== 'object') return null;
-  const source = payload as Record<string, unknown>;
-  const documents = Array.isArray(source['kyc_documents'])
-    ? (source['kyc_documents'] as Record<string, unknown>[]).map((doc) => ({
-        type: typeof doc['type'] === 'string' ? doc['type'] : null,
-        status: typeof doc['status'] === 'string' ? doc['status'] : null,
-      }))
-    : undefined;
-  return {
-    id: typeof source['id'] === 'string' ? source['id'] : null,
-    status: typeof source['status'] === 'string' ? source['status'] : null,
-    completed_at: typeof source['completed_at'] === 'string' ? source['completed_at'] : null,
-    ...(documents ? { kyc_documents: documents } : {}),
-    trimmed: true,
-  };
-}
+export { trimDigioPayload } from '../../shared/integrations/digio-callback';

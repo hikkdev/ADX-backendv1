@@ -1,6 +1,8 @@
 import { Prisma, prisma } from '../../../shared/database';
+import { PROVIDER_FAILED_STATUS } from '../../../shared/verification';
 import type { Advertiser, AdvertiserKyc, KycStatus } from '../../../shared/database';
 import { KYC_QUEUE_STATES, deriveKycState, kycPartyStateWhere, kycQueueBaseWhere, type KycQueueState } from '../../../shared/kyc-state';
+import { accountStateOf, workingAdvertiserWhere } from '../../../shared/party-status';
 import type {
   AdvertiserDigioFields,
   AdvertiserKycKey,
@@ -64,6 +66,8 @@ function stateOf(filter: AdvertiserKycFilter): KycQueueState | undefined {
  */
 function partyWhere(filter: AdvertiserKycFilter): Prisma.AdvertiserWhereInput {
   const parts: Prisma.AdvertiserWhereInput[] = [kycQueueBaseWhere(true)];
+  // Account lifecycle (2 Oct 2026): working accounts only, unless the desk asks for the inactive or names the advertiser.
+  if (!filter.includeInactive && !filter.advertiserId) parts.push(workingAdvertiserWhere());
   const state = stateOf(filter);
   if (state) parts.push(kycPartyStateWhere(state, true));
   if (filter.requested === false && !state) parts.push({ NOT: kycPartyStateWhere('REQUESTED', true) });
@@ -99,7 +103,7 @@ function partySlice(advertiser: Advertiser): AdvertiserPartySlice {
   };
 }
 
-function toQueueRow(advertiser: Advertiser & { kyc: AdvertiserKyc | null }): AdvertiserKycQueueRow {
+function toQueueRow(advertiser: Advertiser & { kyc: AdvertiserKyc | null; user: { isActive: boolean; closedAt: Date | null } | null }): AdvertiserKycQueueRow {
   const party = partySlice(advertiser);
   const record = advertiser.kyc;
   return {
@@ -107,6 +111,7 @@ function toQueueRow(advertiser: Advertiser & { kyc: AdvertiserKyc | null }): Adv
     id: record?.id ?? advertiser.id,
     kycId: record?.id ?? null,
     state: deriveKycState(record, advertiser.kycStatus),
+    accountState: accountStateOf(advertiser),
     party,
     advertiser: party,
   };
@@ -133,7 +138,7 @@ export const prismaAdvertiserKycRepository: AdvertiserKycRepository = {
         skip: (page - 1) * pageSize,
         take: pageSize,
         orderBy,
-        include: { kyc: true },
+        include: { kyc: true, user: { select: { isActive: true, closedAt: true } } },
       }),
       prisma.advertiser.count({ where: partyWhere(where) }),
     ]);
@@ -312,6 +317,30 @@ export const prismaAdvertiserKycRepository: AdvertiserKycRepository = {
     });
   },
 
+  reopenDigioForUpgrade(key: AdvertiserKycKey, fields: AdvertiserDigioFields) {
+    const reopened = {
+      ...fields,
+      status: 'PENDING' as const,
+      digioPayload: Prisma.DbNull,
+      digioVerifiedAt: null,
+      reviewedAt: null,
+      reviewedById: null,
+      reviewNote: null,
+      rejectionReason: null,
+      recordedVia: null,
+      recordedById: null,
+    };
+    return prisma.advertiserKyc.upsert({ where: uniqueOf(key), update: { ...reopened, ...adoptKey(key) }, create: { ...keyColumns(key), ...reopened } });
+  },
+
+  markProviderFailed(key: AdvertiserKycKey) {
+    return prisma.advertiserKyc.upsert({
+      where: uniqueOf(key),
+      update: { digioStatus: PROVIDER_FAILED_STATUS, ...adoptKey(key) },
+      create: { ...keyColumns(key), digioStatus: PROVIDER_FAILED_STATUS },
+    });
+  },
+
   findByDigioRequestId(kycId: string) {
     return prisma.advertiserKyc.findFirst({ where: { digioRequestId: kycId } });
   },
@@ -319,15 +348,17 @@ export const prismaAdvertiserKycRepository: AdvertiserKycRepository = {
   applyDigioWebhook(id: string, update: AdvertiserDigioUpdate) {
     // Lot N: Digio's completion is the recording — nobody at ADX held the
     // documents. N2-B: an approval puts the row on the Digio path whatever
-    // was sent by hand while the session was open.
+    // was sent by hand while the session was open. Cashfree Phase 1: the
+    // same road carries a Cashfree session's outcome — `via` says who answered.
+    const { via = 'DIGIO', ...fields } = update;
     return prisma.advertiserKyc.update({
       where: { id },
       data: {
-        ...update,
-        digioPayload: update.digioPayload as Prisma.InputJsonValue,
-        recordedVia: 'DIGIO',
+        ...fields,
+        digioPayload: fields.digioPayload as Prisma.InputJsonValue,
+        recordedVia: via,
         recordedById: null,
-        ...(update.status === 'VERIFIED' ? { method: 'DIGIO' } : {}),
+        ...(fields.status === 'VERIFIED' ? { method: via } : {}),
       },
     });
   },

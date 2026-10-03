@@ -2,7 +2,7 @@ import { app } from './app';
 import { env } from './config/env';
 import { logger } from './shared/logging';
 import { prisma } from './shared/database';
-import { redis } from './shared/cache';
+import { isRedisOutage, redis } from './shared/cache';
 import { registerGracefulShutdown } from './bootstrap/graceful-shutdown';
 import { startPublisherTimerJob, publisherTimerInterval } from './jobs/publisher-timer.job';
 import { startRightsRenewalJob, rightsRenewalInterval } from './jobs/rights-renewal.job';
@@ -21,11 +21,13 @@ import {
   startMonthlyStatementsJob,
   monthlyStatementsInterval,
 } from './jobs/monthly-statements.job';
+import { startWeeklySummaryJob, weeklySummaryInterval } from './jobs/weekly-summary.job';
 import { startKycProviderProbeJob, kycProviderProbeInterval } from './jobs/kyc-provider-probe.job';
 import { startKycPurgeJob, kycPurgeInterval } from './jobs/kyc-purge.job';
 import { startKycEscalationJob, kycEscalationInterval } from './jobs/kyc-escalation.job';
 import { startWorkDueJob, workDueInterval } from './jobs/work-due.job';
 import { startFraudSignalScanJob, fraudSignalScanInterval } from './jobs/fraud-signal-scan.job';
+import { startOrderRiskRescreenJob, orderRiskRescreenInterval } from './jobs/order-risk-rescreen.job';
 import { startNotificationSenderJob, notificationSenderInterval } from './jobs/notification-sender.job';
 import { startAnnouncementSenderJob, announcementSenderInterval } from './jobs/announcement-sender.job';
 import { startRetentionJob, retentionInterval } from './jobs/retention.job';
@@ -46,6 +48,11 @@ import { startLiveChatSlaJob, liveChatSlaInterval } from './jobs/live-chat-sla.j
 import { startPublisherSubscriptionJob, publisherSubscriptionInterval } from './jobs/publisher-subscription.job';
 import { startPackageRenewalJob, packageRenewalInterval } from './jobs/package-renewal.job';
 import { startCityWindDownJob, cityWindDownInterval } from './jobs/city-winddown.job';
+import { startPromotionsJob, promotionsInterval } from './jobs/promotions.job';
+import { startStorageSweepJob, storageSweepInterval } from './jobs/storage-sweep.job';
+import { startVerificationStatusSweepJob, verificationStatusSweepInterval } from './jobs/verification-status-sweep.job';
+import { startHolidayCalendarJob, holidayCalendarInterval } from './jobs/holiday-calendar.job';
+import { errorThrottled } from './shared/logging/throttled';
 
 /**
  * Opens the Postgres and Redis connections before the first user needs them.
@@ -81,6 +88,22 @@ function warmConnections(): void {
     .catch((err: unknown) => logger.warn('Redis warm-up failed', { reason: String(err) }));
 }
 
+/*
+ * The one net for a Redis outage (26 Sep 2026): a background Redis call
+ * nobody caught becomes an unhandled rejection, and Node ends the process on
+ * one — so a stopped Redis container took the whole API down. A Redis
+ * outage is logged and the server stays up (requests degrade, jobs skip
+ * their ticks); ANY other unhandled rejection is re-thrown, and Node stops
+ * the process exactly as it did before.
+ */
+process.on('unhandledRejection', (reason) => {
+  if (isRedisOutage(reason)) {
+    errorThrottled('Redis unavailable — a background call failed; the server stays up', { err: (reason as Error).message });
+    return;
+  }
+  throw reason;
+});
+
 const server = app.listen(env.PORT, () => {
   logger.info('ADX backend running', { port: env.PORT, env: env.NODE_ENV });
   warmConnections();
@@ -96,6 +119,8 @@ const server = app.listen(env.PORT, () => {
   // Lot B (Q13): on the first of the month, every publisher's payment advice
   // for the month just ended.
   startMonthlyStatementsJob();
+  // WS-1 (DR 12): every advertiser's campaign digest, Monday 09:00 IST.
+  startWeeklySummaryJob();
   // Lot D (Q129): the Digio probe moves the provider switch on failure and back.
   startKycProviderProbeJob();
   // Lot D (Q127): Digio-path KYC images and liveness videos, purged 30 days after verification.
@@ -104,6 +129,8 @@ const server = app.listen(env.PORT, () => {
   startKycEscalationJob();
   // Lot G (Q118/138): every party through the fraud signals; a hot signal opens a SIGNAL_SCAN case, daily.
   startFraudSignalScanJob();
+  // Order fraud screening: every open order re-scored, daily; watch mode flags, never holds unless switched on.
+  startOrderRiskRescreenJob();
   // Lot E (decisions 95/126): past-due erasure requests and the retention-due report, daily.
   startRetentionJob();
   // Lot E (decision 95): the newest dump restored into the scratch database and its ledger verified, monthly.
@@ -142,18 +169,55 @@ const server = app.listen(env.PORT, () => {
   startCityWindDownJob();
   // Lot AA: at 08:00 IST, the assignees of every task due tomorrow or overdue are told, once per task per day.
   startWorkDueJob();
+  // LM-1: paid placements cross their dates — live, ended, the unpaid hour, the unreviewed ad refunded.
+  startPromotionsJob();
+  // ST-3: weekly — files nothing refers to are marked; removal only when Settings › Storage turns it on (off by default).
+  startStorageSweepJob();
+  // Cashfree Phase 1: pending verification attempts read back until they finish; overdue Cashfree sessions expired.
+  startVerificationStatusSweepJob();
+  // HC-1: weekly — the public holiday calendar read into the Holidays page, while Settings › Integrations has it on.
+  startHolidayCalendarJob();
 });
 
-// Without this handler, a port conflict (e.g. a leftover dev server still
-// holding the port) throws as an uncaught exception and kills the process
-// silently — new requests then get served by the stale process instead,
-// so nothing ever appears in this terminal again. Fail loudly instead.
+/**
+ * A port conflict would otherwise throw as an uncaught exception and kill the
+ * process silently, leaving the *stale* instance serving every request while
+ * nothing more appeared in this terminal.
+ *
+ * Failing loudly is still the end of it, but not the first move. On a restart
+ * the previous instance may hold the port for a moment: nodemon hard-kills its
+ * child on Windows, so no graceful shutdown runs, and the operating system
+ * releases the listener a beat after the process is gone. The replacement was
+ * landing inside that beat, exiting 1, and nodemon printed "app crashed —
+ * waiting for file changes" and stopped watching. Every backend edit looked
+ * like a crash.
+ *
+ * So a bind that fails because the port is held is retried for a few seconds
+ * first. Only a port held by something that is genuinely not going away ends
+ * the process, which is the case the loud message was written for.
+ */
+const BIND_RETRY_MS = 400;
+const BIND_RETRY_LIMIT = 30;
+let bindAttempts = 0;
+
 server.on('error', (err: NodeJS.ErrnoException) => {
   if (err.code === 'EADDRINUSE') {
+    bindAttempts += 1;
+    if (bindAttempts <= BIND_RETRY_LIMIT) {
+      /* Info, not error: on a dev restart this is the expected handover, and
+         the `listening` callback above still fires when the retry lands. */
+      logger.info(`Port ${env.PORT} is still held — waiting for the previous instance to release it`, {
+        port: env.PORT,
+        attempt: bindAttempts,
+        of: BIND_RETRY_LIMIT,
+      });
+      setTimeout(() => server.listen(env.PORT), BIND_RETRY_MS).unref();
+      return;
+    }
     logger.error(
       `Port ${env.PORT} is already in use — another server instance is still running. ` +
         `Stop it (check for a leftover node/tsx process) before starting a new one.`,
-      { port: env.PORT },
+      { port: env.PORT, waitedMs: BIND_RETRY_MS * BIND_RETRY_LIMIT },
     );
   } else {
     logger.error('Server failed to start', { err });
@@ -170,11 +234,13 @@ registerGracefulShutdown(server, () => {
   if (campaignLifecycleInterval) clearInterval(campaignLifecycleInterval);
   if (earningsAccrualInterval) clearInterval(earningsAccrualInterval);
   if (monthlyStatementsInterval) clearInterval(monthlyStatementsInterval);
+  if (weeklySummaryInterval) clearInterval(weeklySummaryInterval);
   if (kycProviderProbeInterval) clearInterval(kycProviderProbeInterval);
   if (kycPurgeInterval) clearInterval(kycPurgeInterval);
   if (kycEscalationInterval) clearInterval(kycEscalationInterval);
   if (workDueInterval) clearInterval(workDueInterval);
   if (fraudSignalScanInterval) clearInterval(fraudSignalScanInterval);
+  if (orderRiskRescreenInterval) clearInterval(orderRiskRescreenInterval);
   if (notificationSenderInterval) clearInterval(notificationSenderInterval);
   if (announcementSenderInterval) clearInterval(announcementSenderInterval);
   if (retentionInterval) clearInterval(retentionInterval);
@@ -195,4 +261,8 @@ registerGracefulShutdown(server, () => {
   if (publisherSubscriptionInterval) clearInterval(publisherSubscriptionInterval);
   if (packageRenewalInterval) clearInterval(packageRenewalInterval);
   if (cityWindDownInterval) clearInterval(cityWindDownInterval);
+  if (promotionsInterval) clearInterval(promotionsInterval);
+  if (storageSweepInterval) clearInterval(storageSweepInterval);
+  if (verificationStatusSweepInterval) clearInterval(verificationStatusSweepInterval);
+  if (holidayCalendarInterval) clearInterval(holidayCalendarInterval);
 });

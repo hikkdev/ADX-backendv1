@@ -4,7 +4,8 @@ import { assertCanCreateForPublisher, type ListingActor } from '../listings';
 import { formatGuide, formatGuides, templateCsv } from './import-formats';
 import { commitListingImport, commitRateCardImport, validateListingImport, validateRateCardImport } from './listing-imports.service';
 import { importBodySchema, listImportsQuerySchema, partyKeySchema, publisherQuerySchema, type ListingKind, type PartyKey } from './party-imports.schema';
-import { commitImport, getImport, importReportCsv, listImports, parseImportCsv, revokeImport, validateImport, type RawImportRow } from './party-imports.service';
+import { commitImport, getImport, importReportCsv, listImports, parseImportCsv, parseImportXlsx, revokeImport, validateImport, type RawImportRow } from './party-imports.service';
+import { looksLikeXlsx } from '../../shared/xlsx';
 
 /** `:party` is one of four words; anything else is a 400, never a table lookup. */
 function partyOf(req: Request): PartyKey {
@@ -15,12 +16,17 @@ function partyOf(req: Request): PartyKey {
 
 const idOf = (req: Request) => req.params['id'] as string;
 
-/** The two shapes a file arrives in — a multipart CSV under `file`, or a JSON body of rows — as one input. */
+/**
+ * The shapes a file arrives in — a multipart CSV (or, 26 Sep 2026, on the
+ * publisher's two kinds, an .xlsx) under `file`, or a JSON body of rows —
+ * as one input. A workbook is told by its first bytes (a zip), not its name.
+ */
 function rowsOf(req: Request): { fileName?: string | undefined; note?: string | undefined; rows: RawImportRow[] } {
   const file = req.file as { originalname: string; buffer: Buffer } | undefined;
   if (file) {
-    const rows = parseImportCsv(file.buffer.toString('utf8'));
-    if (rows.length === 0) throw new ApiError(400, 'BAD_REQUEST', 'The CSV has a header and no rows');
+    const workbook = looksLikeXlsx(file.buffer);
+    const rows = workbook ? parseImportXlsx(file.buffer) : parseImportCsv(file.buffer.toString('utf8'));
+    if (rows.length === 0) throw new ApiError(400, 'BAD_REQUEST', workbook ? 'The first sheet has a header and no rows' : 'The CSV has a header and no rows');
     const note = typeof req.body?.['note'] === 'string' ? (req.body['note'] as string).trim().slice(0, 500) : undefined;
     return { fileName: file.originalname, note, rows };
   }
@@ -127,12 +133,20 @@ export async function formatsHandler(_req: Request, res: Response): Promise<void
   res.json({ success: true, data: formatGuides() });
 }
 
+/** BL-1: a publisher or agent reads only the two kinds a publisher uploads. */
+const PUBLISHER_KINDS = new Set(['listings', 'rate-card']);
+function assertKindReadable(req: Request, kind: string): void {
+  if (!req.user!.roles.includes('ADMIN') && !PUBLISHER_KINDS.has(kind)) throw new ApiError(404, 'NOT_FOUND', 'No such format');
+}
+
 export async function formatHandler(req: Request, res: Response): Promise<void> {
+  assertKindReadable(req, req.params['kind'] as string);
   res.json({ success: true, data: formatGuide(req.params['kind'] as string) });
 }
 
 export async function formatTemplateHandler(req: Request, res: Response): Promise<void> {
   const kind = req.params['kind'] as string;
+  assertKindReadable(req, kind);
   const csv = templateCsv(kind);
   res.set('Content-Type', 'text/csv; charset=utf-8');
   res.set('Content-Disposition', `attachment; filename="${kind}-template.csv"`);

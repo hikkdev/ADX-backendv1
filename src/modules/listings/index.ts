@@ -74,6 +74,8 @@ export type { SpotAudience, SpotsAudience } from './audience.service';
  * repository so its clash query counts what browse counts.
  */
 export { hasSlotLeft, listingsWithNoSlotLeft, slotHoldingOrdersWhere, liveReservationsWhere, windowFor, SLOT_FREE_ORDER_STATUSES } from './slots.service';
+/** BD-1: the third hold — the publisher's own blocks — for the availability grid. */
+export { blockedDatesWhere } from './slot-holds';
 export type { SlotWindow, SlotHoldOptions } from './slots.service';
 /**
  * G10: the count itself, over any Prisma client — for the orders and
@@ -84,6 +86,14 @@ export type { SlotWindow, SlotHoldOptions } from './slots.service';
  */
 export { slotsHeldWith } from './prisma-listings.repository';
 export type { SlotCountClient } from './prisma-listings.repository';
+
+/**
+ * LM-1: sponsored listings. `promotions` sells the boosts and registers the
+ * port (through bootstrap) that tells browse and the similar row which
+ * listings go first today; unregistered, nothing is sponsored.
+ */
+export { registerSponsoredPort } from './sponsored.port';
+export type { SponsoredPort, SponsoredPlacement, SponsoredBoost } from './sponsored.port';
 
 // Lot G (answer 144): the module's feature declarations, loaded with the module so the registry sees them at boot.
 import './features';

@@ -479,3 +479,59 @@ idempotency with collect-prints. `print-quote-expiry.job.test.ts` — the tick.
 `qr/__tests__/pickup-code.test.ts`; the port in
 `orders/__tests__/print-job-port.test.ts`; the on-behalf withdrawal and the
 preflight in `payouts/__tests__/print-partner-payee.test.ts`.
+
+## 26 Sep 2026 — the booking id on the floor, `appliedAt`, Digio, the job by order
+
+- `order.displayId` (BKG-…) on `GET /me/jobs` and `/me/jobs/:id`
+  (`shapeOrderForPrint`); `orderDisplayId` on `GET /me/quote-requests(/:id)`
+  and on each `GET /me/earnings` entry (one `orderDisplayIds` read per page).
+- `appliedAt` on `shapePartner` — the app's application screen checks it and
+  it was never sent.
+- `GET /me/jobs?orderId=` — the shop's job behind an order, so an ORDER notice
+  (which names the order) opens the job.
+- `GET /me/kyc` carries `digio { available, provider, retryAfter }`, and so
+  does its 404 before any record (`details.digio`).
+Pinned in `__tests__/partner-display-ids.test.ts`,
+`print-partners.service.test.ts`, `kyc/__tests__/print-partner-kyc.service.test.ts`.
+
+## 29 Sep 2026 — the uniform party roster
+
+`GET /print-partners` takes the cuts every party roster takes beside `q`,
+`city` and `active`: **`onboardedVia`** and **`kycState`** — a shop has no
+type, so there is no `type`. A partner keeps no provenance stamp, so the
+door is read off what the row keeps: `SELF` applied from the app
+(`appliedAt`), `IMPORT` was created by a party import (its CREATED
+`PartyImportRow`), `DESK` is the rest; `AGENT` and `QR` match nothing. The
+PP-1 `applied` facet the schema always took is now passed on. Each item
+carries **`jobCount`** (counted in the same query) and **`onboarding`** — the
+QR-14 block with the door, nobody named (`partnerDoorFacts`). `q` also
+matches the email and the phone as the console prints it, and the city and
+the search no longer share one `OR` (the search's used to overwrite the
+city's). Pinned by `uniform-roster.test.ts` and
+`uniform-roster.repository.test.ts`.
+
+## Phase D (1 Oct 2026) — the legal form the KYC verifies
+
+`PrintPartner.entityType` (`KycEntityType`, nullable) picks the Digio
+workflow — the rules are in `kyc/README.md` under the same heading. A shop
+may be INDIVIDUAL, SOLE_PROPRIETOR, COMPANY or LLP_PARTNERSHIP; it has no
+legacy `type`, so until one is stored the form is unknown.
+
+- `POST /print-partners/me/kyc/digio/initiate` and `POST
+  /print-partner-kyc/:id/digio/restart` take `{ entityType? }`; `POST
+  /print-partner-kyc/:id/request` takes `{ channel?, note?, entityType? }`.
+  Unknown and none sent: **409 `ENTITY_TYPE_REQUIRED`** with `details {
+  party: 'PRINT_PARTNER', options }` (the four). One of the other four forms
+  is 400 `VALIDATION_ERROR`.
+- The desk's request now asks Digio **before** it stamps the row: a 409, or
+  Digio refusing, leaves the case unstamped and the partner untold (the stamp
+  used to land first, so a failed request still read as requested).
+- `GET /print-partners/me`, `GET /print-partners/:id` and the roster answer
+  **`entityType`** and **`entityTypeStored`**.
+- `PATCH /print-partners/:id` takes `entityType` (one of the four, null
+  clears; audit `KYC_ENTITY_TYPE_SET`). On a VERIFIED partner only the
+  upgrade — an individual's business — is taken, as a fresh Digio request;
+  anything else is **409 `KYC_LOCKED`** and the rest of the patch is not written.
+
+Pinned in `kyc/__tests__/print-partner-digio.test.ts` and
+`print-partner-kyc.service.test.ts`.

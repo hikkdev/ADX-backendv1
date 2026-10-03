@@ -1,20 +1,22 @@
-import { Prisma, prisma } from '../../shared/database';
-import type { Order, OrderStatus } from '../../shared/database';
+import { LISTING_PUBLISHER_RECORD_OMIT } from '../../shared/listing-vocabulary';
+import { ORDER_RISK_COLUMNS, Prisma, prisma } from '../../shared/database';
+import type { AppTransactionClient, OrderRead, OrderStatus } from '../../shared/database';
 import { countsFrom, listArgs } from '../../shared/pagination';
 import type {
   AutoAccept,
   MyOrderRow,
   NewOrder,
   OpenOrderScope,
+  OrderRiskState,
   OrdersRepository,
   PlacementLock,
   VerificationPatch,
 } from './orders.repository';
-import { CALENDAR_CATEGORIES, ORDER_STATUSES, type AdminOrdersQuery, type CalendarQuery, type MyOrdersQuery } from './orders.schema';
+import { CALENDAR_CATEGORIES, ORDER_STATUSES, RISK_REVIEW_STATUSES, type AdminOrdersQuery, type CalendarQuery, type MyOrdersQuery, type RiskReviewStatusFilter } from './orders.schema';
 import { slotHoldingOrdersWhere, slotsHeldWith } from '../listings';
 
 /** The client an insert runs on: the repository's own, or the transaction holding the listing lock (G10). */
-type OrderWriter = Pick<Prisma.TransactionClient, 'order'>;
+type OrderWriter = Pick<AppTransactionClient, 'order'>;
 
 /** The insert itself, on either client. With `accepted`, the row is born PENDING_PRINT (Lot D, Q105). */
 function createOrder(db: OrderWriter, data: NewOrder, accepted?: AutoAccept) {
@@ -38,12 +40,157 @@ function createOrder(db: OrderWriter, data: NewOrder, accepted?: AutoAccept) {
             publisherTimerExpiry: new Date(Date.now() + 30 * 60 * 1000),
           }),
     },
-    include: { listing: { include: { publisher: { include: { user: true } } } } },
+    // 2 Oct 2026: no join. This row is POST /orders' answer to the advertiser,
+    // and it used to carry the listing's publisher with their whole User row
+    // (password hash, TOTP secret, email, date of birth). Placement reads the
+    // publisher off its own listing read; every caller needs only the order.
   });
 }
 
-const withPublisher = { listing: { include: { publisher: true } } } as const;
+/*
+ * 3 Oct 2026: a listing as an order carries it to a party never holds the
+ * site QR token (scanning it is the proof of standing at the spot) or the RC
+ * lookup's answer (the vehicle owner's name and address). The client's global
+ * omit already drops both; each party read names them too, so either layer
+ * holds alone — the way the people on an order are selected.
+ */
+const LISTING_PRIVATE_OMIT = { qrToken: true, vehicleRcPayload: true } as const;
 
+// The check-ins compare a scan with the site QR, so this one read opts back in for the token (the RC answer stays out).
+const withPublisher = { listing: { omit: { qrToken: false }, include: { publisher: true } } } as const;
+
+/*
+ * 2 Oct 2026: the people on an order, as the order's other parties see them.
+ * `GET /orders/:id` used to `include` whole User rows — the advertiser, the
+ * publisher's login, the agents' logins — so each party received the others'
+ * password hash, TOTP secret, email, date of birth and gender, and whole
+ * AgentProfile rows (home address, emergency contact, screening notes). Now a
+ * `select` names what the clients draw (console, website, both apps — 2 Oct 2026);
+ * `orderDetailFor` (orders.redact) then drops the contact fields a viewer has
+ * no use for.
+ */
+
+/** A person: the names, the ADX id and the photo. No contact, no birth date, no gender, no sign-in fact. */
+const personSelect = {
+  id: true,
+  name: true,
+  firstName: true,
+  lastName: true,
+  displayId: true,
+  avatarUrl: true,
+} as const satisfies Prisma.UserSelect;
+
+/** The installer's person also carries the number — the publisher calls the agent from the booking (Installer card, Track). */
+const installerPersonSelect = { ...personSelect, mobile: true } as const satisfies Prisma.UserSelect;
+
+/** An agent on the order: the profile ids and city (the publisher's Installer card) and the person. */
+const orderAgentSelect = {
+  id: true,
+  userId: true,
+  displayId: true,
+  city: true,
+  user: { select: installerPersonSelect },
+} as const satisfies Prisma.AgentProfileSelect;
+
+/**
+ * The publisher business on the spot. The agent app's pickup card and its
+ * "call the publisher" button read `name`, `mobile`, `address`, `city` and
+ * `state`; `userId` decides who may read the order. No GSTIN, email, KYC or
+ * suspension facts.
+ */
+const orderPublisherSelect = {
+  id: true,
+  userId: true,
+  displayId: true,
+  name: true,
+  mobile: true,
+  address: true,
+  city: true,
+  state: true,
+} as const satisfies Prisma.PublisherSelect;
+
+/** The agent's own list: the same publisher contact the job card dials and the pickup card prints. */
+// LD-1: the installing agent reads the spot, not the publisher's own statement to ADX (waivers, extra answers, ticks).
+const withPublisherContact = { listing: { omit: { ...LISTING_PUBLISHER_RECORD_OMIT, ...LISTING_PRIVATE_OMIT }, include: { publisher: { select: orderPublisherSelect } } } } as const;
+
+/** PB-1: the placing login's names and ADX id, and its advertiser profile — `OrderPlacerRow`, nothing wider. */
+const placerSelect = {
+  id: true,
+  name: true,
+  firstName: true,
+  lastName: true,
+  displayId: true,
+  advertiserProfile: { select: { id: true, name: true, displayId: true } },
+} as const satisfies Prisma.UserSelect;
+
+
+/**
+ * The console's free-text search over an order — the campaign, the spot,
+ * the agent, and (PB-1) who placed it, by person and by business. Shared by
+ * the order board and the fraud review queue.
+ */
+function orderSearchWhere(q: string): Prisma.OrderWhereInput {
+  return {
+    OR: [
+      { campaignName: { contains: q, mode: 'insensitive' } },
+      { listing: { title: { contains: q, mode: 'insensitive' } } },
+      { listing: { address: { contains: q, mode: 'insensitive' } } },
+      { listing: { city: { contains: q, mode: 'insensitive' } } },
+      { agent: { user: { name: { contains: q, mode: 'insensitive' } } } },
+      { agent: { displayId: { contains: q, mode: 'insensitive' } } },
+      // PB-1: who placed it — the person (names, ADX id) and the business (name, ADV id).
+      { advertiser: { name: { contains: q, mode: 'insensitive' } } },
+      { advertiser: { firstName: { contains: q, mode: 'insensitive' } } },
+      { advertiser: { lastName: { contains: q, mode: 'insensitive' } } },
+      { advertiser: { displayId: { contains: q, mode: 'insensitive' } } },
+      { advertiser: { advertiserProfile: { is: { name: { contains: q, mode: 'insensitive' } } } } },
+      { advertiser: { advertiserProfile: { is: { displayId: { contains: q, mode: 'insensitive' } } } } },
+    ],
+  };
+}
+
+/** Order fraud screening: the order as the screening and the desk read it — `OrderRiskState`, nothing wider. */
+const riskStateSelect = {
+  id: true,
+  displayId: true,
+  status: true,
+  advertiserId: true,
+  listingId: true,
+  agentId: true,
+  budget: true,
+  startDate: true,
+  endDate: true,
+  createdAt: true,
+  riskScore: true,
+  riskSignals: true,
+  riskBand: true,
+  riskScoredAt: true,
+  riskReviewStatus: true,
+  riskReviewedById: true,
+  riskReviewedAt: true,
+  riskReviewNote: true,
+  riskClearedSignalKeys: true,
+  heldAt: true,
+  heldById: true,
+  holdReason: true,
+  fraudCaseId: true,
+  campaignSpot: { select: { campaignId: true } },
+} as const satisfies Prisma.OrderSelect;
+
+/** The fraud review queue's tabs, as where-fragments. ALL is every order the screening scored or anybody held. */
+const RISK_REVIEW_WHERE: Record<RiskReviewStatusFilter, Prisma.OrderWhereInput> = {
+  FLAGGED: { riskReviewStatus: 'FLAGGED' },
+  HELD: { heldAt: { not: null } },
+  CLEARED: { riskReviewStatus: 'CLEARED' },
+  CONFIRMED: { riskReviewStatus: 'CONFIRMED_FRAUD' },
+  ALL: { OR: [{ riskScoredAt: { not: null } }, { heldAt: { not: null } }] },
+};
+
+/** The order board's flags beside the status: held, and what the screening says. Not the signals — the page reads those. */
+const BOARD_RISK_COLUMNS = { heldAt: false, holdReason: false, riskScore: false, riskBand: false, riskReviewStatus: false } as const;
+
+/** Where an order can no longer be held or screened: it has finished, one way or the other. */
+const CLOSED_STATUSES: OrderStatus[] = ['COMPLETED', 'CANCELLED'];
 
 /**
  * One page of a persona's own orders.
@@ -86,6 +233,9 @@ async function myOrdersPage(
       where,
       orderBy,
       ...listArgs(query),
+      // Order fraud screening: the hold alone, so the row can carry the neutral
+      // `reviewNotice`; the query maps it and drops the column (orders.queries).
+      omit: { heldAt: false },
       include: {
         ...include,
         // Lot B (Q102): the accepted offer's quote rides on every row, so the
@@ -102,7 +252,7 @@ async function myOrdersPage(
     prisma.order.groupBy({ by: ['status'], where: scope, _count: { _all: true } }),
   ]);
   const rows: MyOrderRow[] = items.map(({ agentAssignments, ...row }) => ({
-    ...(row as Order),
+    ...(row as OrderRead),
     quotedFee: agentAssignments[0]?.quotedFee ?? null,
   }));
   return { items: rows, total, counts: countsFrom(groups, ORDER_STATUSES) };
@@ -150,6 +300,10 @@ export const prismaOrdersRepository: OrdersRepository = {
 
   findById(orderId: string) {
     return prisma.order.findUnique({ where: { id: orderId } });
+  },
+
+  findWithCompletionCode(orderId: string) {
+    return prisma.order.findUnique({ where: { id: orderId }, omit: { completionOtp: false, completionOtpPlain: false } });
   },
 
   findSummary(orderId: string) {
@@ -224,20 +378,25 @@ export const prismaOrdersRepository: OrdersRepository = {
       where: { id: orderId },
       include: {
         listing: {
+          omit: LISTING_PRIVATE_OMIT,
           include: {
-            publisher: { include: { user: true } },
-            agent: { include: { user: true } },
+            publisher: { select: orderPublisherSelect },
+            // The spot's managing agent: no client draws them from an order.
+            agent: { select: { id: true, displayId: true } },
           },
         },
-        advertiser: true,
-        agent: { include: { user: true } },
+        // The publisher's booking page prints the advertiser's name.
+        advertiser: { select: personSelect },
+        agent: { select: orderAgentSelect },
         agentAssignments: {
-          include: { agent: { include: { user: true } } },
+          include: { agent: { select: orderAgentSelect } },
           orderBy: { assignedAt: 'desc' },
         },
         checkIn: true,
         verification: true,
         milestones: { include: { template: true }, orderBy: { order: 'asc' } },
+        /* OM-1: the campaign, for the detail page's link up to it. */
+        campaignSpot: { select: { campaignId: true } },
       },
     });
   },
@@ -331,19 +490,20 @@ export const prismaOrdersRepository: OrdersRepository = {
   },
 
   findForAdvertiser(advertiserId: string, query: MyOrdersQuery) {
-    return myOrdersPage({ advertiserId }, query, { listing: true });
+    // LD-1: the advertiser reads the spot, not the publisher's own statement to ADX.
+    return myOrdersPage({ advertiserId }, query, { listing: { omit: { ...LISTING_PUBLISHER_RECORD_OMIT, ...LISTING_PRIVATE_OMIT } } });
   },
 
   findForPublisherUser(publisherUserId: string, query: MyOrdersQuery) {
     return myOrdersPage(
       { listing: { publisher: { userId: publisherUserId } } },
       query,
-      { listing: true },
+      { listing: { omit: LISTING_PRIVATE_OMIT } },
     );
   },
 
   findForAgent(agentProfileId: string, query: MyOrdersQuery) {
-    return myOrdersPage({ agentId: agentProfileId }, query, withPublisher);
+    return myOrdersPage({ agentId: agentProfileId }, query, withPublisherContact);
   },
 
   findAgentOrderIdsInStatuses(agentProfileId: string, statuses: string[]) {
@@ -382,19 +542,10 @@ export const prismaOrdersRepository: OrdersRepository = {
       ...(query.city ? { listing: { city: { contains: query.city, mode: 'insensitive' } } } : {}),
       // E7-2: the advertiser account, through the campaign spot the order was raised from.
       ...(query.advertiserId ? { campaignSpot: { campaign: { advertiserId: query.advertiserId } } } : {}),
+      // OM-2: one campaign's orders, through the spot each was raised from.
+      ...(query.campaignId ? { campaignSpot: { campaignId: query.campaignId } } : {}),
       ...(window.length ? { AND: window } : {}),
-      ...(query.q
-        ? {
-            OR: [
-              { campaignName: { contains: query.q, mode: 'insensitive' } },
-              { listing: { title: { contains: query.q, mode: 'insensitive' } } },
-              { listing: { address: { contains: query.q, mode: 'insensitive' } } },
-              { listing: { city: { contains: query.q, mode: 'insensitive' } } },
-              { agent: { user: { name: { contains: query.q, mode: 'insensitive' } } } },
-              { agent: { displayId: { contains: query.q, mode: 'insensitive' } } },
-            ],
-          }
-        : {}),
+      ...(query.q ? orderSearchWhere(query.q) : {}),
     };
     const where: Prisma.OrderWhereInput = {
       ...base,
@@ -415,12 +566,28 @@ export const prismaOrdersRepository: OrdersRepository = {
         where,
         orderBy,
         ...listArgs(query),
-        include: { listing: true, agent: { include: { user: true } } },
+        // Order fraud screening: the "Held" pill and the screening's verdict beside the status (ADX's own board).
+        omit: BOARD_RISK_COLUMNS,
+        /* OM-1: the campaign the order was raised from, so the console can
+           link an order to its campaign. Null for an order placed straight
+           onto a listing by the legacy route. */
+        include: {
+          listing: true,
+          // The board's agent column; the console's own read, so the number rides along.
+          agent: { select: orderAgentSelect },
+          campaignSpot: { select: { campaignId: true } },
+          /* PB-1: who placed it, shaped into `placedBy` by the query. */
+          advertiser: { select: placerSelect },
+        },
       }),
       prisma.order.count({ where }),
       prisma.order.groupBy({ by: ['status'], where: base, _count: { _all: true } }),
     ]);
     return { items, total, counts: countsFrom(groups, ORDER_STATUSES) };
+  },
+
+  findPlacer(userId: string) {
+    return prisma.user.findUnique({ where: { id: userId }, select: placerSelect });
   },
 
   findOpenForListings(listingIds: string[]) {
@@ -565,5 +732,75 @@ export const prismaOrdersRepository: OrdersRepository = {
       // checkedInAt is refreshed on re-check-in but set by default on create.
       update: { ...data, checkedInAt: new Date() },
     });
+  },
+
+  /* ── Order fraud screening (2 Oct 2026) ───────────────────────────── */
+
+  findRiskState(orderId: string) {
+    return prisma.order.findUnique({ where: { id: orderId }, select: riskStateSelect }) as Promise<OrderRiskState | null>;
+  },
+
+  findHold(orderId: string) {
+    return prisma.order.findUnique({ where: { id: orderId }, select: { heldAt: true } });
+  },
+
+  updateRisk(orderId, patch) {
+    const { riskSignals, ...rest } = patch;
+    return prisma.order.update({
+      where: { id: orderId },
+      data: { ...rest, ...(riskSignals !== undefined ? { riskSignals: riskSignals === null ? Prisma.DbNull : riskSignals } : {}) },
+      select: riskStateSelect,
+    }) as Promise<OrderRiskState>;
+  },
+
+  async holdIfOpen(orderId, hold) {
+    const result = await prisma.order.updateMany({
+      where: { id: orderId, heldAt: null, status: { notIn: CLOSED_STATUSES } },
+      data: hold,
+    });
+    return result.count === 1;
+  },
+
+  async releaseIfHeld(orderId) {
+    const result = await prisma.order.updateMany({
+      where: { id: orderId, heldAt: { not: null } },
+      data: { heldAt: null, heldById: null, holdReason: null },
+    });
+    return result.count === 1;
+  },
+
+  async findRiskReviewPage(query) {
+    const base: Prisma.OrderWhereInput = query.q ? orderSearchWhere(query.q) : {};
+    const where: Prisma.OrderWhereInput = { AND: [base, RISK_REVIEW_WHERE[query.status]] };
+    const orderBy: Prisma.OrderOrderByWithRelationInput[] =
+      query.sort === 'newest' ? [{ createdAt: 'desc' }] : [{ riskScore: { sort: 'desc', nulls: 'last' } }, { createdAt: 'desc' }];
+    const [items, total, ...tabCounts] = await Promise.all([
+      prisma.order.findMany({
+        where,
+        orderBy,
+        ...listArgs(query),
+        omit: ORDER_RISK_COLUMNS,
+        include: {
+          listing: true,
+          agent: { select: orderAgentSelect },
+          campaignSpot: { select: { campaignId: true } },
+          advertiser: { select: placerSelect },
+        },
+      }),
+      prisma.order.count({ where }),
+      ...RISK_REVIEW_STATUSES.map((status) => prisma.order.count({ where: { AND: [base, RISK_REVIEW_WHERE[status]] } })),
+    ]);
+    const counts = Object.fromEntries(RISK_REVIEW_STATUSES.map((status, i) => [status, tabCounts[i] ?? 0]));
+    return { items, total, counts };
+  },
+
+  async findOpenOrderIds(afterId, limit) {
+    const rows = await prisma.order.findMany({
+      where: { status: { notIn: CLOSED_STATUSES }, ...(afterId ? { id: { gt: afterId } } : {}) },
+      orderBy: { id: 'asc' },
+      take: limit,
+      select: { id: true },
+    });
+    return rows.map((row) => row.id);
   },
 };

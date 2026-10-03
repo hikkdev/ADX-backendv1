@@ -1,4 +1,5 @@
 import { ApiError } from '../../shared/errors';
+import { logger } from '../../shared/logging';
 
 /* ------------------------------------------------------------------ */
 /* The print shop's application door — PP-1                            */
@@ -38,4 +39,44 @@ export async function applyAsPrintPartner(
     throw new ApiError(503, 'PARTY_UNAVAILABLE', 'Print partner applications are not open on this server');
   }
   return partnerApplication.apply(userId, input);
+}
+
+/* ------------------------------------------------------------------ */
+/* Deactivate / Reactivate, cascaded onto the profiles                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Account lifecycle (2 Oct 2026): a user's Deactivate also suspends the
+ * user's publisher, advertiser and agent profiles with BLOCK_NEW, and
+ * Reactivate lifts exactly what Deactivate placed. The suspension module owns
+ * that act, and it imports `users` (the actor labels), so the door is a port
+ * `bootstrap/register-modules` fills. Unregistered, the user's sign-in still
+ * switches and the profiles are left as they are, logged.
+ */
+export type ProfileRef = { partyType: string; partyId: string };
+export type AccountLifecyclePort = {
+  onDeactivated(userId: string, byUserId: string): Promise<ProfileRef[]>;
+  onReactivated(userId: string, byUserId: string): Promise<ProfileRef[]>;
+};
+
+let lifecycle: AccountLifecyclePort | null = null;
+
+export function registerAccountLifecyclePort(port: AccountLifecyclePort | null): void {
+  lifecycle = port;
+}
+
+export async function cascadeDeactivation(userId: string, byUserId: string): Promise<ProfileRef[]> {
+  if (!lifecycle) {
+    logger.warn('User deactivated with no lifecycle port: the profiles were not suspended', { userId });
+    return [];
+  }
+  return lifecycle.onDeactivated(userId, byUserId);
+}
+
+export async function cascadeReactivation(userId: string, byUserId: string): Promise<ProfileRef[]> {
+  if (!lifecycle) {
+    logger.warn('User reactivated with no lifecycle port: the profiles were not reinstated', { userId });
+    return [];
+  }
+  return lifecycle.onReactivated(userId, byUserId);
 }

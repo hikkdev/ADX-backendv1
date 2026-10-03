@@ -94,7 +94,7 @@ describe('MSG91', () => {
   it('reads a delivery report array into per-request statuses', async () => {
     const rail = createMsg91Rail();
     const reports = await rail.parseDeliveryWebhook({
-      url: 'https://api.adx.local/api/v1/webhooks/msg91',
+      url: 'https://api.adx.in/api/v1/webhooks/msg91',
       headers: {},
       body: [
         { requestId: 'req-1', report: [{ number: '919845012210', status: '1', desc: 'DELIVERED', date: '2026-09-12 10:00:00' }] },
@@ -137,7 +137,7 @@ describe('Twilio', () => {
 
   it('accepts a correctly signed status callback and refuses a forged one', async () => {
     const rail = createTwilioRail();
-    const url = 'https://api.adx.local/api/v1/webhooks/twilio';
+    const url = 'https://api.adx.in/api/v1/webhooks/twilio';
     const body = { MessageSid: 'SM1', MessageStatus: 'undelivered', ErrorCode: '30003' };
     const good = await rail.parseDeliveryWebhook({ url, headers: { 'x-twilio-signature': twilioSignature('tok', url, body) }, body });
     expect(good).toEqual([{ providerMessageId: 'SM1', status: 'FAILED', error: 'Twilio error 30003' }]);

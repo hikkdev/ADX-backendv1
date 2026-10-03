@@ -132,6 +132,16 @@ describe('cancelSpotsForOrders', () => {
     repository.findSpotsByOrderIds.mockResolvedValue([]);
     await expect(cancelSpotsForOrders(['ord_1'], NOW)).resolves.toEqual([]);
   });
+
+  // Order fraud screening (2 Oct 2026): the desk's "Cancel as fraud" dialog reads the same figure, writing nothing.
+  it('as a dry run answers the same figure and cancels no spot', async () => {
+    repository.findSpotsByOrderIds.mockResolvedValue([spot(), spot({ id: 'spt_2', quantity: 2, ratePerDay: new Decimal('500.00') })]);
+    const dry = await cancelSpotsForOrders(['ord_1', 'ord_2'], NOW, { dryRun: true });
+    expect(repository.updateSpot).not.toHaveBeenCalled();
+    const real = await cancelSpotsForOrders(['ord_1', 'ord_2'], NOW);
+    expect(dry).toEqual(real);
+    expect(repository.updateSpot).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe('cancelAdvertiserCampaigns', () => {

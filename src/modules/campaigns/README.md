@@ -11,11 +11,19 @@ the arithmetic is `revenue`'s, fulfilment is `orders`'.
 | --- | --- | --- |
 | `GET/POST /campaigns`, `GET/PATCH/DELETE /campaigns/:id` | advertiser, agent, admin | the draft and its seventeen steps; E6: `GET /campaigns/:id` carries `refund: { id, amount, status, reason, releasedAt } \| null` from the `CampaignRefund` the cancel recorded; E7-2: each spot carries `reviewed: boolean` and `reviewId \| null` through `SpotReviewPort` (`spot-review.port.ts`, filled by `reviews` from bootstrap — this module cannot import `reviews` back; unregistered, every spot reads unreviewed); E11-2: `GET /campaigns/:id` carries `landingPage: { id, slug, status, url, publishedAt } \| null` — one narrow read through the `landingPage` relation (`landingPageSummary`), never the blocks; T-B: the detail also carries `city` (`targetLocation`) and `spotCount`, the list row's two derived columns — `campaignDetailView` in the controller is the one view |
 | `GET /campaigns/:id/inventory`, `PUT /campaigns/:id/spots` | same | the match and the cart; T-B: the cart write answers the same detail view `GET /campaigns/:id` answers |
+| `PATCH /campaigns/:id { placementPreferences, brandApprovalRequired, contactName, contactEmail, contactPhone }`, `creativeConfig.notes` | same | WG-1 (DR 12 boards 04/05): the placement wishes (`avoidAlcohol / avoidPolitical / avoidCompetitors / note`, null clears), whether the brand signs off the artwork before launch, the campaign contact the production step draws, and the design notes under the ADX brief — stored as stated, read beside the brief; nothing enforces them yet |
+| `POST /campaigns/:id/design-quote { amount, note? }` (ADMIN, `content.edit`), `POST /campaigns/:id/design-quote/respond { decision }` (the advertiser or their agent) | — | DQ-1 (DR 12 board 05): ADX's price for designing the artwork on an `ADX_DESIGN_AGENCY` campaign, before payment. QUOTED → ACCEPTED \| DECLINED; an accepted quote is `review.designFee` (taxed as the media is) and a DESIGN line on the invoice; the design-requests desk carries `campaign.designQuote`. Audited `CAMPAIGN_DESIGN_QUOTED` / `…_ACCEPTED` / `…_DECLINED` |
+| `POST /campaigns/:id/reserve`, `POST /campaigns/:id/reserve/pay` | same | RF-1 (the owner, 25 Sep 2026): a checkout at or above `settings.booking.reservationFee.minCheckoutValue` is reserved — spots held for `holdHours`, PENDING_PAYMENT, and a fee of `feePct` of the total falls DUE within `payWithinMinutes` (409 `RESERVATION_NOT_OFFERED` under the threshold). `/pay` takes the fee from the wallet into a hold; a gateway pays it through `POST /payments/intents { campaignId, purpose: 'RESERVATION_FEE' }`. Going ahead (`/authorize`, or a gateway payment for `campaignPaymentQuote.total`, now the total less the fee) releases the fee's hold into the full hold (ADJUSTED). A cancel while reserved, or the lapsed day, forfeits it: `retainPct` to platform:revenue as a PENALTY, the rest left in the wallet (RETAINED). An unpaid fee lapses after the hour (LAPSED; the campaign back to DRAFT unless ops had sent it). `GET /campaigns/:id` carries `reservation`; `GET /campaigns/:id/review` carries `reservationFee` (the offer). Audited `CAMPAIGN_RESERVED` / `…_RESERVATION_FEE_PAID` / `…_RESERVATION_FORFEITED` |
+| `PUT /campaigns/:id/spots` — `items[].fulfilment` | same | PS-1: a spot's own print choice (`ADX_PRINTS` \| `ADVERTISER_SHIPS`); null means the campaign's. A spot the advertiser ships for takes no PRINTING fee, on the review and on the invoice alike |
+| `GET /campaigns/:id/review` — `discountGst` | same | GST-D (the owner, 25 Sep 2026): a discount (manual or promo) comes off the taxable value; the tax is charged on what is paid, and `discountGst` is the tax the discount took with it. The invoice's discount line carries the same negative GST |
+| `POST /campaigns/:id/promo { code }`, `DELETE /campaigns/:id/promo` | same | PC-1 (DR 12, 25 Sep 2026): a promo code on and off the booking, DRAFT or PENDING_PAYMENT only (409 CONFLICT after payment). The code must exist (404 `PROMO_NOT_FOUND`) and pass `promo-codes.promoProblem` against this booking's media + fees (409 `PROMO_NOT_APPLICABLE`, the message says why). Both answer the review re-priced: `discount` is what the code takes off (`promo-codes.discountFor`: percent or flat, capped, never more than the base; GST stays as charged on the lines) and `promo: { code, amount }` names it; `GET /campaigns/:id/review` carries the same. At authorise the code is spent — one `PromoRedemption` per campaign, for what it took off, snapshotted into `Campaign.discount` — and a cancel releases it. Audited `CAMPAIGN_PROMO_APPLIED` / `CAMPAIGN_PROMO_REMOVED` |
 | `GET /campaigns/content-categories` | same | Lot D (Q138): the seeded content categories the wizard asks about (`contentCategoryId` on the patch) |
 | `POST/DELETE /campaigns/:id/creatives[/:creativeId]` | same | artwork; an upload is a submission (Lot D, Q44) — see below; T-B: the upload answers the desk's row (the artwork with its `campaign` and `spot`), the same read `GET /campaigns/creatives/:creativeId` makes |
 | `POST /campaigns/:id/creatives/:creativeId/accept`, `/request-changes { note }` | advertiser or their agent — never an admin | Lot D (Q120): the answer to ADX-designed artwork |
-| `GET /campaigns/creatives/review-queue?status=&kind=&flagged=&resubmitted=&q=&sort=&page=&pageSize=` | ADMIN | the desk, on the list contract with status counts; E7-2: `counts` also carries `flagged`, `static`, `video`, `resubmitted`, counted over the same scope as the histogram |
-| `GET /campaigns/creatives/:creativeId` | ADMIN | one artwork with its campaign, spot, checks and flags |
+| `GET /campaigns/creatives/review-queue?status=&kind=&flagged=&resubmitted=&analysed=&q=&sort=&page=&pageSize=` | ADMIN | the desk, on the list contract with status counts; E7-2: `counts` also carries `flagged`, `static`, `video`, `resubmitted`, counted over the same scope as the histogram; VA-4: `analysed=true|false` is the reading facet, `counts.analysed` / `counts.unanalysed` its numbers, and every row carries `analysis` — its latest vision run or null |
+| `GET /campaigns/creatives/:creativeId` | ADMIN | one artwork with its campaign, spot, checks and flags — VA-1: and `analysis`, the latest vision run or null |
+| `POST /campaigns/creatives/:creativeId/analyse` | ADMIN | VA-1: ask the vision model — appropriate, relevant, legal, PG/REGULAR/ADULT, unique; **201** the analysis; audited `CREATIVE_ANALYSED` |
+| `POST /campaigns/creatives/analyse { creativeIds? }` | ADMIN | VA-4: the batch — the named artworks (up to fifty), or with no body everything IN_REVIEW that is a still image with no reading yet, oldest first; `{ analysed, skipped, failed }`; a video or an empty slot is skipped, a vendor failure is recorded against its one artwork, "switched off" (503) stops the run |
 | `PATCH /campaigns/:id/creatives/:creativeId/review { decision, note?, checks? }` | ADMIN | APPROVED \| REJECTED \| CHANGES_REQUESTED; a note is required unless approved; audited `CREATIVE_REVIEWED` |
 | `POST /campaigns/creatives/review { creativeIds, decision, note? }` | ADMIN | the same decision across up to fifty; one audit row and notification each |
 | `GET /campaigns/:id/tracking-codes/:code/image.png?size=`, `…/image.svg` | same | Lot D (Q139): the code's QR for the artwork to embed. QR-1: drawn by the QR engine when it hosts the code — GenQR's styled artwork (the SVG carries dots, frame, caption, logo; the PNG colours only) encoding the short URL the hoarding carries — and locally otherwise, of the stored short URL when one exists, else of `/t/`; `X-QR-Engine: LOCAL \| GENQR` and `X-QR-Styled` say which |
@@ -25,10 +33,15 @@ the arithmetic is `revenue`'s, fulfilment is `orders`'.
 | `GET /campaigns/:id/landing-page` | same | the page, with `url: /p/:slug` |
 | `PATCH /campaigns/:id/landing-page { blocks?, theme? }` | same | an edit is the next `version`, live page or not; audited `LANDING_PAGE_UPDATED`; E11-2: answers `url` beside the blocks |
 | `POST /campaigns/:id/landing-page/publish` | same | PUBLISHED with `publishedAt`; needs a hero block; audited `LANDING_PAGE_PUBLISHED` |
-| `GET /campaigns/landing-pages?status=&page=&pageSize=` | ADMIN | the review list, on the list contract with status counts, each row beside its campaign — E7-2 (Lot E addendum 2): `LandingPage.campaign` is a relation now, so the campaign is the same query |
+| `GET /campaigns/landing-pages?status=&q=&page=&pageSize=` | ADMIN | the review list, on the list contract with status counts, each row beside its campaign — E7-2 (Lot E addendum 2): `LandingPage.campaign` is a relation now, so the campaign is the same query. The Campaigns lot (2 Oct 2026): `q` matches the slug, the campaign's name and reference, and the advertiser's business, person and ADV-/ADX- ids, and the status counts are taken with `q` (without the status facet); every row adds `url` (`/p/:slug`), `heroTitle` (the hero block's headline, or null), `advertiser` (the orders' `placedBy` shape — below) and the page's own `views`, `ctaClicks`, `enquiries` (lifetime, two queries per page) |
 | `POST /campaigns/:id/landing-page/unpublish { reason }` | ADMIN | back to DRAFT; audited `LANDING_PAGE_UNPUBLISHED`; the campaign's creator told why; T-B: answers the review list's row — the page with its `campaign` and advertiser (`findLandingPageView`, the list's include) |
 | `GET /p/:slug` | public | the page itself, rendered server-side — one document, no external asset; a slug nothing PUBLISHED answers to falls through to the package payment link on the same prefix |
 | `GET /campaigns/:id/review`, `POST /campaigns/:id/authorize`, `POST /campaigns/:id/cancel` | same | the bill, the booking, the cancel; E6: the authorise answers `invoice: { id, number, kind, status } \| null` — what `invoices` issued through the port inside the call, null when it could not (the desk's `POST /finance/invoices/issue` catches up) |
+| `GET /campaigns?…&city=&from=&to=&goal=&waitingOn=` | advertiser, agent, admin | The Campaigns lot (2 Oct 2026): the console's filter bar — `city` (slug or name, by the key `targetMarketCityId`, the typed `targetMarket` the fallback), `from`/`to` (`YYYY-MM-DD`, flight overlap on UTC days; `to` before `from` is a 400), `goal` (comma list), `waitingOn` (comma list of launch gates — ADMIN only, ignored for a party); `q` also matches the advertiser's business, person and ADV-/ADX- ids. ADX's rows add the console columns (below); a party's rows are unchanged |
+| `GET /campaigns/launch-queue?reason=&q=&city=&page=&pageSize=` | ADMIN + `demand.view` | The Campaigns lot: paid (or reservation-fee-paid) campaigns that cannot go live yet, oldest-waiting first — see below |
+| `POST /campaigns/:id/remind-payment` | ADMIN + `demand.edit` | The Campaigns lot: the advertiser of a PENDING_PAYMENT campaign is told to pay (or to pay the reservation fee while that is DUE) by the in-app notification; once per 24 h per campaign (429 `TOO_MANY_REQUESTS` with `details.lastRemindedAt`/`nextAllowedAt`), 409 for anything else, an advertiser with no login, or an account that is not working; audited `CAMPAIGN_PAYMENT_REMINDED`. Answers `{ campaignId, reference, about: PAYMENT\|RESERVATION_FEE, amountDue, remindedAt, nextAllowedAt }` |
+| `GET /campaigns/:id/cancel-impact` | whoever may cancel (`assertMayAct`) | The Campaigns lot: what `POST /campaigns/:id/cancel` would do, written nowhere — `{ campaignId, reference, status, cancellable, notCancellableBecause: ALREADY_CANCELLED\|COMPLETED\|null, holdReleased, refundNeeded, refundAmount, unusedDays, reservationFee: { status: PAID, fee, retained, returned } \| { status: DUE, fee, retained: null, returned: null } \| null }`; the same arithmetic as the cancel (`unusedValueOf`, `retainedPartOf`) |
+| `GET /campaigns/:id/performance` | advertiser, their agent, admin (`assertMayAct`) | The Campaigns lot: the campaign page's Performance card — `{ campaignId, reference, status, startDate, endDate, lifetime: { scans, views, ctaClicks, enquiries }, series: [{ day, scans, views, ctaClicks, enquiries }] }`; `lifetime` is the codes' scan counters and the landing page's events, `series` one point per flight day run (UTC days, zeros filled, empty before the start) from the same event read the analytics chart uses |
 | `POST /campaigns/:id/submit-for-payment` | ADMIN or the campaign's agent | Lot C (Q88): the finished brief sent to the advertiser to pay — PENDING_PAYMENT, the spots held 24 h, the advertiser told; audited `CAMPAIGN_SUBMITTED_FOR_PAYMENT`; answers `{ campaign, review, reservedUntil }` — T-B: `campaign` is the detail view `GET /campaigns/:id` answers |
 | `POST /campaigns/:id/authorize { confirm, approvedByUserId? }` | ADMIN | Lot C (Q88): authorising on the advertiser's behalf out of their wallet — the reference typed back, a second admin at or above `finance.opsAuthoriseThreshold` (409 `FOUR_EYES`); audited `CAMPAIGN_AUTHORIZED_ON_BEHALF` |
 | `GET /campaigns/analytics?days=`, `GET /campaigns/:id/analytics?days=`, tracking codes and redemptions | same | what the campaign did; E11-2: the per-campaign `spend` carries `onTrack: boolean \| null` (spend to date no faster than what was committed — the portfolio's own test; null with nothing committed), and both reads carry `comparison: { window: { days, from, to, previousFrom, previousTo }, totalReach, clickRate, budgetSpent }` — each metric `{ previous, deltaPct, provenance, basis } \| null`, the current window (`days`, default 7, capped at 90, ending today) against the window of the same length immediately before it, both folded from the stored `CampaignDailyMetric` rows in one query (`dailyMetricsFor`); `previous` is that window's value (reach summed, click rate as clicks of scans, spend as money), `deltaPct` one decimal and null when the previous value was zero; the metric is null when the previous window has no rows (or none that carry it — no stated reach, no scans), so a first week prints no delta; provenance MEASURED for spend and the click rate, ESTIMATED for reach; the portfolio reads the rows once across every non-draft campaign it counts |
@@ -145,6 +158,65 @@ creative with a file is short of APPROVED (`blocked` in the tick's count,
 `CreativeGatePort` this module fills (`creativeGateForOrder`). Rows that
 were UPLOADED on in-flight campaigns were grandfathered APPROVED by the
 migration.
+
+## VA-1 (23 Sep 2026): the vision review — `creative-analysis.service.ts`
+
+The owner: "a vision analysis program in order to analyse creatives submitted
+by advertisers in order to determine if the creatives are appropriate,
+relevant, unique, legal and if they're PG rated or regular." On demand, from
+the workbench, and **never a decision**: the reviewer reads it, applies what
+they agree with to the checklist, and decides as before.
+
+`analyseCreative(creativeId, { userId })`:
+
+1. Reads the file through `uploads.readImageForModel` — downscaled to
+   1,024 px, JPEG, with a **perceptual hash** (a 9×8 difference hash, 64
+   bits). A creative with no file is **409** `NO_FILE`; a video is **409**
+   `ANALYSIS_UNSUPPORTED` (still images only); undecodable bytes are **409**
+   `FILE_UNREADABLE`.
+2. Asks the configured provider (`shared/ai`, `images` on the request) with
+   `CREATIVE_REVIEW_SYSTEM` and `creativePrompt(creative)` — the campaign's
+   name and industry, the spot and its size, the content category — and holds
+   the answer to `analysisAnswerSchema`: `appropriate`, `relevant`, `legal`
+   each `{ verdict: PASS | FAIL | UNSURE, reason }`, `rating` PG | REGULAR |
+   ADULT with `ratingReason`, `flags` from the fixed `ANALYSIS_FLAGS`
+   vocabulary (TOBACCO, ALCOHOL, GAMBLING, ADULT_CONTENT, VIOLENCE,
+   HATE_OR_DISCRIMINATION, POLITICAL, RELIGIOUS_SENSITIVITY,
+   MISLEADING_CLAIM, HEALTH_CLAIM, PRICE_CLAIM, MISSING_DISCLAIMER,
+   COMPETITOR_MARK, CELEBRITY_LIKENESS, CHILDREN_TARGETED, LOW_LEGIBILITY,
+   OFF_BRIEF — a word outside it becomes OTHER), `summary`, `confidence`. No
+   provider is **503** `AI_UNAVAILABLE`; an answer that does not parse is
+   **502** `AI_FAILED`.
+3. **Uniqueness is arithmetic, not the model.** The hash is stored on the
+   creative (`perceptualHash`) and compared with every other creative's by
+   Hamming distance (`nearestByHash`); within `UNIQUE_DISTANCE` (10 bits) the
+   artwork is `unique: false` with `nearest: { creativeId, distance }`; null
+   when there is nothing yet to compare with.
+4. Stores a `CreativeAnalysis` row (provider, model, the verdicts, the raw
+   answer, who asked) and audits `CREATIVE_ANALYSED`. `GET
+   /campaigns/creatives/:id` carries the latest as `analysis`.
+
+The console's workbench draws the card at the top of the rail with "Analyse
+with AI" and "Apply to checklist" — the latter is `checksFromAnalysis` on the
+console: BRAND_SAFE fails on an inappropriate or illegal reading and passes
+only when both are clean, TEXT_LEGIBLE fails on LOW_LEGIBILITY, UNSURE and
+every other row are left as the reviewer had them.
+
+**VA-4: the queue.** Every row of the review queue carries its latest
+reading (`analysis`), the queue takes `analysed=true|false` as a facet with
+`counts.analysed` / `counts.unanalysed`, and `analyseCreatives(actor,
+creativeIds?)` runs the pass over the selection or over everything pending
+that has no reading yet — one creative at a time through the same
+`analyseCreative`, so each run is audited on its own. The console draws the
+worst verdict, the rating and a near-duplicate badge on each card, and has
+"Analyse pending" on the queue and "Analyse" on the selection bar.
+
+**Training.** Nothing here trains anything. Whether ADX may use advertisers'
+creatives for training at all is a consent question for the advertiser
+agreement (OPEN-TASKS); the model is called on demand with the one picture
+and the answer is kept as the desk's own record.
+
+Tests: `__tests__/va1-creative-analysis.test.ts`.
 
 ## Lot D (Q123): the insertion order
 
@@ -305,6 +377,81 @@ The ADX page stands in when the advertiser gives no destination.
   after `trackingRouter`. The landing-page handler calls `next()` on a slug
   nothing PUBLISHED answers to, so a token still reaches the payment link;
   slugs are words plus four characters, tokens are long and random.
+
+## The Campaigns lot (2 Oct 2026): the console's reads — `console.service.ts`, `launch-gates.ts`
+
+The owner: "Campaigns section feels too weak here" / "Landing pages … we
+don't even know how they work". Everything here is ADX's read; a party's own
+reads never carry the advertiser's party row.
+
+**The advertiser, as `placedBy`.** `launch-gates.campaignAdvertiserOf` shapes
+the campaign's advertiser into the orders' PB-1 shape —
+`{ userId, name, displayId, business: { id, name, displayId } | null }`:
+`userId` the advertiser's login (null for an account the desk holds for
+somebody who has not registered), `name` the person (first and last name,
+else the display name), `displayId` the person's ADX-… id, `business` the
+advertiser profile (never null on a campaign). The repository selects the
+person column by column (`advertiserPartySelect`); the account columns it
+reads for the lifecycle predicates (`isActive`, `closedAt`, the suspension
+scopes) never leave the service. `tests/contract/no-secrets-in-responses.test.ts`
+pins it.
+
+**What a campaign waits on** (`waitingOnOf`) — one derivation for the list's
+`waitingOn`, the launch queue and the Campaigns overview's count. A DRAFT
+waits on nobody but its author; LIVE, PAUSED, COMPLETED and CANCELLED wait on
+nothing. For PENDING_PAYMENT and SCHEDULED, in this order:
+
+| Reason | When | The fact on the queue (`waitingFacts`) |
+| --- | --- | --- |
+| `RESERVATION_FEE` | PENDING_PAYMENT with the RF-1 fee DUE | `{ amount, dueAt }` |
+| `PAYMENT` | PENDING_PAYMENT otherwise (the balance, when the fee is PAID) | `{ amountDue, sentForPaymentAt, reservationFeePaid }` |
+| `DESIGN_QUOTE` | PENDING_PAYMENT on `ADX_DESIGN_AGENCY` with no quote (ADX owes one) or one QUOTED (the advertiser owes the answer) | `{ state: NOT_QUOTED\|QUOTED, amount, quotedAt }` |
+| `KYC` | paid (SCHEDULED, or the fee PAID) and the advertiser not VERIFIED — QR-16's launch gate | `{ advertiserId, kycStatus, accountState }` |
+| `ARTWORK` | artwork uploaded and not approved, a superseded one ignored (`moderation.outstandingCreatives`) — Lot D's launch gate | `{ creatives: [{ id, status, designedByAdx }] }` |
+| `PUBLISHER` | SCHEDULED with a standing spot whose order is PENDING_PUBLISHER | `{ spotIds, orderIds }` |
+| `AGENT` | SCHEDULED with a standing spot whose order is PENDING_AGENT or AGENT_REJECTED | `{ spotIds, orderIds }` |
+
+A filter by reason reads the candidates through `waitingPrefilter` — exact
+for every gate but ARTWORK, which cannot see a superseded creative (the
+resubmission is a plain column) and reads a superset — and narrows them in
+memory by the same derivation, so a row a filter keeps always says why. At
+most 5,000 candidates per read (`GATE_CANDIDATE_CAP`, logged when reached).
+
+**The list's console columns** (`GET /campaigns`, ADMIN): `advertiser`
+(`placedBy`, replacing the apps' `{ id, displayId, name }` on ADX's rows
+only), `landingPage` (`{ id, slug, status, url, publishedAt } | null` — the
+narrow summary `GET /campaigns/:id` carries, read in the same gate-facts query),
+`waitingOn`, `spotsLive` / `spotsTotal` (spots not cancelled, and
+those LIVE), `performance: { scans, views, ctaClicks, enquiries }` (lifetime:
+the codes' scan counters, the landing page's VIEW / CTA_CLICK / FORM_SUBMIT
+events), `paidAmount` (the total once `paidAt`; the reservation fee while only
+that is PAID; else null), `daysLeft` (a LIVE flight's days left, today
+included; else null). Two reads for the whole page — `campaignGateFacts` and
+`performanceTotals` — never one per row.
+
+**The launch queue** (`GET /campaigns/launch-queue`): the population is
+SCHEDULED, or PENDING_PAYMENT with the reservation fee PAID, waiting on at
+least one reason. Each row: `{ id, reference, name, status, brandName,
+startDate, endDate, total, paidAmount, paidAt, reservationFeePaidAt,
+advertiser, waitingOn, waitingFacts, waitingSince, waitingDays }` —
+`waitingSince` the payment (or the fee's), `waitingDays` whole days since;
+oldest first. `reason` (comma list) keeps the rows waiting on any of them;
+`counts` is one per reason (a campaign waiting on two counts under both) and
+`ALL`, taken without `reason`. `launchQueueSummary` (exported) counts the same
+for the section overview.
+
+**The campaign page** (`GET /campaigns/:id`, ADMIN) adds `placedBy`,
+`waitingOn`, `waitingFacts`, `paidAmount` and `daysLeft` beside the detail
+view (whose own `advertiser` stays the apps' narrow one).
+
+**References.** The canonical reference is `ADX-CMP-<year>-<six digits>`
+(`campaigns.service.nextReference`, the year from the server clock, the digits
+random and checked unique). The demo seeds write `ADX-CMP-2026-DEMO01…`
+(`src/scripts/seedDemoListings.ts` DEMO01–05, `seedDemoPlatform.ts` DEMO06
+onward). The four `ADX-CMP-probe_c1…c4` rows in the local database were
+written directly by a one-off probe on 11 Sep 2026 06:33 UTC (created by
+ADX-1109-2601, a tenth of a second apart) — no code in the repository writes
+that shape. Stored references are never rewritten.
 
 ## G7 (Q109): the Audience Breakdown — `audience` on `GET /campaigns/:id/analytics`
 

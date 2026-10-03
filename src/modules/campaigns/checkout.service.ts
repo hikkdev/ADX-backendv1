@@ -1,3 +1,4 @@
+import { assertPartyAdultForOrders } from '../../shared/age-gate';
 import { ApiError } from '../../shared/errors';
 import { logger } from '../../shared/logging';
 import { Decimal, money, ZERO, type Money } from '../../shared/money';
@@ -6,17 +7,20 @@ import {
   captureCampaignHold,
   holdForCampaign,
   releaseCampaignHold,
+  retainReservationFee,
 } from '../advertisers';
 import { findAgentTier } from '../agents';
 import { insertionOrderSigning, transactionAcceptance, type AgreementStanding, type InsertionOrderSigning } from '../agreements';
 import { getPlatformSettings } from '../app-config';
 import { createNotification } from '../notifications';
-import { notifyAdmins, placeOrder } from '../orders';
+import { announceOrdersPaid, notifyAdmins, placeOrder } from '../orders';
 import { listAdminUserIds } from '../users';
 import { recordIncentive } from '../payouts';
 import { quote as revenueQuote } from '../revenue';
+import { countRedemptions, discountFor, findPromoByCode, promoProblem, recordRedemption, releaseRedemption } from '../promo-codes';
+import { logActivity } from '../../shared/audit';
 import { prismaCampaignsRepository as repository } from './prisma-campaigns.repository';
-import type { CampaignStatus } from '../../shared/database';
+import type { CampaignStatus, FulfilmentChoice } from '../../shared/database';
 import { SlotClashError, type CampaignAggregate, type NewSpot } from './campaigns.repository';
 import {
   assertMayAct,
@@ -79,6 +83,8 @@ export type CampaignLine = {
   fees: { label: string; amount: Money }[];
   gst: Money;
   gross: Money;
+  /** PS-1: the print choice this line was priced under. */
+  fulfilment: FulfilmentChoice | null;
 };
 
 export type CampaignReview = {
@@ -91,6 +97,12 @@ export type CampaignReview = {
   feesTotal: Money;
   gstAmount: Money;
   discount: Money;
+  /** GST-D: the tax the discount took off with it — GST is charged on what is actually paid. */
+  discountGst: Money;
+  /** PC-1: the code behind `discount`, when one is on the booking. */
+  promo: { code: string; amount: Money } | null;
+  /** DQ-1: ADX's accepted design quote, as a fee on the booking; null until accepted. */
+  designFee: { amount: Money; gst: Money; note: string | null } | null;
   total: Money;
   budget: Money | null;
   /** Negative when the cart has outrun the budget. */
@@ -165,13 +177,17 @@ async function priceCampaign(
   let feesTotal = new Decimal(0);
   let gstAmount = new Decimal(0);
 
+  let mediaGstPct: Decimal | null = null;
   for (const spot of campaign.spots) {
+    // PS-1: a spot the advertiser ships prints for takes no printing fee.
+    const fulfilment = spot.fulfilment ?? campaign.fulfilment;
     const bill = await revenueQuote({
       listingId: spot.listingId,
       days: spot.days,
       spots: spot.quantity,
       ratePerDay: money(spot.ratePerDay),
       ...(campaign.startDate ? { at: campaign.startDate } : {}),
+      ...(fulfilment === 'ADVERTISER_SHIPS' ? { excludeFeeKinds: ['PRINTING' as const] } : {}),
     });
     commissions.set(spot.id, {
       commissionPct: bill.publisher.commissionPct,
@@ -179,6 +195,7 @@ async function priceCampaign(
     });
 
     const media = bill.lines.find((line) => line.kind === 'MEDIA');
+    if (media && mediaGstPct === null && media.gstPct !== undefined && media.gstPct !== null) mediaGstPct = new Decimal(media.gstPct);
     const fees = bill.lines
       .filter((line) => line.kind !== 'MEDIA')
       .map((line) => ({ label: line.label, amount: line.taxableValue }));
@@ -205,11 +222,36 @@ async function priceCampaign(
       fees,
       gst: bill.gstAmount,
       gross: bill.grossTotal,
+      fulfilment: fulfilment ?? null,
     });
   }
 
-  const discount = campaign.discount ? new Decimal(campaign.discount) : ZERO;
-  const total = spotsSubtotal.plus(feesTotal).plus(gstAmount).minus(discount);
+  // DQ-1: an accepted design quote is a fee on the booking, taxed as the media is.
+  const designFee =
+    campaign.designQuoteStatus === 'ACCEPTED' && campaign.designQuoteAmount
+      ? (() => {
+          const amount = new Decimal(campaign.designQuoteAmount);
+          const gst = amount.times(mediaGstPct ?? new Decimal('0.18')).toDecimalPlaces(2);
+          return { amount, gst, note: campaign.designQuoteNote ?? null };
+        })()
+      : null;
+  if (designFee) {
+    feesTotal = feesTotal.plus(designFee.amount);
+    gstAmount = gstAmount.plus(designFee.gst);
+  }
+
+  // PC-1: a promo code takes its cut off media + fees at every review, so
+  // a cart that changes after the code went on is re-discounted; without a
+  // code the stored figure (a desk's manual discount) stands as before.
+  // GST-D (the owner, 25 Sep 2026): the discount comes off the taxable
+  // value, so the tax is charged on what is actually paid — the GST the
+  // discount takes with it is its share of every line's tax.
+  const promo = campaign.promoCode ?? null;
+  const base = spotsSubtotal.plus(feesTotal);
+  const discount = Decimal.min(promo ? discountFor(promo, base) : campaign.discount ? new Decimal(campaign.discount) : ZERO, base);
+  const discountGst = base.greaterThan(0) ? gstAmount.times(discount).dividedBy(base).toDecimalPlaces(2) : ZERO;
+  gstAmount = gstAmount.minus(discountGst);
+  const total = base.minus(discount).plus(gstAmount);
   const budget = campaign.budget ? new Decimal(campaign.budget) : null;
 
   // Artwork is expected per spot on the paths that produce a file, and once for
@@ -264,6 +306,9 @@ async function priceCampaign(
     feesTotal: money(feesTotal),
     gstAmount: money(gstAmount),
     discount: money(discount),
+    discountGst: money(discountGst),
+    promo: promo ? { code: promo.code, amount: money(discount) } : null,
+    designFee: designFee ? { amount: money(designFee.amount), gst: money(designFee.gst), note: designFee.note } : null,
     total: money(total.lessThan(0) ? ZERO : total),
     budget: budget ? money(budget) : null,
     budgetRemaining: budget ? money(budget.minus(spotsSubtotal)) : null,
@@ -316,7 +361,7 @@ async function signingOf(campaignId: string): Promise<InsertionOrderSigning> {
  */
 export async function setCart(
   campaign: CampaignAggregate,
-  items: { listingId: string; quantity?: number; matchScore?: number | null }[]
+  items: { listingId: string; quantity?: number; matchScore?: number | null; fulfilment?: 'ADX_PRINTS' | 'ADVERTISER_SHIPS' | null }[]
 ): Promise<CampaignAggregate> {
   if (!campaign.startDate || !campaign.endDate) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'Set the flight dates before choosing spots.');
@@ -359,6 +404,7 @@ export async function setCart(
       campaignId: campaign.id,
       listingId: listing.id,
       matchScore: item.matchScore ?? null,
+      fulfilment: item.fulfilment ?? null,
       ratePerDay: rate,
       days,
       quantity,
@@ -447,7 +493,7 @@ async function recordCampaignAssist(
  * the advertiser to pay happens before they have accepted it, and the
  * acceptance is their own click, never ops'.
  */
-function assertAuthorisable(
+export function assertAuthorisable(
   campaign: Pick<CampaignAggregate, 'status' | 'walletHoldId'>,
   review: CampaignReview,
   options: { agreement: boolean } = { agreement: true }
@@ -500,6 +546,27 @@ function assertAuthorisable(
   }
 }
 
+/**
+ * AGE-1 (the owner, 29 Sep 2026): an order needs the account holder 18 or
+ * over with a date of birth on file — the advertiser's own person, whoever
+ * presses the button (their agent and the desk included; see
+ * `shared/age-gate`). Asked first, before anything is priced or held.
+ */
+export async function assertCampaignOrderAge(campaign: Pick<CampaignAggregate, 'advertiserId'>, actor: Pick<Actor, 'userId'>): Promise<void> {
+  await assertPartyAdultForOrders({ kind: 'ADVERTISER', id: campaign.advertiserId }, { actorUserId: actor.userId });
+}
+
+/**
+ * The checkout a person presses (`POST /campaigns/:id/authorize`, the
+ * advertiser or their agent): the age gate, then the ordinary authorise.
+ * A gateway's settlement (`authorizeCampaignById`) does not ask again —
+ * its intent was refused at `POST /payments/intents` already.
+ */
+export async function checkoutCampaign(campaign: CampaignAggregate, actor: Actor, now = new Date()): Promise<AuthorizeResult> {
+  await assertCampaignOrderAge(campaign, actor);
+  return authorizeCampaign(campaign, now);
+}
+
 export async function authorizeCampaign(
   campaign: CampaignAggregate,
   now = new Date()
@@ -509,7 +576,17 @@ export async function authorizeCampaign(
 
   // Profile, agreement and funds — checked before anything is written, so a
   // campaign that cannot be paid for fails while somebody is still looking at it.
-  const eligibility = await assertCanBook(campaign.advertiserId, review.total);
+  // RF-1: a paid reservation fee is folded into the checkout — its hold is
+  // released first, so the balance it sat in counts towards the total's
+  // hold; a refusal below puts the fee's hold back as it was.
+  const feeHold = await releaseReservationFeeHold(campaign);
+  let eligibility;
+  try {
+    eligibility = await assertCanBook(campaign.advertiserId, review.total);
+  } catch (err) {
+    await reinstateReservationFeeHold(campaign, feeHold);
+    throw err;
+  }
 
   // QR-16 (the owner, 17 Sep 2026): an unverified advertiser may book and pay,
   // but the campaign does not RUN until KYC is verified. One due today stays
@@ -518,7 +595,13 @@ export async function authorizeCampaign(
   // the launch, and the detail read says so beside the campaign.
   const launchHeld = (eligibility?.launchBlockedBy ?? []).includes('KYC');
 
-  const { holdId } = await holdForCampaign(campaign.advertiserId, campaign.id, review.total);
+  let holdId: string;
+  try {
+    ({ holdId } = await holdForCampaign(campaign.advertiserId, campaign.id, review.total));
+  } catch (err) {
+    await reinstateReservationFeeHold(campaign, feeHold);
+    throw err;
+  }
 
   const startsToday = !launchHeld && (campaign.startDate ? campaign.startDate <= now : false);
 
@@ -533,7 +616,18 @@ export async function authorizeCampaign(
     paidAt: now,
     launchedAt: startsToday ? now : null,
     step: 17,
+    // RF-1: the fee is in the checkout now (ADJUSTED), or was never paid and the full payment supersedes it.
+    ...(campaign.reservationFeeStatus === 'PAID'
+      ? { reservationFeeStatus: 'ADJUSTED', reservationFeeSettledAt: now, reservationHoldUntil: null }
+      : campaign.reservationFeeStatus === 'DUE'
+        ? { reservationFeeStatus: 'SUPERSEDED', reservationFeeSettledAt: now, reservationHoldUntil: null }
+        : {}),
   });
+
+  // PC-1: the code is spent now — one row per campaign, for what it took off.
+  if (campaign.promoCodeId && review.promo) {
+    await recordRedemption({ promoCodeId: campaign.promoCodeId, campaignId: campaign.id, advertiserId: campaign.advertiserId, amount: new Decimal(review.discount) });
+  }
 
   /*
    * A live campaign's money is spent on the day it starts. A scheduled one keeps
@@ -553,6 +647,7 @@ export async function authorizeCampaign(
   const invoice = await campaignInvoicing.issueForCampaign(campaign.id, campaign.createdByUserId);
 
   const failedSpots: AuthorizeResult['failedSpots'] = [];
+  const placedOrderIds: string[] = [];
 
   for (const spot of campaign.spots) {
     if (spot.status !== 'RESERVED') continue;
@@ -575,6 +670,7 @@ export async function authorizeCampaign(
         forCampaignId: campaign.id,
         quantity: spot.quantity,
       });
+      placedOrderIds.push(order.id);
       await repository.updateSpot(spot.id, {
         status: startsToday ? 'LIVE' : 'BOOKED',
         orderId: order.id,
@@ -601,6 +697,11 @@ export async function authorizeCampaign(
       });
     }
   }
+
+  // Order fraud screening (2 Oct 2026): the booking is paid and every spot now
+  // names its order — each is re-scored with the campaign and its payments in
+  // view. In the background; a scoring failure never touches the booking.
+  announceOrdersPaid(placedOrderIds);
 
   const incentive = await recordCampaignAssist(campaign, now);
 
@@ -704,7 +805,10 @@ export type CampaignPaymentQuote = {
   name: string;
   advertiserId: string;
   status: CampaignStatus;
+  /** What is collected now — the review's total less a reservation fee already paid (RF-1). */
   total: Money;
+  /** RF-1: the paid reservation fee this payment does not have to cover again; null when none. */
+  reservationFeeCredit: Money | null;
   agreements: AgreementStanding[];
 };
 
@@ -725,7 +829,8 @@ export async function campaignPaymentQuote(campaignId: string, actor: Actor): Pr
     name: campaign.name,
     advertiserId: campaign.advertiserId,
     status: campaign.status,
-    total: review.total,
+    total: money(Decimal.max(new Decimal(review.total).minus(reservationFeeCredit(campaign) ?? ZERO), ZERO)),
+    reservationFeeCredit: reservationFeeCredit(campaign) ? money(reservationFeeCredit(campaign)!) : null,
     agreements: review.agreements,
   };
 }
@@ -766,6 +871,8 @@ export async function authorizeOnBehalf(
       { confirm: campaign.reference }
     );
   }
+  // AGE-1: the advertiser's person, not the admin's — the order is theirs.
+  await assertCampaignOrderAge(campaign, actor);
 
   const review = await reviewCampaign(campaign);
   const threshold = new Decimal((await getPlatformSettings()).finance.opsAuthoriseThreshold);
@@ -845,9 +952,7 @@ export async function cancelCampaign(
       // included — is what the desk decides on; measured before the spots
       // are marked CANCELLED below.
       refundNeeded = true;
-      const live = campaign.spots.filter((spot) => spot.status !== 'CANCELLED');
-      const days = unusedDays(campaign.startDate, campaign.endDate, now);
-      refundAmount = money(sumUnused(live, days));
+      refundAmount = money(unusedValueOf(campaign, now).amount);
       const refund = await openCampaignRefund({
         campaignId: campaign.id,
         amount: refundAmount,
@@ -858,11 +963,21 @@ export async function cancelCampaign(
     }
   }
 
+  // RF-1: walking away from a reserved booking — the fee's hold is released,
+  // ADX keeps its part, the rest stays in the wallet; an unpaid fee simply lapses.
+  if (campaign.reservationFeeStatus === 'PAID') {
+    await forfeitReservationFee(campaign, reason, byUserId, now);
+  } else if (campaign.reservationFeeStatus === 'DUE') {
+    await repository.updateCampaign(campaign.id, { reservationFeeStatus: 'LAPSED', reservationFeeSettledAt: now, reservationHoldUntil: null });
+  }
+
   for (const spot of campaign.spots) {
     if (spot.status === 'CANCELLED') continue;
     await repository.updateSpot(spot.id, { status: 'CANCELLED' });
   }
 
+  // PC-1: a cancelled booking gives its code back.
+  await releaseRedemption(campaign.id);
   await repository.updateCampaign(campaign.id, {
     status: 'CANCELLED',
     cancelledAt: now,
@@ -879,6 +994,82 @@ export async function cancelCampaign(
   }
 
   return { released, refundNeeded, campaignRefundId, refundAmount };
+}
+
+/**
+ * What a captured campaign's cancel owes back: the standing spots' daily
+ * rate for the whole undelivered days, today included. `cancelCampaign`
+ * records it; `cancelImpact` shows it first.
+ */
+function unusedValueOf(campaign: Pick<CampaignAggregate, 'spots' | 'startDate' | 'endDate'>, now: Date): { amount: Decimal; days: number } {
+  const live = campaign.spots.filter((spot) => spot.status !== 'CANCELLED');
+  const days = unusedDays(campaign.startDate, campaign.endDate, now);
+  return { amount: sumUnused(live, days), days };
+}
+
+/** RF-1: the part of a paid reservation fee ADX keeps when the booking is walked away from. */
+const retainedPartOf = (fee: Decimal, retainPct: number | string): Decimal => fee.times(new Decimal(retainPct)).dividedBy(100).toDecimalPlaces(2);
+
+/**
+ * The Campaigns lot (2 Oct 2026): what `POST /campaigns/:id/cancel` would do
+ * to this campaign, written nowhere — the console's "Cancel…" dialog and its
+ * bulk bar read it before anybody confirms. The same arithmetic as the
+ * cancel (`unusedValueOf`, `retainedPartOf`), so the dialog can never promise
+ * a figure the cancel does not raise.
+ *
+ * - `holdReleased`: a SCHEDULED campaign's wallet hold goes back whole — the money never left.
+ * - `refundAmount`: a captured campaign's unused days, recorded as a PENDING refund for the refund desk (never credited here).
+ * - `reservationFee`: a PAID fee is forfeited — `retained` kept by ADX, `returned` left in the wallet; a DUE fee simply lapses.
+ */
+export type CancelImpact = {
+  campaignId: string;
+  reference: string;
+  status: CampaignStatus;
+  cancellable: boolean;
+  /** Why not, when not: already cancelled, or finished. */
+  notCancellableBecause: 'ALREADY_CANCELLED' | 'COMPLETED' | null;
+  holdReleased: Money | null;
+  refundNeeded: boolean;
+  refundAmount: Money;
+  unusedDays: number;
+  reservationFee: { status: 'PAID'; fee: Money; retained: Money; returned: Money } | { status: 'DUE'; fee: Money | null; retained: null; returned: null } | null;
+};
+
+export async function cancelImpact(campaign: CampaignAggregate, now = new Date()): Promise<CancelImpact> {
+  const base = { campaignId: campaign.id, reference: campaign.reference, status: campaign.status };
+  if (campaign.status === 'CANCELLED' || campaign.status === 'COMPLETED') {
+    return {
+      ...base,
+      cancellable: false,
+      notCancellableBecause: campaign.status === 'CANCELLED' ? 'ALREADY_CANCELLED' : 'COMPLETED',
+      holdReleased: null,
+      refundNeeded: false,
+      refundAmount: money(0),
+      unusedDays: 0,
+      reservationFee: null,
+    };
+  }
+  const releases = !!campaign.walletHoldId && campaign.status === 'SCHEDULED';
+  const captured = !!campaign.walletHoldId && !releases;
+  const unused = captured ? unusedValueOf(campaign, now) : { amount: new Decimal(0), days: 0 };
+  const fee = reservationFeeCredit(campaign);
+  let reservationFee: CancelImpact['reservationFee'] = null;
+  if (fee) {
+    const retained = retainedPartOf(fee, (await getPlatformSettings()).booking.reservationFee.retainPct);
+    reservationFee = { status: 'PAID', fee: money(fee), retained: money(retained), returned: money(fee.minus(retained)) };
+  } else if (campaign.reservationFeeStatus === 'DUE') {
+    reservationFee = { status: 'DUE', fee: campaign.reservationFeeAmount ? money(campaign.reservationFeeAmount) : null, retained: null, returned: null };
+  }
+  return {
+    ...base,
+    cancellable: true,
+    notCancellableBecause: null,
+    holdReleased: releases && campaign.total !== null ? money(campaign.total) : null,
+    refundNeeded: captured,
+    refundAmount: money(unused.amount),
+    unusedDays: unused.days,
+    reservationFee,
+  };
 }
 
 /* ------------------------------------------------------------------ */
@@ -928,16 +1119,22 @@ const sumUnused = (
  *
  * No wallet is touched here. A refund is a two-person decision by design, and
  * this only says what it would be for.
+ *
+ * Order fraud screening (2 Oct 2026): `{ dryRun: true }` writes nothing — the
+ * spots stay as they are — and answers what the cancel would come to, for the
+ * desk's "Cancel as fraud" dialog. One computation for both, so the dialog
+ * can never promise a figure the cancel does not raise.
  */
 export async function cancelSpotsForOrders(
   orderIds: string[],
-  now = new Date()
+  now = new Date(),
+  options: { dryRun?: boolean } = {}
 ): Promise<CampaignRefund[]> {
   const spots = await repository.findSpotsByOrderIds(orderIds);
   const byCampaign = new Map<string, CampaignRefund & { total: Decimal }>();
 
   for (const spot of spots) {
-    if (spot.status !== 'CANCELLED') await repository.updateSpot(spot.id, { status: 'CANCELLED' });
+    if (spot.status !== 'CANCELLED' && !options.dryRun) await repository.updateSpot(spot.id, { status: 'CANCELLED' });
 
     const days = unusedDays(
       spot.startDate ?? spot.campaign.startDate,
@@ -1010,7 +1207,11 @@ export type CampaignInvoiceSnapshot = {
     days: number;
     quantity: number;
     lineTotal: Money;
+    /** PS-1: the print choice this spot was billed under. */
+    fulfilment: FulfilmentChoice | null;
   }[];
+  /** DQ-1: the accepted design quote, a DESIGN line on the invoice. */
+  designFee: { amount: Money; note: string | null } | null;
 };
 
 export async function findCampaignForInvoice(campaignId: string): Promise<CampaignInvoiceSnapshot | null> {
@@ -1043,7 +1244,9 @@ export async function findCampaignForInvoice(campaignId: string): Promise<Campai
       days: spot.days,
       quantity: spot.quantity,
       lineTotal: money(spot.lineTotal),
+      fulfilment: spot.fulfilment ?? campaign.fulfilment ?? null,
     })),
+    designFee: campaign.designQuoteStatus === 'ACCEPTED' && campaign.designQuoteAmount ? { amount: money(campaign.designQuoteAmount), note: campaign.designQuoteNote ?? null } : null,
   };
 }
 
@@ -1157,6 +1360,8 @@ export async function runCampaignTransitions(now = new Date()): Promise<{
           await captureCampaignHold(campaign.walletHoldId);
           // Lot B (Q13): captured, so the invoice is paid.
           await campaignInvoicing.markCampaignPaid(campaign.id);
+          // Order fraud screening: the money is taken now — the orders are re-scored, in the background.
+          announceOrdersPaid(campaign.spots.map((spot) => (spot as { orderId?: string | null }).orderId));
         }
         await repository.updateCampaign(campaign.id, { status: 'LIVE', launchedAt: now });
         for (const spot of campaign.spots) {
@@ -1289,3 +1494,239 @@ async function inviteReviews(campaign: CampaignAggregate): Promise<void> {
 /** Guards the write paths that only an owner may take. Re-exported for the controller. */
 export { assertMayAct };
 export type { Actor };
+
+/* ------------------------------------------------------------------ */
+/* PC-1: the promo code on a booking                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * "Have a promo code?" — the advertiser types one on Review & pay. The code
+ * must exist, be live, within its limits and its minimum spend against THIS
+ * booking's media + fees; then it goes on the campaign and the review is
+ * answered re-priced. Only before payment: a paid campaign's money is
+ * snapshotted and a code cannot move it.
+ */
+export async function applyPromoToCampaign(campaign: CampaignAggregate, code: string, actorUserId: string, now = new Date()): Promise<CampaignReview> {
+  if (campaign.status !== 'DRAFT' && campaign.status !== 'PENDING_PAYMENT') {
+    throw new ApiError(409, 'CONFLICT', 'A promo code goes on before the campaign is paid.');
+  }
+  const promo = await findPromoByCode(code);
+  if (!promo) throw new ApiError(404, 'PROMO_NOT_FOUND', 'That code is not one we know. Check the spelling and try again.');
+
+  // The base the rules read: this booking, priced with no code on it.
+  const { review: bare } = await priceCampaign({ ...campaign, promoCode: null, discount: null });
+  const base = new Decimal(bare.spotsSubtotal).plus(new Decimal(bare.feesTotal));
+  const [redemptions, advertiserRedemptions] = await Promise.all([countRedemptions(promo.id), countRedemptions(promo.id, campaign.advertiserId)]);
+  const problem = promoProblem(promo, { now, base, redemptions, advertiserRedemptions });
+  if (problem) throw new ApiError(409, 'PROMO_NOT_APPLICABLE', problem, { code: promo.code });
+
+  await repository.updateCampaign(campaign.id, { promoCodeId: promo.id });
+  await logActivity(actorUserId, 'CAMPAIGN_PROMO_APPLIED', {
+    module: 'campaigns',
+    targetType: 'Campaign',
+    targetId: campaign.id,
+    metadata: { code: promo.code, promoCodeId: promo.id, replaced: campaign.promoCode?.code ?? null },
+  });
+  const fresh = await repository.findCampaign(campaign.id);
+  return reviewCampaign(fresh ?? { ...campaign, promoCodeId: promo.id, promoCode: promo });
+}
+
+/** The code comes off again, before payment. Answers the review re-priced without it. */
+export async function removePromoFromCampaign(campaign: CampaignAggregate, actorUserId: string): Promise<CampaignReview> {
+  if (campaign.status !== 'DRAFT' && campaign.status !== 'PENDING_PAYMENT') {
+    throw new ApiError(409, 'CONFLICT', 'A paid campaign keeps the code it was paid with.');
+  }
+  if (campaign.promoCodeId) {
+    await repository.updateCampaign(campaign.id, { promoCodeId: null });
+    await logActivity(actorUserId, 'CAMPAIGN_PROMO_REMOVED', {
+      module: 'campaigns',
+      targetType: 'Campaign',
+      targetId: campaign.id,
+      metadata: { code: campaign.promoCode?.code ?? null, promoCodeId: campaign.promoCodeId },
+    });
+  }
+  const fresh = await repository.findCampaign(campaign.id);
+  return reviewCampaign(fresh ?? { ...campaign, promoCodeId: null, promoCode: null });
+}
+
+/* ------------------------------------------------------------------ */
+/* DQ-1: ADX's quote for designing the artwork                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The desk names a price for the design (board 05's "Awaiting quote").
+ * Only on a campaign that asked ADX to design, and only before it is paid:
+ * an accepted quote is a fee on the booking, and a paid booking's money is
+ * snapshotted. A new quote replaces an unanswered or declined one; an
+ * accepted one is refused (it is on the bill).
+ */
+export async function quoteDesign(campaign: CampaignAggregate, input: { amount: Money; note?: string | null | undefined }, byUserId: string, now = new Date()): Promise<CampaignAggregate> {
+  if (campaign.creativePath !== 'ADX_DESIGN_AGENCY') throw new ApiError(409, 'CONFLICT', 'This campaign did not ask ADX to design its artwork.');
+  if (campaign.status !== 'DRAFT' && campaign.status !== 'PENDING_PAYMENT') throw new ApiError(409, 'CONFLICT', 'A design quote goes on before the campaign is paid.');
+  if (campaign.designQuoteStatus === 'ACCEPTED') throw new ApiError(409, 'CONFLICT', 'The advertiser has accepted the standing quote; cancel the booking to change it.');
+  if (new Decimal(input.amount).lessThanOrEqualTo(0)) throw new ApiError(400, 'VALIDATION_ERROR', 'A quote has to be more than zero.');
+  await repository.updateCampaign(campaign.id, {
+    designQuoteAmount: new Decimal(input.amount),
+    designQuoteStatus: 'QUOTED',
+    designQuoteNote: input.note?.trim() || null,
+    designQuotedAt: now,
+    designQuotedByUserId: byUserId,
+    designQuoteRespondedAt: null,
+  });
+  await logActivity(byUserId, 'CAMPAIGN_DESIGN_QUOTED', { module: 'campaigns', targetType: 'Campaign', targetId: campaign.id, metadata: { amount: money(input.amount), replaced: campaign.designQuoteAmount ? money(campaign.designQuoteAmount) : null } });
+  const context = await repository.advertiserContext(campaign.advertiserId);
+  if (context?.userId) {
+    try {
+      await createNotification({
+        userId: context.userId,
+        type: 'BOOKING',
+        title: 'ADX has quoted for your artwork',
+        subtitle: campaign.name,
+        message: `Designing the artwork for ${campaign.reference} comes to INR ${money(input.amount)} plus GST. Accept it and it goes on your booking; decline it and you can upload your own.`,
+        suggestedAction: 'See the quote',
+        relatedId: campaign.id,
+        relatedType: 'CAMPAIGN',
+      });
+    } catch (err) {
+      logger.warn('Could not tell the advertiser about the design quote', { campaignId: campaign.id, err });
+    }
+  }
+  return (await repository.findCampaign(campaign.id))!;
+}
+
+/** The advertiser (or their agent) answers the quote. Only a QUOTED one, only before payment. */
+export async function respondToDesignQuote(campaign: CampaignAggregate, decision: 'ACCEPTED' | 'DECLINED', byUserId: string, now = new Date()): Promise<CampaignAggregate> {
+  if (campaign.designQuoteStatus !== 'QUOTED') throw new ApiError(409, 'CONFLICT', 'There is no open design quote on this campaign.');
+  if (campaign.status !== 'DRAFT' && campaign.status !== 'PENDING_PAYMENT') throw new ApiError(409, 'CONFLICT', 'A design quote is answered before the campaign is paid.');
+  // AGE-1: accepting buys ADX's design work — an order; declining asks nothing.
+  if (decision === 'ACCEPTED') await assertCampaignOrderAge(campaign, { userId: byUserId });
+  await repository.updateCampaign(campaign.id, { designQuoteStatus: decision, designQuoteRespondedAt: now });
+  await logActivity(byUserId, decision === 'ACCEPTED' ? 'CAMPAIGN_DESIGN_QUOTE_ACCEPTED' : 'CAMPAIGN_DESIGN_QUOTE_DECLINED', {
+    module: 'campaigns',
+    targetType: 'Campaign',
+    targetId: campaign.id,
+    metadata: { amount: campaign.designQuoteAmount ? money(campaign.designQuoteAmount) : null },
+  });
+  return (await repository.findCampaign(campaign.id))!;
+}
+
+/* ------------------------------------------------------------------ */
+/* RF-1: the reservation fee, as the checkout sees it                  */
+/* ------------------------------------------------------------------ */
+
+/** The paid fee a campaign carries, or null. */
+function reservationFeeCredit(campaign: Pick<CampaignAggregate, 'reservationFeeStatus' | 'reservationFeeAmount'>): Decimal | null {
+  return campaign.reservationFeeStatus === 'PAID' && campaign.reservationFeeAmount ? new Decimal(campaign.reservationFeeAmount) : null;
+}
+
+/** What `booking.reservationFee` offers on a checkout of this size — null when the policy cannot be read. */
+export type ReservationFeeOffer = {
+  /** The policy switch itself; `offered` is that AND the threshold. */
+  enabled: boolean;
+  offered: boolean;
+  /** The fee itself when offered, else null. */
+  amount: Money | null;
+  pct: number;
+  minCheckoutValue: number;
+  payWithinMinutes: number;
+  holdHours: number;
+  retainPct: number;
+};
+
+export async function reservationFeeOffer(total: Money): Promise<ReservationFeeOffer | null> {
+  let policy: { enabled: boolean; minCheckoutValue: number; feePct: number; payWithinMinutes: number; holdHours: number; retainPct: number } | undefined;
+  try {
+    policy = (await getPlatformSettings())?.booking?.reservationFee;
+  } catch (err) {
+    logger.warn('Could not read the reservation-fee policy', { err });
+    return null;
+  }
+  if (!policy) return null;
+  const amount = new Decimal(total).times(policy.feePct).dividedBy(100).toDecimalPlaces(2);
+  const offered = policy.enabled && new Decimal(total).greaterThanOrEqualTo(policy.minCheckoutValue) && amount.greaterThan(0);
+  return {
+    enabled: policy.enabled,
+    offered,
+    amount: offered ? money(amount) : null,
+    pct: policy.feePct,
+    minCheckoutValue: policy.minCheckoutValue,
+    payWithinMinutes: policy.payWithinMinutes,
+    holdHours: policy.holdHours,
+    retainPct: policy.retainPct,
+  };
+}
+
+type ReleasedFeeHold = { holdId: string; amount: Decimal } | null;
+
+/** At authorise: the fee's hold is released so its balance counts towards the total's hold. */
+async function releaseReservationFeeHold(campaign: CampaignAggregate): Promise<ReleasedFeeHold> {
+  const amount = reservationFeeCredit(campaign);
+  if (!amount || !campaign.reservationFeeHoldId) return null;
+  await releaseCampaignHold(campaign.reservationFeeHoldId);
+  return { holdId: campaign.reservationFeeHoldId, amount };
+}
+
+/** ... and put back when the authorise is refused after it, so the reservation stands as it was. Best-effort. */
+async function reinstateReservationFeeHold(campaign: CampaignAggregate, released: ReleasedFeeHold): Promise<void> {
+  if (!released) return;
+  try {
+    const { holdId } = await holdForCampaign(campaign.advertiserId, campaign.id, money(released.amount));
+    await repository.updateCampaign(campaign.id, { reservationFeeHoldId: holdId });
+  } catch (err) {
+    logger.error('Could not put the reservation fee hold back after a refused authorise', { campaignId: campaign.id, err });
+  }
+}
+
+/**
+ * The advertiser walks away (a cancel while PENDING_PAYMENT) or the hold
+ * lapses: the fee's hold is released, `retainPct` of it goes to ADX as a
+ * PENALTY, and the rest stays in the wallet as spendable balance — a refund
+ * to the bank goes through the wallet's refund desk, with the advertiser's
+ * consent, as any wallet balance does. Idempotent: a fee not PAID answers null.
+ */
+export async function forfeitReservationFee(
+  campaign: CampaignAggregate,
+  reason: string,
+  byUserId: string | null,
+  now = new Date(),
+): Promise<{ fee: Money; retained: Money; returned: Money } | null> {
+  const fee = reservationFeeCredit(campaign);
+  if (!fee) return null;
+  const retained = retainedPartOf(fee, (await getPlatformSettings()).booking.reservationFee.retainPct);
+  if (campaign.reservationFeeHoldId) await releaseCampaignHold(campaign.reservationFeeHoldId);
+  if (retained.greaterThan(0)) {
+    await retainReservationFee(campaign.advertiserId, campaign.id, money(retained), `Reservation fee kept on ${campaign.reference}: ${reason}`);
+  }
+  await repository.updateCampaign(campaign.id, {
+    reservationFeeStatus: 'RETAINED',
+    reservationFeeRetained: retained,
+    reservationFeeSettledAt: now,
+    reservationHoldUntil: null,
+  });
+  if (byUserId) {
+    await logActivity(byUserId, 'CAMPAIGN_RESERVATION_FORFEITED', {
+      module: 'campaigns',
+      targetType: 'Campaign',
+      targetId: campaign.id,
+      metadata: { reference: campaign.reference, fee: money(fee), retained: money(retained), reason },
+    });
+  }
+  const context = await repository.advertiserContext(campaign.advertiserId);
+  if (context?.userId) {
+    try {
+      await createNotification({
+        userId: context.userId,
+        type: 'BOOKING',
+        title: 'Reservation released',
+        subtitle: campaign.name,
+        message: `The spots reserved on ${campaign.reference} are released. Of the INR ${money(fee)} reservation fee, INR ${money(retained)} is kept and INR ${money(fee.minus(retained))} is back in your ADX wallet.`,
+        suggestedAction: 'See your wallet',
+        relatedId: campaign.id,
+        relatedType: 'CAMPAIGN',
+      });
+    } catch (err) {
+      logger.warn('Could not tell the advertiser their reservation was released', { campaignId: campaign.id, err });
+    }
+  }
+  return { fee: money(fee), retained: money(retained), returned: money(fee.minus(retained)) };
+}

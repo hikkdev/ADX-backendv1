@@ -1,5 +1,6 @@
 import { ApiError } from '../../shared/errors';
-import { lookupVehicleRc, nameMatchScore, normaliseVehicleNumber } from '../../shared/integrations';
+import { nameMatchScore, normaliseVehicleNumber } from '../../shared/integrations';
+import { routedVehicleRc } from '../../shared/verification';
 import { PROFILE_BASIC_LABEL, profileBasicsMissing } from '../../shared/kyc-state';
 import { allocateIdentifier } from '../identifiers';
 import { auditDiff, findActivityRows, logActivity } from '../../shared/audit';
@@ -10,26 +11,39 @@ import { holdsLiveGrant } from '../access-grants';
 import { findWorkingAgentProfile } from '../agents';
 import { requestPublisherLicence } from '../agreements';
 import { isFeatureEnabled } from '../feature-flags';
+import { getFlow, LISTING_FLOW_KEY } from '../app-config';
 import { createNotification } from '../notifications';
 import { activeSurge, assertCityAllows, citySupport, cityKeyFor, classifySpot, suggestedRate, withCityKey } from '../pricing';
 import { areaFrom, ratePerDayFrom } from './listing-pricing';
+import { coverPhotoUrlOf } from './photos';
+import {
+  flowFieldLabels,
+  hasUnmappedAnswers,
+  mergeExtraAnswers,
+  stampWaivers,
+  termsTickedOn,
+  termsVersionOf,
+  unmappedAnswers,
+} from './listing-answers';
 import { prismaListingsRepository as repository } from './prisma-listings.repository';
 import { assertSlotsAllowed, carriesLoop, slotsHeldFor, slotsLeft, todayWindow } from './slots.service';
 import type {
   ListingCategory,
   ListingStatus,
   PricingUnit,
+  Prisma,
   RateGrade,
 } from '../../shared/database';
 import type {
   ContentRule,
   ListingPatch,
   NewListing,
+  NewListingPhoto,
   ReviewCaseListing,
   ReviewDocument,
   ReviewQueueListing,
 } from './listings.repository';
-import type { AdminListingsQuery, ReviewQueueQuery, SendBackOutcome } from './listings.schema';
+import type { AdminListingsQuery, DocumentWaiverInput, ExtraAnswer, ReviewQueueQuery, SendBackOutcome } from './listings.schema';
 
 /**
  * A listing as the API receives it, before the pricing engine has classified it.
@@ -37,10 +51,25 @@ import type { AdminListingsQuery, ReviewQueueQuery, SendBackOutcome } from './li
  * `mediaTypeName` is words; `mediaTypeId` is a decision already taken. Sending
  * the name is what puts a new spot through the similarity threshold.
  */
+/**
+ * LD-1: what a form states that the service turns into columns — the extra
+ * answers and waivers as sent (stamped here), the two ticks as booleans.
+ */
+export type ListingRecordInputs = {
+  extraAnswers?: ExtraAnswer[] | null;
+  documentWaivers?: DocumentWaiverInput[] | null;
+  ownershipDeclared?: boolean;
+};
+
 export type ListingDraft = Omit<
   NewListing,
-  'ratePerDay' | 'ratePerDaySurgeUntil' | 'areaSqFt'
-> & {
+  'ratePerDay' | 'ratePerDaySurgeUntil' | 'areaSqFt' | 'extraAnswers' | 'documentWaivers' | 'ownershipDeclaredAt' | 'termsAcceptedAt' | 'termsVersion'
+> & ListingRecordInputs & {
+  /** LD-1: the terms tick and the wording ticked. */
+  termsAccepted?: boolean;
+  termsVersion?: string;
+  /** LD-1: the saved draft's answers this listing is finished from — its unmapped answers and its terms tick are kept. */
+  draftAnswers?: unknown;
   /** QR-8: the reference carried over from a saved draft; minted here when absent. */
   displayId?: string | null;
   /** DR 02 step 6. Written after the listing exists, so it has an id to hang on. */
@@ -108,6 +137,63 @@ function canonicalRate(
 }
 
 /**
+ * LD-1: the stored flow's labels and version, read only when a create needs
+ * them (a draft with an answer no column takes, or a terms tick with no
+ * wording named). A config row that cannot be read labels by id and records
+ * the flow without a version rather than failing the listing.
+ */
+async function listingFlowFacts(): Promise<{ labels: Map<string, string>; version: number | null }> {
+  try {
+    const flow = await getFlow(LISTING_FLOW_KEY);
+    return { labels: flowFieldLabels(flow), version: typeof flow?.['version'] === 'number' ? (flow['version'] as number) : null };
+  } catch {
+    return { labels: new Map(), version: null };
+  }
+}
+
+/**
+ * LD-1: the record a create keeps of what the form stated — the answers no
+ * column takes (from the draft and the body), the papers waived, the two
+ * ticks with the moment they were made.
+ */
+async function recordAtCreate(
+  input: ListingRecordInputs & { termsAccepted?: boolean; termsVersion?: string; draftAnswers?: unknown },
+  now: Date,
+): Promise<Pick<NewListing, 'extraAnswers' | 'documentWaivers' | 'ownershipDeclaredAt' | 'termsAcceptedAt' | 'termsVersion'>> {
+  const ticked = input.termsAccepted === true || termsTickedOn(input.draftAnswers);
+  const needsFlow = hasUnmappedAnswers(input.draftAnswers) || (ticked && !input.termsVersion);
+  const flow = needsFlow ? await listingFlowFacts() : { labels: new Map<string, string>(), version: null };
+  const extras = mergeExtraAnswers(unmappedAnswers(input.draftAnswers, flow.labels), input.extraAnswers);
+  const waivers = input.documentWaivers?.length ? stampWaivers(input.documentWaivers, null, now) : [];
+  return {
+    ...(extras.length ? { extraAnswers: extras as unknown as Prisma.InputJsonValue } : {}),
+    ...(waivers.length ? { documentWaivers: waivers as unknown as Prisma.InputJsonValue } : {}),
+    ...(input.ownershipDeclared === true ? { ownershipDeclaredAt: now } : {}),
+    ...(ticked ? { termsAcceptedAt: now, termsVersion: input.termsVersion ?? termsVersionOf(flow.version) } : {}),
+  };
+}
+
+/**
+ * LD-1: each photograph with its upload-register row and capture time — as
+ * the client sent them, else matched on the URL (one indexed read for the
+ * lot). A URL the register does not know is filed as it always was.
+ */
+async function withPhotoFacts(photos: readonly NewListingPhoto[]): Promise<NewListingPhoto[]> {
+  const unknown = photos.filter((photo) => !photo.uploadedFileId || !photo.takenAt).map((photo) => photo.url);
+  const facts = unknown.length ? await repository.uploadedPhotoFacts(unknown) : [];
+  const byUrl = new Map(facts.map((fact) => [fact.url, fact]));
+  return photos.map((photo) => {
+    const fact = byUrl.get(photo.url);
+    return {
+      url: photo.url,
+      type: photo.type,
+      uploadedFileId: photo.uploadedFileId ?? fact?.id ?? null,
+      takenAt: photo.takenAt ?? fact?.takenAt ?? null,
+    };
+  });
+}
+
+/**
  * Creates a listing, classifying it for the pricing engine on the way in.
  *
  * Two things happen here that cannot happen in the repository. A media type
@@ -126,8 +212,16 @@ export async function createListing(draft: ListingDraft) {
     venueTypeSlug,
     contentRules,
     ratePerDay: _raw,
+    extraAnswers,
+    documentWaivers,
+    ownershipDeclared,
+    termsAccepted,
+    termsVersion,
+    draftAnswers,
+    photos,
     ...data
   } = draft;
+  const now = new Date();
 
   // Derived, never accepted. An area that disagrees with its own width and
   // height is a spot that prices one way and measures another, and the
@@ -184,9 +278,12 @@ export async function createListing(draft: ListingDraft) {
   // quote the same one from draft to live. (Rows from before QR-8 keep their
   // ADX-LST-nnnnn; `submitListingForReview` mints for any still without.)
   const displayId = data.displayId ?? (await allocateIdentifier('LISTING'));
+  const record = await recordAtCreate({ extraAnswers, documentWaivers, ownershipDeclared, termsAccepted, termsVersion, draftAnswers }, now);
   // Lot X-B: the city key rides with the typed city (null for a town the catalogue lacks).
   const created = await repository.create({
     ...(await withCityKey(data)),
+    ...record,
+    ...(photos?.length ? { photos: await withPhotoFacts(photos) } : {}),
     displayId,
     ratePerDay,
     ...(areaSqFt ? { areaSqFt } : {}),
@@ -244,11 +341,18 @@ export async function getListingForAdmin(listingId: string) {
 export async function getAllListings(query: AdminListingsQuery) {
   // Lot X-B: `?city=` is a slug (or a name, for the console's older links) — matched by key, the spelling as the fallback.
   const keyed = query.city ? { ...query, cityId: (await cityKeyFor(query.city))?.cityId ?? null } : query;
-  const { items, total, counts } = await repository.findAllForAdmin(keyed);
+  const { items, total, counts, bookingCounts } = await repository.findAllForAdmin(keyed);
   // Lot E: the rate-card badge on every row — under the floor of the card in
   // force, or not. One flag per row; the verdict itself is the gate route's.
   const flags = await belowFloorFlags(items.map((row) => row.id));
-  const stamped = items.map((row) => ({ ...row, belowFloor: flags[row.id] ?? false }));
+  // 3 Oct 2026: the grid view's card — the cover photograph (public, the
+  // storage lot's LISTING_PHOTO) and how many bookings the spot has taken.
+  const stamped = items.map((row) => ({
+    ...row,
+    belowFloor: flags[row.id] ?? false,
+    coverPhotoUrl: coverPhotoUrlOf((row as { photos?: { url: string; type: string }[] }).photos),
+    bookingCount: bookingCounts?.[row.id] ?? 0,
+  }));
   return toListPage(stamped, total, counts, query);
 }
 
@@ -261,7 +365,7 @@ export async function getAllListings(query: AdminListingsQuery) {
  */
 export async function updateListing(
   listingId: string,
-  data: Omit<ListingPatch, 'ratePerDaySurgeUntil' | 'areaSqFt'> & {
+  data: Omit<ListingPatch, 'ratePerDaySurgeUntil' | 'areaSqFt' | 'extraAnswers' | 'documentWaivers' | 'ownershipDeclaredAt'> & ListingRecordInputs & {
     category?: NewListing['category'];
     mediaTypeName?: string;
     sizeClassSlug?: string;
@@ -282,6 +386,9 @@ export async function updateListing(
     materialId,
     venueTypeId,
     contentRules,
+    extraAnswers,
+    documentWaivers,
+    ownershipDeclared,
     ...rest
   } = data;
   // Lot X-B: a corrected city carries its key on every branch below; a patch of other fields leaves the key alone.
@@ -320,6 +427,9 @@ export async function updateListing(
   // depending on which field the caller happened to touch.
   const listing = await repository.findById(listingId);
   if (!listing) throw new ApiError(404, 'NOT_FOUND', 'Listing not found');
+
+  // LD-1: what the edit form states beside the columns, carried on every branch below.
+  Object.assign(patch, recordAtEdit(listing, { extraAnswers, documentWaivers, ownershipDeclared }, new Date()));
 
   // Lot D (Q105): switching instant booking on is gated on the flag and on
   // the publisher having an address; switching it off asks nothing.
@@ -420,6 +530,34 @@ export async function updateListing(
     ...priced,
     ratePerDaySurgeUntil: surge?.coverUntil ?? null,
   });
+}
+
+/**
+ * LD-1: an edit's record of what the form stated. Each list replaces the
+ * stored one when it is sent (null or empty clears); a waiver the listing
+ * already held keeps the moment it was first stated; the ownership tick
+ * keeps its first moment while it stays ticked.
+ */
+function recordAtEdit(
+  listing: { documentWaivers?: unknown; ownershipDeclaredAt?: Date | null },
+  input: ListingRecordInputs,
+  now: Date,
+): Pick<ListingPatch, 'extraAnswers' | 'documentWaivers' | 'ownershipDeclaredAt'> {
+  return {
+    ...(input.extraAnswers === undefined
+      ? {}
+      : { extraAnswers: input.extraAnswers?.length ? (input.extraAnswers as unknown as Prisma.InputJsonValue) : null }),
+    ...(input.documentWaivers === undefined
+      ? {}
+      : {
+          documentWaivers: input.documentWaivers?.length
+            ? (stampWaivers(input.documentWaivers, listing.documentWaivers, now) as unknown as Prisma.InputJsonValue)
+            : null,
+        }),
+    ...(input.ownershipDeclared === undefined
+      ? {}
+      : { ownershipDeclaredAt: input.ownershipDeclared ? (listing.ownershipDeclaredAt ?? now) : null }),
+  };
 }
 
 /**
@@ -603,6 +741,9 @@ export async function assertCanCreateForPublisher(
 
   const publisher = await repository.findPublisherById(publisherId);
   if (!publisher) throw new ApiError(404, 'NOT_FOUND', 'Publisher not found');
+  // BL-1 (26 Sep 2026): the publisher, for their own account — the website's
+  // bulk upload of many spaces at once, which the app points them to.
+  if (publisher.userId && publisher.userId === actor.userId) return;
 
   const agent = await findWorkingAgentProfile(actor.userId);
   if (agent) {
@@ -970,7 +1111,8 @@ export async function publishListing(listingId: string) {
   await assertCityAllows(listing.city, 'publishing', listing.cityId);
 
   // QR-5 (the owner, 17 Sep 2026): a spot goes live once its publisher's
-  // BASICS are in — name, email, address, date of birth. The identity check
+  // BASICS are in — name, email, address (AGE-1, 29 Sep 2026: the date of
+  // birth left them; listing a space asks no age). The identity check
   // no longer holds a spot back (QR-2 did that for a day): an unverified
   // publisher lists and goes live, marked unverified and ranked below the
   // verified when an advertiser browses. The desk sees the reason when the
@@ -993,11 +1135,6 @@ export async function assertPublisherBasics(publisherId: string): Promise<void> 
   throw new ApiError(409, 'PROFILE_INCOMPLETE', `This publisher's profile is missing ${missing.map((key) => PROFILE_BASIC_LABEL[key]).join(', ')}. A spot goes live once the basics are in; the identity check moves it up the list, it does not hold it back.`, { missing });
 }
 
-export async function getSimilarListings(listingId: string) {
-  const listing = await repository.findById(listingId);
-  if (!listing) throw new ApiError(404, 'NOT_FOUND', 'Listing not found');
-  return repository.findSimilar(listing);
-}
 
 /** The publisher record behind a login, for a publisher listing their own spot. */
 export async function findOwnPublisher(userId: string) {
@@ -1247,12 +1384,101 @@ export async function setListingRatingSnapshot(
  * refusal (an unwhitelisted IP, an unknown number) or an unconfigured pair
  * is a 409 the desk reads; nothing is stored then.
  */
-export async function verifyListingVehicleRc(listingId: string, input: { vehicleNumber?: string }, byUserId: string) {
+/**
+ * VH-3: check a registration BEFORE there is a listing to hang it on.
+ *
+ * The owner asked for a Verify button beside the registration field while a
+ * spot is being registered — and at that moment no listing exists, so
+ * `verifyListingVehicleRc` has nothing to be called with. This is the same
+ * lookup, answering the one question that matters at that point: **is this
+ * the publisher's own vehicle?**
+ *
+ * It deliberately answers LESS than the listing check does. Nothing is
+ * stored, because there is nothing to store it on; and the registered
+ * owner's name does not come back — only how closely it matches the
+ * publisher's own name, what the vehicle is, and whether its papers are
+ * current. A route that returned the registered owner of any number anybody
+ * typed would be a people-finder wearing a Verify button, whatever it was
+ * built for. Once the listing exists, the desk's own check records the full
+ * answer against it, with an audit line naming who ran it.
+ *
+ * `publisherId` is who the spot is being registered for. A publisher may
+ * only name themselves; an agent must hold the same right the create will
+ * demand a moment later, and it is checked BEFORE the vendor is called so a
+ * refusal costs nothing.
+ */
+export async function checkVehicleRcForPublisher(
+  input: { vehicleNumber: string; publisherId?: string | undefined },
+  actor: ListingActor,
+) {
+  const number = normaliseVehicleNumber(input.vehicleNumber);
+  if (!number) throw new ApiError(400, 'VALIDATION_ERROR', 'A vehicle registration number is required');
+
+  const publisher = await resolvePublisherForCheck(input.publisherId, actor);
+  // Cashfree Phase 1: asked through the verification router. There is no listing yet, so the attempt is kept against the publisher it is for.
+  const answer = await routedVehicleRc(number, { caseType: 'LISTING', caseId: `publisher:${publisher.id}` });
+  if (!answer.ok) throw new ApiError(409, 'VERIFICATION_UNAVAILABLE', answer.message, { code: answer.code });
+
+  const nameMatch = nameMatchScore(answer.facts.ownerName, publisher.name);
+  return {
+    vehicleNumber: number,
+    via: 'CASHFREE_VRS',
+    nameMatch,
+    publisherName: publisher.name,
+    /* What the vehicle IS, and whether it can lawfully be on the road — the
+       publisher already knows both, and an advertiser booking a moving spot
+       needs them. Who owns it is answered as a score, not a name. */
+    vehicle: {
+      maker: answer.facts.maker ?? null,
+      model: answer.facts.model ?? null,
+      vehicleClass: answer.facts.vehicleClass ?? null,
+      rcStatus: answer.facts.rcStatus ?? null,
+      blacklisted: answer.facts.blacklisted ?? null,
+      insuranceValidUntil: answer.facts.insuranceValidUntil ?? null,
+      fitnessValidUntil: answer.facts.fitnessValidUntil ?? null,
+      pucValidUntil: answer.facts.pucValidUntil ?? null,
+    },
+  };
+}
+
+/** VH-3: whose vehicle the check is measured against, and whether this caller may ask at all. */
+async function resolvePublisherForCheck(publisherId: string | undefined, actor: ListingActor) {
+  const own = await repository.findPublisherByUserId(actor.userId);
+  if (!publisherId) {
+    if (own) return own;
+    if (actor.isAdmin) throw new ApiError(400, 'VALIDATION_ERROR', 'Name the publisher this spot belongs to');
+    throw new ApiError(403, 'FORBIDDEN', 'Name the publisher this spot belongs to');
+  }
+  if (own?.id === publisherId) return own;
+  const named = await repository.findPublisherById(publisherId);
+  if (!named) throw new ApiError(404, 'NOT_FOUND', 'Publisher not found');
+  // Not their own record: the caller must be allowed to add a spot to it.
+  await assertCanCreateForPublisher(named.id, actor);
+  return named;
+}
+
+export async function verifyListingVehicleRc(
+  listingId: string,
+  input: { vehicleNumber?: string },
+  byUserId: string,
+  /**
+   * VH-1: who is asking. The desk still may; so now may the spot's own
+   * publisher and the agent registering it, because that is where the
+   * registration number is typed. Everyone else is refused BEFORE the
+   * lookup runs — an RC answer carries the owner's name and address, and a
+   * check anybody could run on any number is a lookup service, not a
+   * verification. Omitted, the caller is treated as the desk, which keeps
+   * every existing call working.
+   */
+  actor: { userId: string; isAdmin: boolean } = { userId: byUserId, isAdmin: true },
+) {
+  await assertCanEditListing(listingId, actor);
   const listing = await repository.findWithPublisher(listingId);
   if (!listing) throw new ApiError(404, 'NOT_FOUND', 'Listing not found');
   const number = input.vehicleNumber ? normaliseVehicleNumber(input.vehicleNumber) : listing.vehicleNumber ? normaliseVehicleNumber(listing.vehicleNumber) : null;
   if (!number) throw new ApiError(409, 'VERIFICATION_UNAVAILABLE', 'No vehicle registration number on the listing');
-  const answer = await lookupVehicleRc(number);
+  // Cashfree Phase 1: asked through the verification router — an attempt on record against the listing.
+  const answer = await routedVehicleRc(number, { caseType: 'LISTING', caseId: listingId });
   if (!answer.ok) throw new ApiError(409, 'VERIFICATION_UNAVAILABLE', answer.message, { code: answer.code });
   const publisherName = listing.publisher?.name ?? null;
   const nameMatch = nameMatchScore(answer.facts.ownerName, publisherName);
@@ -1260,4 +1486,56 @@ export async function verifyListingVehicleRc(listingId: string, input: { vehicle
   const updated = await repository.update(listingId, { vehicleNumber: number, vehicleRcVerifiedAt: new Date(), vehicleRcPayload: payload });
   await logActivity(byUserId, 'LISTING_VEHICLE_RC_VERIFIED', { targetType: 'Listing', targetId: listingId, module: 'listings', metadata: { number, via: 'CASHFREE_VRS', nameMatch, status: answer.facts.status } });
   return { listing: updated, verification: { via: 'CASHFREE_VRS', nameMatch, facts: answer.facts } };
+}
+
+/* ------------------------------------------------------------------ */
+/* WG-1: photographs and the publisher's word on a send-back           */
+/* ------------------------------------------------------------------ */
+
+/** A photograph onto a live listing — the URL an upload of purpose LISTING_PHOTO answered. Ownership as an edit. */
+export async function addListingPhoto(listingId: string, data: NewListingPhoto, actor: ListingActor) {
+  await assertCanEditListing(listingId, actor);
+  // LD-1: filed with its upload-register row and capture time.
+  const [filed] = await withPhotoFacts([data]);
+  const photo = await repository.addPhoto(listingId, filed!);
+  await logActivity(actor.userId, 'LISTING_PHOTO_ADDED', { module: 'listings', targetType: 'Listing', targetId: listingId, metadata: { photoId: photo.id, type: data.type } });
+  return photo;
+}
+
+export async function removeListingPhoto(listingId: string, photoId: string, actor: ListingActor) {
+  await assertCanEditListing(listingId, actor);
+  const photo = await repository.findPhoto(photoId);
+  if (!photo || photo.listingId !== listingId) throw new ApiError(404, 'NOT_FOUND', 'No such photograph on this listing');
+  await repository.deletePhoto(photoId);
+  await logActivity(actor.userId, 'LISTING_PHOTO_REMOVED', { module: 'listings', targetType: 'Listing', targetId: listingId, metadata: { photoId, url: photo.url } });
+  return photo;
+}
+
+/**
+ * WG-1 (board 08 · 26): the publisher writes back on a send-back — "the
+ * NOC is on its way", "the address is right, the pin was wrong". Audited
+ * on the listing (the review case reads the activity), and the desk is
+ * told, so the reply does not wait for the next upload.
+ */
+export async function sendListingClarification(listingId: string, message: string, actor: ListingActor) {
+  await assertCanEditListing(listingId, actor);
+  const listing = await repository.findWithPublisher(listingId);
+  if (!listing) throw new ApiError(404, 'NOT_FOUND', 'Listing not found');
+  // Read here rather than through `users`: users → publishers → listings would close a cycle.
+  const adminUserIds = await repository.adminUserIds();
+  await logActivity(actor.userId, 'LISTING_CLARIFICATION_SENT', { module: 'listings', targetType: 'Listing', targetId: listingId, metadata: { message } });
+  await Promise.all(
+    adminUserIds.map((userId) =>
+      createNotification({
+        userId,
+        type: 'SYSTEM',
+        title: 'A publisher wrote back on a send-back',
+        subtitle: listing.title,
+        message: message.length > 200 ? `${message.slice(0, 197)}…` : message,
+        relatedId: listingId,
+        relatedType: 'LISTING',
+      }),
+    ),
+  );
+  return { listingId, sentAt: new Date().toISOString() };
 }

@@ -72,23 +72,23 @@ printPartnerRouter.get('/me/invoices', ...floor, asyncHandler(h.myInvoicesHandle
 
 printPartnerRouter.use(requireRole('ADMIN'));
 
-printPartnerRouter.get('/', asyncHandler(h.listPartnersHandler));
-printPartnerRouter.post('/', asyncHandler(h.createPartnerHandler));
-printPartnerRouter.get('/:id', asyncHandler(h.getPartnerHandler));
-printPartnerRouter.patch('/:id', asyncHandler(h.updatePartnerHandler));
-printPartnerRouter.post('/:id/deactivate', asyncHandler(h.deactivatePartnerHandler));
-printPartnerRouter.post('/:id/reactivate', asyncHandler(h.reactivatePartnerHandler));
+printPartnerRouter.get('/', requirePermission('print.view'), asyncHandler(h.listPartnersHandler));
+printPartnerRouter.post('/', requirePermission('print.edit'), asyncHandler(h.createPartnerHandler));
+printPartnerRouter.get('/:id', requirePermission('print.view'), asyncHandler(h.getPartnerHandler));
+printPartnerRouter.patch('/:id', requirePermission('print.edit'), asyncHandler(h.updatePartnerHandler));
+printPartnerRouter.post('/:id/deactivate', requirePermission('print.suspend'), asyncHandler(h.deactivatePartnerHandler));
+printPartnerRouter.post('/:id/reactivate', requirePermission('print.suspend'), asyncHandler(h.reactivatePartnerHandler));
 /* Lot H: the account switched on, so the partner signs in by OTP. */
-printPartnerRouter.post('/:id/activate', asyncHandler(h.activatePartnerHandler));
+printPartnerRouter.post('/:id/activate', requirePermission('print.suspend'), asyncHandler(h.activatePartnerHandler));
 /* The partner's money and work: wallet, statement lines, withdrawals, jobs, invoices. */
-printPartnerRouter.get('/:id/ledger', asyncHandler(h.partnerLedgerHandler));
+printPartnerRouter.get('/:id/ledger', requirePermission('finance.view'), asyncHandler(h.partnerLedgerHandler));
 /* Lot H: the console's reads of the rate card and the quote history. */
-printPartnerRouter.get('/:id/rate-card', asyncHandler(h.partnerRateCardHandler));
-printPartnerRouter.get('/:id/quotes', asyncHandler(h.partnerQuotesHandler));
+printPartnerRouter.get('/:id/rate-card', requirePermission('print.view'), asyncHandler(h.partnerRateCardHandler));
+printPartnerRouter.get('/:id/quotes', requirePermission('print.view'), asyncHandler(h.partnerQuotesHandler));
 /* G13-B: the desk on the partner's behalf — for a partner who never activates. */
-printPartnerRouter.put('/:id/rate-card', asyncHandler(h.setPartnerRateCardHandler));
-printPartnerRouter.post('/:id/invoices', asyncHandler(h.recordPartnerInvoiceHandler));
-printPartnerRouter.get('/:id/invoices', asyncHandler(h.partnerInvoicesHandler));
+printPartnerRouter.put('/:id/rate-card', requirePermission('print.edit'), asyncHandler(h.setPartnerRateCardHandler));
+printPartnerRouter.post('/:id/invoices', requirePermission('finance.edit'), asyncHandler(h.recordPartnerInvoiceHandler));
+printPartnerRouter.get('/:id/invoices', requirePermission('finance.view'), asyncHandler(h.partnerInvoicesHandler));
 
 /**
  * G13-B: `/print-quote-requests` — the desk's list across orders, so the
@@ -97,22 +97,22 @@ printPartnerRouter.get('/:id/invoices', asyncHandler(h.partnerInvoicesHandler));
  */
 export const printQuoteRequestsRouter = Router();
 printQuoteRequestsRouter.use(authenticate, requireRole('ADMIN'), requireFeature('partners.quotes'));
-printQuoteRequestsRouter.get('/', asyncHandler(h.listQuoteRequestsHandler));
+printQuoteRequestsRouter.get('/', requirePermission('print.view'), asyncHandler(h.listQuoteRequestsHandler));
 
 export const printJobRouter = Router();
 printJobRouter.use(authenticate);
 printJobRouter.use(requireRole('ADMIN'));
 
-printJobRouter.get('/:id/print-job', asyncHandler(h.getJobHandler));
-printJobRouter.post('/:id/print-job', asyncHandler(h.openJobHandler));
-printJobRouter.patch('/:id/print-job', asyncHandler(h.updateJobHandler));
+printJobRouter.get('/:id/print-job', requirePermission('print.view'), asyncHandler(h.getJobHandler));
+printJobRouter.post('/:id/print-job', requirePermission('print.edit'), asyncHandler(h.openJobHandler));
+printJobRouter.patch('/:id/print-job', requirePermission('print.edit'), asyncHandler(h.updateJobHandler));
 /* The money moves here, so it carries the finance approver's permission. */
 printJobRouter.post('/:id/print-job/approve-cost', requirePermission('finance.approve'), asyncHandler(h.approveCostHandler));
 
 /* Lot H: the quote request behind a job — raised, read with the lowest highlighted, awarded. */
 const desk = requireFeature('partners.quotes');
-printJobRouter.post('/:id/print-quote-request', desk, asyncHandler(h.createQuoteRequestHandler));
-printJobRouter.get('/:id/print-quote-request', desk, asyncHandler(h.getQuoteRequestHandler));
-printJobRouter.post('/:id/print-quote-request/award', desk, asyncHandler(h.awardQuoteRequestHandler));
+printJobRouter.post('/:id/print-quote-request', requirePermission('print.edit'), desk, asyncHandler(h.createQuoteRequestHandler));
+printJobRouter.get('/:id/print-quote-request', requirePermission('print.view'), desk, asyncHandler(h.getQuoteRequestHandler));
+printJobRouter.post('/:id/print-quote-request/award', requirePermission('print.edit'), desk, asyncHandler(h.awardQuoteRequestHandler));
 /* G13-B: ops close an OPEN request with a reason. */
-printJobRouter.post('/:id/print-quote-request/cancel', desk, asyncHandler(h.cancelQuoteRequestHandler));
+printJobRouter.post('/:id/print-quote-request/cancel', requirePermission('print.edit'), desk, asyncHandler(h.cancelQuoteRequestHandler));

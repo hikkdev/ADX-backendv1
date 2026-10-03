@@ -77,20 +77,20 @@ describe('DUPLICATE_LISTING_PHOTOS with the sharp decoder', () => {
   it('scores 1 for two identical images and 0 for two different ones', async () => {
     const same = await png({ r: 200, g: 40, b: 40 });
     const other = await png({ r: 40, g: 40, b: 200 }, true);
-    const bytes: Record<string, Buffer> = { 'https://cdn.adx.test/a.png': same, 'https://cdn.adx.test/b.png': Buffer.from(same), 'https://cdn.adx.test/c.png': other };
+    const bytes: Record<string, Buffer> = { 'https://cdn.adx.in/a.png': same, 'https://cdn.adx.in/b.png': Buffer.from(same), 'https://cdn.adx.in/c.png': other };
     registerThumbnailDecoder(sharpThumbnailDecoder(async (url) => bytes[url] ?? null));
     expect(hasThumbnailDecoder()).toBe(true);
 
-    const a = dhash((await decodeThumbnail('https://cdn.adx.test/a.png'))!);
-    const b = dhash((await decodeThumbnail('https://cdn.adx.test/b.png'))!);
-    const c = dhash((await decodeThumbnail('https://cdn.adx.test/c.png'))!);
+    const a = dhash((await decodeThumbnail('https://cdn.adx.in/a.png'))!);
+    const b = dhash((await decodeThumbnail('https://cdn.adx.in/b.png'))!);
+    const c = dhash((await decodeThumbnail('https://cdn.adx.in/c.png'))!);
     expect(isDuplicate(a, b)).toBe(true);
     expect(isDuplicate(a, c)).toBe(false);
 
     const identical = {
       ...empty(),
-      listingPhotosFor: async () => [{ listingId: 'l1', publisherId: 'pub_1', url: 'https://cdn.adx.test/a.png' }],
-      listingPhotosOfOthers: async () => [{ listingId: 'l7', publisherId: 'pub_7', url: 'https://cdn.adx.test/b.png' }],
+      listingPhotosFor: async () => [{ listingId: 'l1', publisherId: 'pub_1', url: 'https://cdn.adx.in/a.png' }],
+      listingPhotosOfOthers: async () => [{ listingId: 'l7', publisherId: 'pub_7', url: 'https://cdn.adx.in/b.png' }],
     };
     expect(await duplicateListingPhotosSignal.evaluate(publisher, { index: identical, now: new Date() })).toMatchObject({
       value: 1,
@@ -99,8 +99,8 @@ describe('DUPLICATE_LISTING_PHOTOS with the sharp decoder', () => {
 
     const different = {
       ...empty(),
-      listingPhotosFor: async () => [{ listingId: 'l1', publisherId: 'pub_1', url: 'https://cdn.adx.test/a.png' }],
-      listingPhotosOfOthers: async () => [{ listingId: 'l8', publisherId: 'pub_8', url: 'https://cdn.adx.test/c.png' }],
+      listingPhotosFor: async () => [{ listingId: 'l1', publisherId: 'pub_1', url: 'https://cdn.adx.in/a.png' }],
+      listingPhotosOfOthers: async () => [{ listingId: 'l8', publisherId: 'pub_8', url: 'https://cdn.adx.in/c.png' }],
     };
     expect(await duplicateListingPhotosSignal.evaluate(publisher, { index: different, now: new Date() })).toMatchObject({ value: 0 });
   });

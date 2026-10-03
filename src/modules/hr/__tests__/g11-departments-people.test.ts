@@ -91,7 +91,7 @@ beforeEach(() => {
   repository.update.mockImplementation(async (id: string, data: Record<string, unknown>) => ({ ...dept({ id }), ...data }));
   employees.countEmployeesByDepartment.mockResolvedValue({ dep_ops: 1 });
   employees.listDepartmentMembers.mockResolvedValue([
-    { id: 'emp_1', userId: 'usr_1', displayId: 'EMP-1', name: 'Asha', email: 'asha@adx.co', designation: 'Head of ops', region: 'Bengaluru', workMode: 'HYBRID', employmentType: 'FULL_TIME', active: true, joinedAt: since },
+    { id: 'emp_1', userId: 'usr_1', displayId: 'EMP-1', name: 'Asha', email: 'asha@adx.in', designation: 'Head of ops', region: 'Bengaluru', workMode: 'HYBRID', employmentType: 'FULL_TIME', active: true, joinedAt: since },
   ]);
   employees.findEmployeeCard.mockImplementation(async (id: string) => (id === 'emp_1' ? { id: 'emp_1', userId: 'usr_1', name: 'Asha', designation: 'Head of ops' } : null));
   employees.findEmployeeByUserId.mockImplementation(async (userId: string) => (userId === 'usr_1' ? { id: 'emp_1', userId: 'usr_1', isActive: true } : null));

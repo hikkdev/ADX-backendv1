@@ -291,7 +291,7 @@ export async function walletBalance(walletId: string): Promise<Money> {
   return account ? money(await repository.balanceOf(account.id)) : money(0);
 }
 
-export function listTransactions(filter: {
+export type LedgerFacets = {
   accountId?: string;
   walletId?: string;
   kind?: LedgerTransactionKind[];
@@ -299,14 +299,54 @@ export function listTransactions(filter: {
   to?: Date;
   /** E6: a leg of exactly this absolute amount. */
   amount?: string;
-  limit?: number;
-  cursor?: string;
-}) {
+  /** The transaction's reference or note, case-insensitive contains. */
+  q?: string;
+};
+
+export function listTransactions(filter: LedgerFacets & { limit?: number; cursor?: string }) {
   return repository.listTransactions({
     ...filter,
     limit: Math.min(filter.limit ?? 50, 200),
   });
 }
+
+export type TransactionPage = {
+  rows: TransactionRow[];
+  /** Every transaction the facets match, not only this page's. */
+  total: number;
+  /** The id to pass as `cursor` for the next page; null on the last one. */
+  nextCursor: string | null;
+  /** The debit legs (as a positive figure) and the credit legs of every match. Equal while the books balance. */
+  totals: { debit: Money; credit: Money };
+};
+
+/**
+ * One page of the ledger with what the screen says about the whole set:
+ * how many match and what they move. Newest first, keyset on the id as
+ * the bare list is; one row past the page is read so the last page says
+ * so rather than offering a Next that leads nowhere.
+ */
+export async function pageTransactions(
+  filter: LedgerFacets & { limit?: number; cursor?: string }
+): Promise<TransactionPage> {
+  const { limit: asked, cursor, ...facets } = filter;
+  const limit = Math.min(asked ?? 50, 200);
+  const [read, total, sums] = await Promise.all([
+    repository.listTransactions({ ...facets, limit: limit + 1, ...(cursor ? { cursor } : {}) }),
+    repository.countTransactions(facets),
+    repository.sumLegs(facets),
+  ]);
+  const rows = read.slice(0, limit);
+  return {
+    rows,
+    total,
+    nextCursor: read.length > limit ? (rows[rows.length - 1]?.id ?? null) : null,
+    totals: { debit: money(sums.debit), credit: money(sums.credit) },
+  };
+}
+
+/** How many legs the facets' transactions carry — the export's size before it is written. */
+export const countLegs = (filter: LedgerFacets) => repository.countLegs(filter);
 
 export const getTransaction = (id: string) => repository.findTransaction(id);
 export const listAccounts = () => repository.listAccounts();

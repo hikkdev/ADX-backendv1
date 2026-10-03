@@ -1,3 +1,4 @@
+import { assertOpenForKyc } from '../../../shared/party-status';
 import type { Request } from 'express';
 import { ApiError } from '../../../shared/errors';
 import { auditDiff, logActivity } from '../../../shared/audit';
@@ -95,6 +96,8 @@ export async function recordEmployeeKyc(employeeId: string, data: EmployeeKycDoc
 export async function requestEmployeeKyc(employeeId: string, input: KycRequestInput, byUserId: string, req?: Request, now = new Date()) {
   const employee = await repository.findEmployeeContact(employeeId);
   if (!employee) throw new ApiError(404, 'NOT_FOUND', 'Employee not found');
+  // Account lifecycle (2 Oct 2026): a closed account is never asked for KYC.
+  assertOpenForKyc({ closedAt: employee.user.closedAt ?? null });
   const current = await repository.findByEmployeeId(employeeId);
   if (current?.status === 'VERIFIED') {
     throw new ApiError(409, 'KYC_ALREADY_VERIFIED', 'This employee is already verified; there is nothing to request');

@@ -1,11 +1,23 @@
 import type { Request, Response } from 'express';
 import { logActivity } from '../../shared/audit';
 import { ApiError } from '../../shared/errors';
-import { money } from '../../shared/money';
-import { listTransactions, reverse, verifyLedger } from '../ledger';
+import { Decimal, money } from '../../shared/money';
+import {
+  LEDGER_EXPORT_LEG_CAP,
+  assertLedgerExportable,
+  iterateLedgerCsv,
+  ledgerCsvHeader,
+  listTransactions,
+  pageTransactions,
+  reverse,
+  verifyLedger,
+  type LedgerFacets,
+  type TransactionRow,
+} from '../ledger';
 import { listEntries, listWallets, snapshot } from '../wallets';
 import {
   addMethod,
+  addOwnMethod,
   approveWithdrawal,
   availableRails,
   cancelWithdrawal,
@@ -22,7 +34,8 @@ import {
   requestWithdrawal,
   requestWithdrawalOnBehalf,
   setDefaultMethod,
-  verifyMethod,
+  verifyMethodChecked,
+  lastUpiChecks,
   walletForUser,
   walletForUserOrOpen,
   withdrawalAllowance,
@@ -75,10 +88,11 @@ export async function listMethodsHandler(req: Request, res: Response): Promise<v
   res.json({ success: true, data: methods.map(shapeMethod) });
 }
 
+/** The person's own method; a UPI ID is checked as it is added (`addOwnMethod`), and the answer rides on `data.check`. */
 export async function addMethodHandler(req: Request, res: Response): Promise<void> {
   const body = parse<schema.AddMethodInput>(schema.addMethodSchema, req.body);
-  const method = await addMethod(userId(req), body);
-  res.status(201).json({ success: true, data: shapeMethod(method) });
+  const { method, check } = await addOwnMethod(userId(req), body);
+  res.status(201).json({ success: true, data: { ...shapeMethod(method), check } });
 }
 
 export async function removeMethodHandler(req: Request, res: Response): Promise<void> {
@@ -436,7 +450,9 @@ export async function failHandler(req: Request, res: Response): Promise<void> {
 export async function pendingMethodsHandler(req: Request, res: Response): Promise<void> {
   const { userId: forUser } = parse<{ userId?: string }>(schema.methodsQuerySchema, req.query);
   const methods = forUser ? await listMethods(forUser) : await listMethodsAwaitingReview();
-  res.json({ success: true, data: methods.map(shapeMethod) });
+  // 2 Oct 2026: each UPI method carries its last check — a flagged one (not found, a name that does not match) says why.
+  const checks = await lastUpiChecks(methods);
+  res.json({ success: true, data: methods.map((method) => ({ ...shapeMethod(method), check: checks.get(method.id) ?? null })) });
 }
 
 /**
@@ -456,13 +472,13 @@ export async function verifyMethodHandler(req: Request, res: Response): Promise<
     schema.verifyMethodSchema,
     req.body ?? {}
   );
-  const method = await verifyMethod(req.params['id'] as string, {
+  const { method, check } = await verifyMethodChecked(req.params['id'] as string, {
     via: body.via,
     reference: body.reference ?? null,
     nameMatchPct: body.nameMatchPct ?? null,
     byUserId: userId(req),
   });
-  res.json({ success: true, data: shapeMethod(method) });
+  res.json({ success: true, data: { ...shapeMethod(method), check } });
 }
 
 export async function rejectMethodHandler(req: Request, res: Response): Promise<void> {
@@ -588,6 +604,8 @@ export async function incentiveRatesHandler(_req: Request, res: Response): Promi
       event: rate.event,
       tier: rate.tier,
       amount: money(rate.amount),
+      // CP-4: a switched-off key. The screen says "pays nothing", not "₹0.00".
+      paysNothing: rate.paysNothing,
       effectiveFrom: rate.effectiveFrom,
       effectiveTo: rate.effectiveTo,
     })),
@@ -600,45 +618,110 @@ export async function setIncentiveRateHandler(req: Request, res: Response): Prom
     event: body.event,
     ...(body.tier ? { tier: body.tier } : {}),
     amount: body.amount,
+    ...(body.paysNothing ? { paysNothing: true } : {}),
     effectiveFrom: body.effectiveFrom ?? new Date(),
   });
-  res.json({ success: true, data: { id: rate.id, amount: money(rate.amount) } });
+  res.json({ success: true, data: { id: rate.id, amount: money(rate.amount), paysNothing: rate.paysNothing } });
 }
 
 /* ── Ledger and jobs ──────────────────────────────────────────────── */
+
+/** The facets the ledger read and its export share. */
+function ledgerFacets(query: import('zod').infer<typeof schema.ledgerExportQuerySchema>): LedgerFacets {
+  return {
+    ...(query.walletId ? { walletId: query.walletId } : {}),
+    ...(query.kind ? { kind: query.kind } : {}),
+    ...(query.from ? { from: query.from } : {}),
+    ...(query.to ? { to: query.to } : {}),
+    ...(query.amount ? { amount: query.amount } : {}),
+    ...(query.q ? { q: query.q } : {}),
+  };
+}
+
+const shapeLedgerRow = (row: TransactionRow) => ({
+  id: row.id,
+  reference: row.reference,
+  kind: row.kind,
+  occurredAt: row.occurredAt,
+  note: row.note,
+  reversesId: row.reversesId,
+  legs: row.legs.map((leg) => ({
+    accountCode: leg.account.code,
+    accountName: leg.account.name,
+    amount: money(leg.amount),
+    note: leg.note,
+  })),
+});
+
+/** The paged row adds what the screen's table shows beside the legs: the debit total and both reversal markers. */
+const shapeLedgerPageRow = (row: TransactionRow) => ({
+  ...shapeLedgerRow(row),
+  debit: money(
+    row.legs.reduce((sum, leg) => (leg.amount.isNegative() ? sum.plus(leg.amount.abs()) : sum), new Decimal(0))
+  ),
+  reversesReference: row.reverses?.reference ?? null,
+  reversedBy: row.reversedBy ? { id: row.reversedBy.id, reference: row.reversedBy.reference } : null,
+});
 
 export async function ledgerHandler(req: Request, res: Response): Promise<void> {
   const query = parse<import('zod').infer<typeof schema.ledgerQuerySchema>>(
     schema.ledgerQuerySchema,
     req.query
   );
-  // E6: kind, window and amount facets for the ledger screen.
-  const rows = await listTransactions({
-    ...(query.walletId ? { walletId: query.walletId } : {}),
-    ...(query.kind ? { kind: query.kind } : {}),
-    ...(query.from ? { from: query.from } : {}),
-    ...(query.to ? { to: query.to } : {}),
-    ...(query.amount ? { amount: query.amount } : {}),
+  // E6: kind, window and amount facets for the ledger screen; the search rides with them.
+  const facets = ledgerFacets(query);
+  const page = {
     ...(query.limit ? { limit: query.limit } : {}),
     ...(query.cursor ? { cursor: query.cursor } : {}),
+  };
+  if (query.paged) {
+    const result = await pageTransactions({ ...facets, ...page });
+    res.json({
+      success: true,
+      data: {
+        rows: result.rows.map(shapeLedgerPageRow),
+        total: result.total,
+        nextCursor: result.nextCursor,
+        totals: result.totals,
+      },
+    });
+    return;
+  }
+  const rows = await listTransactions({ ...facets, ...page });
+  res.json({ success: true, data: rows.map(shapeLedgerRow) });
+}
+
+/**
+ * GET /finance/ledger/export.csv — the ledger's filters, no page, one line
+ * per leg. Refused with a sentence past the cap; audited before the first
+ * byte otherwise (an export that fails half-way was still an export).
+ */
+export async function ledgerExportHandler(req: Request, res: Response): Promise<void> {
+  const query = parse<import('zod').infer<typeof schema.ledgerExportQuerySchema>>(
+    schema.ledgerExportQuerySchema,
+    req.query
+  );
+  const facets = ledgerFacets(query);
+  const legs = await assertLedgerExportable(facets);
+  await logActivity(userId(req), 'LEDGER_EXPORTED', {
+    req,
+    module: 'ledger',
+    targetType: 'LedgerAccount',
+    targetId: query.walletId ?? 'all',
+    metadata: {
+      filter: { ...facets, from: facets.from?.toISOString(), to: facets.to?.toISOString() },
+      legs,
+      cap: LEDGER_EXPORT_LEG_CAP,
+    },
   });
-  res.json({
-    success: true,
-    data: rows.map((row) => ({
-      id: row.id,
-      reference: row.reference,
-      kind: row.kind,
-      occurredAt: row.occurredAt,
-      note: row.note,
-      reversesId: row.reversesId,
-      legs: row.legs.map((leg) => ({
-        accountCode: leg.account.code,
-        accountName: leg.account.name,
-        amount: money(leg.amount),
-        note: leg.note,
-      })),
-    })),
-  });
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+  res.status(200);
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="ledger-${stamp}.csv"`);
+  res.setHeader('Cache-Control', 'no-store');
+  res.write(ledgerCsvHeader());
+  for await (const chunk of iterateLedgerCsv(facets)) res.write(chunk);
+  res.end();
 }
 
 export async function reverseLedgerHandler(req: Request, res: Response): Promise<void> {

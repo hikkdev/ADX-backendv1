@@ -1,3 +1,4 @@
+import { findAccountFacts, isWorkingUser } from '../../shared/party-status';
 import type { Lead, LeadInvite } from '../../shared/database';
 import type { Role } from '../../shared/database';
 import { ApiError } from '../../shared/errors';
@@ -253,6 +254,9 @@ export async function verifyInviteOtp(code: string, input: { mobile: string; otp
   const lead = invite.lead;
   const mobile = normalizeMobile(input.mobile);
   const userId = await verifyOtp(mobile, input.otp, 'LOGIN');
+  // Account lifecycle (2 Oct 2026): the invite is a sign-in door too — a deactivated or closed account is not let in by it.
+  const account = await findAccountFacts(userId);
+  if (account && !isWorkingUser(account)) throw new ApiError(401, 'UNAUTHORIZED', 'Account not active');
   const side = lead.side as 'PUBLISHER' | 'ADVERTISER';
   const party = await openParty(userId, { party: side, accountType: input.accountType ?? 'BUSINESS', name: input.name?.trim() || lead.contactName || lead.businessName });
   let converted = lead.status === 'CONVERTED';

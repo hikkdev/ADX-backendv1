@@ -31,6 +31,9 @@ export const prismaDraftsRepository: DraftsRepository = {
   remove(id) {
     return prisma.listingDraft.delete({ where: { id } });
   },
+  findForDesk(id) {
+    return prisma.listingDraft.findUnique({ where: { id }, include: deskInclude });
+  },
   async desk(query, idleBefore) {
     const where: Prisma.ListingDraftWhereInput = {
       ...(idleBefore ? { updatedAt: { lte: idleBefore } } : {}),

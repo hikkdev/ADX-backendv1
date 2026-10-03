@@ -112,7 +112,8 @@ export function createRazorpayAdapter(
       const order = result.json as { id: string; amount: number; currency: string };
       return {
         gatewayOrderId: order.id,
-        checkout: { orderId: order.id, keyId: cfg.keyId, amount: order.amount ?? amount, currency: order.currency ?? input.currency },
+        // UP-1: the VPA rides as a prefill for Checkout (and the API's own checkout page reads it off the Payment row).
+        checkout: { orderId: order.id, keyId: cfg.keyId, amount: order.amount ?? amount, currency: order.currency ?? input.currency, ...(input.upiId ? { prefill: { vpa: input.upiId } } : {}) },
       };
     },
 

@@ -176,3 +176,45 @@ describe('the lane is still the publisher’s alone', () => {
     expect(repository.addPhotos).not.toHaveBeenCalled();
   });
 });
+
+/*
+ * SI-N (26 Sep 2026): the installation note was parsed by the controller and
+ * dropped by the service; a condition note with no new photographs was
+ * refused at the schema. Both now land on `selfInstallNotes`, one under the
+ * other, and a note sent twice is not written twice.
+ */
+describe('SI-N — what the publisher writes beside the photos', () => {
+  it('the installation note lands on selfInstallNotes', async () => {
+    await selfInstallCaptureInstallation('ord_1', PUBLISHER_USER, 'after.jpg', 'Fixed with four bolts');
+    expect(repository.update).toHaveBeenCalledWith('ord_1', {
+      status: 'PENDING_APPROVAL',
+      selfInstallInstallPhotoUrl: 'after.jpg',
+      selfInstallNotes: 'Fixed with four bolts',
+    });
+  });
+
+  it('keeps the condition note and adds the installation note under it', async () => {
+    repository.findWithPublisher.mockResolvedValue(booking({ selfInstallNotes: 'Wall freshly painted' }));
+    await selfInstallCaptureInstallation('ord_1', PUBLISHER_USER, 'after.jpg', 'Fixed with four bolts');
+    expect(repository.update).toHaveBeenCalledWith('ord_1', expect.objectContaining({ selfInstallNotes: 'Wall freshly painted\n\nFixed with four bolts' }));
+  });
+
+  it('a note already on the order is not written twice', async () => {
+    repository.findWithPublisher.mockResolvedValue(booking({ selfInstallNotes: 'Wall freshly painted' }));
+    await selfInstallCaptureInstallation('ord_1', PUBLISHER_USER, 'after.jpg', 'Wall freshly painted');
+    expect(repository.update.mock.calls[0]?.[1]).not.toHaveProperty('selfInstallNotes');
+  });
+
+  it('a condition note with no new photographs is kept and the photographs on file stay', async () => {
+    await selfInstallCaptureCondition('ord_1', PUBLISHER_USER, [], 'Tree branch in front of the frame');
+    expect(repository.addPhotos).not.toHaveBeenCalled();
+    expect(repository.update).toHaveBeenCalledWith('ord_1', { selfInstallNotes: 'Tree branch in front of the frame' });
+  });
+
+  it('the schema takes a note alone, and refuses a body with neither', async () => {
+    const { photoUrlsSchema } = await import('../orders.schema');
+    expect(photoUrlsSchema.parse({ note: 'Only a note' })).toEqual({ photoUrls: [], note: 'Only a note' });
+    expect(photoUrlsSchema.safeParse({ photoUrls: [] }).success).toBe(false);
+    expect(photoUrlsSchema.safeParse({}).success).toBe(false);
+  });
+});

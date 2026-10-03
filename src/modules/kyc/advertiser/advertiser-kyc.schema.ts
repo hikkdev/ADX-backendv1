@@ -33,11 +33,42 @@ const KYC_TYPES = ['INDIVIDUAL', 'COMMERCIAL', 'NGO', 'AGENCY'] as const;
 /** Lot F: the onboarding-manifest version the phone rendered — pinned on the row at the first submission. */
 const manifestVersion = z.number().int().positive().optional();
 
+/**
+ * 26 Sep 2026: the onboarding manifest (and the phone and the website with
+ * it) names the PAN photo `panFrontUrl` on both sides; this row keeps it as
+ * `panCardUrl`. Both names are accepted in — `panFrontUrl` folds into
+ * `panCardUrl` (an explicit `panCardUrl` wins) — and both are answered out
+ * (`withPanAlias`). Before this a `panFrontUrl` was stripped by the schema
+ * and the PAN photo silently lost.
+ */
+const panFrontAlias = { panFrontUrl: z.string().url().optional() };
+
+function foldPanAlias<T extends { panFrontUrl?: string | undefined; panCardUrl?: string | undefined }>(input: T): Omit<T, 'panFrontUrl'> {
+  const { panFrontUrl, ...rest } = input;
+  return panFrontUrl && !rest.panCardUrl ? { ...rest, panCardUrl: panFrontUrl } : rest;
+}
+
+/** The alias for a document field the desk names (`panFrontUrl` is the manifest's name for `panCardUrl`). */
+export function advertiserDocumentField(field: string): string {
+  return field === 'panFrontUrl' ? 'panCardUrl' : field;
+}
+
+/** A row answered with the PAN photo under both names. */
+export function withPanAlias<T extends { panCardUrl?: string | null }>(row: T): T & { panFrontUrl: string | null } {
+  return { ...row, panFrontUrl: row.panCardUrl ?? null };
+}
+
+/** The flagged list with a flagged `panCardUrl` also named `panFrontUrl`, so the manifest's PAN tile carries the flag. */
+export function withFlaggedPanAlias<T extends { field: string }>(flagged: T[]): T[] {
+  return flagged.flatMap((item) => (item.field === 'panCardUrl' ? [item, { ...item, field: 'panFrontUrl' }] : [item]));
+}
+
 export const createAdvertiserKycSchema = z.object({
   kycType: z.enum(KYC_TYPES).default('INDIVIDUAL'),
   manifestVersion,
   ...documentFields,
-});
+  ...panFrontAlias,
+}).transform(foldPanAlias);
 
 /**
  * `PUT /advertiser-kyc/me`: every column optional. Lot D (Q42) / Lot F: while
@@ -50,7 +81,8 @@ export const updateAdvertiserKycSchema = z.object({
   kycType: z.enum(KYC_TYPES).optional(),
   manifestVersion,
   ...documentFields,
-});
+  ...panFrontAlias,
+}).transform(foldPanAlias);
 
 export const advertiserKycStatusFilterSchema = z
   .enum(['PENDING', 'VERIFIED', 'REJECTED', 'NEEDS_INFO'])

@@ -19,6 +19,7 @@ const repository = vi.hoisted(
   userLabels: vi.fn(async () => new Map()),
       findAdvertiserById: vi.fn(),
       findKycSummary: vi.fn(),
+      findKycSummaries: vi.fn(),
       findAdvertiserByMobile: vi.fn(),
       findAdvertiserByUserId: vi.fn(),
       findAdvertiserLabelsByUserIds: vi.fn(),
@@ -66,7 +67,7 @@ const { allocateIdentifier, wallets, payouts, agents, agreements } = vi.hoisted(
   allocateIdentifier: vi.fn(),
   wallets: { move: vi.fn(), findWallet: vi.fn() },
   payouts: { findPayoutMethod: vi.fn(), recordIncentiveOnce: vi.fn() },
-  agents: { findAgentTier: vi.fn() },
+  agents: { findAgentTier: vi.fn(), payForNextOnboarding: vi.fn() },
   // Lot D (Q123): the insertion order is rendered and recorded by `agreements`;
   // the re-acceptance rule is the real one, so the gate tests exercise it.
   agreements: {
@@ -106,6 +107,7 @@ import {
   registerAdvertiser,
   releaseCampaignHold,
   updateProfile,
+  listAdvertisers,
 } from '../advertisers.service';
 
 /** Only the fields the service reads; the rest of Advertiser is irrelevant. */
@@ -363,6 +365,9 @@ describe('applyKycDecision', () => {
 describe('the onboarding commission (Lot B, Q101)', () => {
   beforeEach(() => {
     agents.findAgentTier.mockResolvedValue('GOLD');
+    /* CP-1: no pay record means the agent is not on the quota model, so the
+       commission behaves as it did before — the flat rate table. */
+    agents.payForNextOnboarding.mockResolvedValue({ agentId: 'agt_1', day: '2026-09-23', covered: false, reason: 'NO_TERMS', quota: null, doneToday: 0, amount: null });
     payouts.recordIncentiveOnce.mockResolvedValue({ id: 'inc_1', amount: '2000.00', status: 'PENDING_VERIFICATION' });
     // The row keeps its attribution through the activation write.
     repository.updateAdvertiser.mockImplementation(
@@ -581,5 +586,26 @@ describe('capture and release', () => {
 
     await expect(releaseCampaignHold('hld-1')).resolves.toEqual({ released: true });
     expect(repository.releaseHold).not.toHaveBeenCalled();
+  });
+});
+
+describe('the roster carries each advertiser KYC status (29 Sep 2026)', () => {
+  it('attaches the detail page kyc summary to every row, from one lookup for the page', async () => {
+    const row = (id: string, kycStatus: string, userId: string | null) => ({ id, userId, kycStatus, onboardedById: null });
+    repository.listAdvertisers.mockResolvedValue({ rows: [row('adv_1', 'PENDING', 'usr_1'), row('adv_2', 'VERIFIED', null), row('adv_3', 'PENDING', 'usr_3')], total: 3, page: 1, pageSize: 10 });
+    repository.findKycSummaries.mockResolvedValue(
+      new Map([
+        ['adv_1', { id: 'kyc_1', status: 'PENDING', submittedAt: new Date('2026-09-20T00:00:00Z'), requestedAt: null, requestedChannel: null, method: 'MANUAL' }],
+        ['adv_2', null],
+        ['adv_3', null],
+      ]),
+    );
+    const page = (await listAdvertisers({ page: 1, pageSize: 10 } as never)) as unknown as { rows: { id: string; kyc: { state: string } }[] };
+    expect(repository.findKycSummaries).toHaveBeenCalledTimes(1);
+    expect(page.rows.map((r) => [r.id, r.kyc.state])).toEqual([
+      ['adv_1', 'PENDING'],
+      ['adv_2', 'VERIFIED'],
+      ['adv_3', 'AWAITING_DOCUMENTS'],
+    ]);
   });
 });

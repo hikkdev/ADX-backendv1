@@ -1,3 +1,4 @@
+import { isWorkingUser } from '../../../shared/party-status';
 import type { Request, Response } from 'express';
 import { ApiError } from '../../../shared/errors';
 import { logActivity } from '../../../shared/audit';
@@ -9,6 +10,8 @@ import { prismaAuthRepository as repository } from '../prisma-auth.repository';
 import { sessionMeta, startSession } from '../auth.session';
 import { verifyGoogleIdToken } from './google.service';
 import { isAdmin, issueChallenge } from '../two-factor/two-factor.service';
+import { isEnrolled } from '../two-factor/authenticator.service';
+import { signupHandoffForProvenEmail, stampProvenEmail } from '../otp/otp.service';
 
 /**
  * POST /auth/google — exchange a Google ID token for an ADX session.
@@ -45,24 +48,22 @@ export async function googleLoginHandler(req: Request, res: Response): Promise<v
   const user = matches[0];
 
   if (!user) {
-    // No ActivityLog row is possible here — its userId is a foreign key and
-    // there is no user to hang it on — so the rejection goes to the log only.
-    logger.warn('Google sign-in for an unprovisioned address', {
-      hostedDomain: identity.hostedDomain,
-      googleSub: identity.sub,
-    });
-    // Unlike login-password, naming the reason here leaks nothing. The caller
-    // has already proved to Google that they own this mailbox, so they learn
-    // only about their own address — it is not an oracle for probing others.
-    // Being explicit saves a support ticket from every new hire.
-    throw new ApiError(
-      403,
-      'FORBIDDEN',
-      'No ADX account is linked to this Google address. Ask an administrator to invite you.',
-    );
+    // G-2 (the owner, 25 Sep 2026): Google is a sign-up door too. A mailbox
+    // Google vouches for skips the email code and goes straight to the phone
+    // step — every account still proves a number — carrying the hand-off the
+    // email door answers a new address with. An address Google has not
+    // verified is not proof of anything, and is refused as before.
+    if (!identity.emailVerified) {
+      logger.warn('Google sign-in for an unverified address', { googleSub: identity.sub });
+      throw new ApiError(403, 'FORBIDDEN', 'Google has not verified this email address. Verify it with Google, or sign up with your email or mobile number.');
+    }
+    const signup = await signupHandoffForProvenEmail(identity.email);
+    logger.info('Google sign-in for a new address: handed to the phone step', { googleSub: identity.sub });
+    res.json({ success: true, data: { signup: { signupToken: signup.signupToken, email: signup.email, expiresInSeconds: signup.expiresInSeconds } } });
+    return;
   }
 
-  if (!user.isActive) {
+  if (!isWorkingUser(user)) {
     // Mirrors what password login records for a rejected attempt, so a
     // deactivated account being probed is visible in the same place.
     await logActivity(user.id, 'LOGIN_FAILED', req, {
@@ -74,12 +75,21 @@ export async function googleLoginHandler(req: Request, res: Response): Promise<v
   }
 
   const roles = user.roles.map((r) => r.role) as Role[];
+  // ED-1: Google proved the mailbox — the same standing the email door's code gives.
+  if (identity.emailVerified && user.email) await stampProvenEmail(user.id, user.email);
 
   // Lot A (Q25): Google proved the mailbox, not the phone. An admin therefore
   // gets the same challenge a password sign-in gets, and no tokens yet.
   if (isAdmin(roles)) {
     const challenge = await issueChallenge(user);
     await logActivity(user.id, 'LOGIN_2FA_CHALLENGED', req, { method: 'google', googleSub: identity.sub });
+    res.json({ success: true, data: { challenge } });
+    return;
+  }
+  // 2FA-A: an account with an authenticator answers the app before tokens.
+  if (isEnrolled(user)) {
+    const challenge = await issueChallenge(user, { methods: ['AUTHENTICATOR'] });
+    await logActivity(user.id, 'LOGIN_2FA_CHALLENGED', req, { method: 'google', googleSub: identity.sub, authenticator: true });
     res.json({ success: true, data: { challenge } });
     return;
   }

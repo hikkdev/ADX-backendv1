@@ -51,7 +51,7 @@ describe('the permission catalogue', () => {
   it('answers a tier and a group', () => {
     expect(permissionsOfTier('view')).toContain('finance.view');
     expect(permissionsOfTier('view')).not.toContain('flows.edit');
-    expect(permissionsOfGroup('hr')).toEqual(['hr.view', 'hr.edit', 'hr.salary.view', 'hr.documents.view']);
+    expect(permissionsOfGroup('hr')).toEqual(['hr.view', 'hr.edit', 'hr.salary.view', 'hr.documents.view', 'hr.delete']);
     expect(permissionsOfGroup('nope')).toEqual([]);
   });
 });

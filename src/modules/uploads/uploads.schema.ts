@@ -13,10 +13,17 @@ export const purposeSchema = z.enum([
   /// Lot D: what a party attaches to a dispute.
   'DISPUTE_EVIDENCE',
   'LISTING_PHOTO',
+  /// Site-visit, re-verification and installation proof photos, and — until ST-2 adopts them — the papers filed on a listing. Public.
   'VERIFICATION',
+  /// ST-2 (28 Sep 2026): a listing's venue papers and audience reports — private; adopted from any public upload when filed on a listing.
+  'LISTING_DOCUMENT',
+  /// ST-2: a photo an agent or a publisher files on an order (pickup, condition, installed) — public, like the other proof photos.
+  'ORDER_EVIDENCE',
   'AVATAR',
   /// QR-9: a brand file the console uploads — the wordmark, the mark, the icon. Public.
   'BRANDING',
+  /** LM-1: the media library — layout blocks, tiles, ad artwork. Public. */
+  'MEDIA',
   /// Campaign artwork: a print-ready image, or a video for a digital screen.
   'CAMPAIGN_CREATIVE',
   /// Lot B (Q41): the proof behind a wallet top-up — a transfer receipt, a cheque scan.
@@ -49,6 +56,10 @@ export const purposeSchema = z.enum([
   'CALL_RECORDING',
   /// LH10: the photo an agent takes when they mark a field visit done — private, what the QA draw reads.
   'VISIT_PROOF',
+  /// VA-2: a competitor's hoarding an agent photographed in the street — private; the analysis and training corpus read it.
+  'COMPETITOR_CAPTURE',
+  /// FM-1 (27 Sep 2026): a file answered on a SIGNED_IN form — private, the person's own; the desk reads it from the submission.
+  'FORM_UPLOAD',
   'OTHER',
 ]);
 
@@ -80,6 +91,20 @@ export const PRIVATE_PURPOSES: ReadonlySet<UploadPurpose> = new Set<UploadPurpos
   'LEAD_CAPTURE',
   'CALL_RECORDING',
   'VISIT_PROOF',
+  'COMPETITOR_CAPTURE',
+  'FORM_UPLOAD',
+  /*
+   * ST-2 (28 Sep 2026): a listing's venue papers — the permit, the owner's
+   * NOC, the lease — and its audience reports (BARC, footfall audits). The
+   * owner: "Sure, go ahead, build it." Read by the publisher, the desk, the
+   * publisher's agent under a live grant, and the field agent sent to that
+   * listing (`FileAccessPort.listingDocumentMayView`). Filed under its own
+   * purpose rather than VERIFICATION, which also carries the installation
+   * and site-visit photos an advertiser is shown and so stays public: a file
+   * named on a listing's document is ADOPTED into this purpose when the
+   * document is filed (`adoptListingDocument`), whatever it was uploaded as.
+   */
+  'LISTING_DOCUMENT',
 ]);
 
 export const isPrivatePurpose = (purpose: string): boolean => PRIVATE_PURPOSES.has(purpose as UploadPurpose);
@@ -89,6 +114,7 @@ export const KYC_PURPOSES: ReadonlySet<string> = new Set(['KYC', 'AGENT_KYC', 'A
 
 /** Destination folder per purpose. Unknown purposes fall back to 'misc'. */
 export const PURPOSE_FOLDER: Record<string, string> = {
+  MEDIA: 'media',
   KYC: 'kyc',
   AGENT_KYC: 'agent-kyc',
   ADVERTISER_KYC: 'advertiser-kyc',
@@ -98,6 +124,8 @@ export const PURPOSE_FOLDER: Record<string, string> = {
   DISPUTE_EVIDENCE: 'dispute-evidence',
   LISTING_PHOTO: 'listings',
   VERIFICATION: 'verification',
+  LISTING_DOCUMENT: 'listing-documents',
+  ORDER_EVIDENCE: 'order-evidence',
   AVATAR: 'avatars',
   BRANDING: 'brand',
   CAMPAIGN_CREATIVE: 'creatives',
@@ -116,6 +144,8 @@ export const PURPOSE_FOLDER: Record<string, string> = {
   LEAD_CAPTURE: 'lead-captures',
   CALL_RECORDING: 'call-recordings',
   VISIT_PROOF: 'visit-proofs',
+  COMPETITOR_CAPTURE: 'competitor-captures',
+  FORM_UPLOAD: 'form-uploads',
   OTHER: 'misc',
 };
 
@@ -145,8 +175,29 @@ export const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
 export const isVideo = (mimetype: string): boolean => mimetype.startsWith('video/');
 
 /**
+ * 26 Sep 2026: types admitted for one purpose only. A browser's webcam
+ * (MediaRecorder) records WebM, not MP4, so the website's liveness video —
+ * purpose USER_KYC — arrives as `video/webm`. Nothing else takes WebM: a
+ * digital-screen creative is still MP4/QuickTime by the campaign spec.
+ * Checked after the whole form is read, when the purpose is known (a
+ * multipart field may arrive after the file).
+ */
+export const PURPOSE_ONLY_MIME: Readonly<Record<string, readonly string[]>> = {
+  'video/webm': ['USER_KYC'],
+};
+
+/** Whether the general upload door takes this type for this purpose. */
+export function mimeAllowedFor(mimetype: string, purpose: string | undefined): boolean {
+  if (ALLOWED_MIME.includes(mimetype)) return true;
+  const purposes = PURPOSE_ONLY_MIME[mimetype];
+  return Boolean(purposes && purpose && purposes.includes(purpose));
+}
+
+/**
  * Lot B (Q85): what a bank's statement export arrives as. Browsers label a
  * .csv three different ways, and Excel-saved files come as its own type.
  */
 export const CSV_MIME = ['text/csv', 'text/plain', 'application/csv', 'application/vnd.ms-excel', 'application/octet-stream'];
 export const MAX_CSV_BYTES = 5 * 1024 * 1024;
+/** 26 Sep 2026: an Excel workbook, for the bulk listing upload. */
+export const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';

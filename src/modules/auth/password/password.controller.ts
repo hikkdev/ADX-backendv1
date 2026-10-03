@@ -1,3 +1,4 @@
+import { isWorkingUser } from '../../../shared/party-status';
 import type { Request, Response } from 'express';
 import { ApiError } from '../../../shared/errors';
 import { env } from '../../../config/env';
@@ -12,6 +13,7 @@ import {
 } from '../auth.schema';
 import { passwordLoginUser } from '../auth.mapper';
 import { prismaAuthRepository as repository } from '../prisma-auth.repository';
+import { stampProvenEmail } from '../otp/otp.service';
 import { sessionMeta, startSession } from '../auth.session';
 import { revokeSessions } from '../tokens/tokens.service';
 import {
@@ -47,7 +49,7 @@ export async function loginPasswordHandler(req: Request, res: Response): Promise
     throw new ApiError(401, 'UNAUTHORIZED', 'Invalid email or password');
   }
 
-  if (!user.isActive) {
+  if (!isWorkingUser(user)) {
     throw new ApiError(401, 'UNAUTHORIZED', 'Account not active');
   }
 
@@ -123,6 +125,9 @@ export async function resetPasswordHandler(req: Request, res: Response): Promise
 
   const passwordHash = await hashPassword(parsed.data.newPassword);
   await repository.setPasswordHash(userId, passwordHash);
+  // ED-1: the reset link came to the account's mailbox and was opened from it — proved.
+  const holder = await repository.findLoginUserById(userId);
+  if (holder?.email) await stampProvenEmail(userId, holder.email);
 
   // A password reset ends every session — the refresh tokens AND the access
   // tokens still in flight, through the revocation marker authenticate()

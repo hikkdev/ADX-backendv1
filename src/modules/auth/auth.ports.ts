@@ -1,4 +1,3 @@
-import { PERMISSIONS } from '../../shared/auth';
 import type { Role } from '../../shared/database';
 
 /**
@@ -6,8 +5,9 @@ import type { Role } from '../../shared/database';
  * ids this person holds. The answer lives in `access-control` (RoleConfig and
  * its members), and access-control needs `revokeSessions` from here whenever
  * a role changes — so the dependency is inverted. `bootstrap/register-modules`
- * plugs access-control's resolver in; until it does, the launch rule answers:
- * an ADMIN holds every permission, nobody else holds any.
+ * plugs access-control's resolver in; until it does, nobody holds any (RP-1:
+ * only Super admin holds every permission, and only access-control knows who
+ * that is).
  */
 export type PermissionResolver = (userId: string, roles: Role[]) => Promise<string[]>;
 
@@ -17,9 +17,9 @@ export function registerPermissionResolver(fn: PermissionResolver | null): void 
   resolver = fn;
 }
 
-/** The launch rule, also what a registered resolver falls back to for an ADMIN with no role. */
-export function launchPermissions(roles: Role[]): string[] {
-  return roles.includes('ADMIN') ? [...PERMISSIONS] : [];
+/** Unregistered, nobody holds a permission: a console role is the only source of one (RP-1). */
+export function launchPermissions(_roles: Role[]): string[] {
+  return [];
 }
 
 export async function resolvePermissions(userId: string, roles: Role[]): Promise<string[]> {
@@ -34,11 +34,10 @@ export async function resolvePermissions(userId: string, roles: Role[]): Promise
 /**
  * What `GET /users/me` and `GET /auth/2fa/status` say about the console
  * role: the config the person holds (with `isSystem`) and whether they are
- * a super admin — a member of the system role, or an ADMIN with no role
- * config at all under the launch rule. The predicate is access-control's
- * (`consoleStandingFor`) and is registered from there, so the console
- * stops reading `/roles-config` a second time to decide the same thing.
- * Unregistered, the launch rule answers.
+ * a super admin — a member of the system role, and nothing else (RP-1). The
+ * predicate is access-control's (`consoleStandingFor`) and is registered
+ * from there, so the console stops reading `/roles-config` a second time
+ * to decide the same thing. Unregistered, nobody is a super admin.
  */
 export type ConsoleStanding = {
   roleConfig: { id: string; name: string; isSystem: boolean } | null;
@@ -52,9 +51,9 @@ export function registerConsoleStandingResolver(fn: ConsoleStandingResolver | nu
   standingResolver = fn;
 }
 
-/** The launch rule: an ADMIN with no role config is a super admin; nobody else has a console. */
-export function launchConsoleStanding(roles: Role[]): ConsoleStanding {
-  return { roleConfig: null, isSuperAdmin: roles.includes('ADMIN') };
+/** Unregistered, nobody holds a role and nobody is a super admin (RP-1). */
+export function launchConsoleStanding(_roles: Role[]): ConsoleStanding {
+  return { roleConfig: null, isSuperAdmin: false };
 }
 
 export async function resolveConsoleStanding(userId: string, roles: Role[]): Promise<ConsoleStanding> {

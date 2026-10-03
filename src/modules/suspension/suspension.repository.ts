@@ -52,6 +52,8 @@ export type NewSuspensionEvent = {
   reason: string;
   byUserId: string;
   at?: Date;
+  /** Account lifecycle: what the step needs remembered — `cause` when a user deactivation placed it. */
+  metadata?: Record<string, unknown>;
 };
 
 /** One of a publisher's spots, for the BLOCK_NEW / STOP_ACCRUAL cascade. */
@@ -75,5 +77,7 @@ export interface SuspensionRepository {
   setUserActive(userId: string, isActive: boolean): Promise<void>;
   listingsForPublisher(publisherId: string): Promise<PublisherListing[]>;
   createEvent(input: NewSuspensionEvent): Promise<PartySuspensionEvent>;
+  /** Account lifecycle: the publisher, advertiser and agent profiles one account holds. */
+  partiesOfUser(userId: string): Promise<{ partyType: 'PUBLISHER' | 'ADVERTISER' | 'AGENT'; partyId: string }[]>;
   listEvents(partyType: PartyType, partyId: string, limit: number): Promise<PartySuspensionEvent[]>;
 }

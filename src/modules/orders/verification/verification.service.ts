@@ -6,6 +6,7 @@ import { setListingAvailability } from '../../listings';
 import { installationFeeFor, recordIncentiveOnce } from '../../payouts';
 import { prismaOrdersRepository as repository } from '../prisma-orders.repository';
 import { notifyAdmins, notifyAgent, notifyUser, shortId } from '../orders.notify';
+import { assertOrderNotHeld } from '../risk/order-hold';
 
 const OTP_TTL_MS = 10 * 60 * 1000;
 
@@ -55,7 +56,8 @@ export async function verifyCompletionOtp(
   agentProfileId: string,
   otp: string,
 ) {
-  const order = await repository.findById(orderId);
+  // The one read that opts back into the code past the global omit.
+  const order = await repository.findWithCompletionCode(orderId);
   if (!order) throw new Error('ORDER_NOT_FOUND');
   if (order.agentId !== agentProfileId) throw new Error('NOT_YOUR_ORDER');
   if (order.status !== 'PENDING_OTP') throw new Error('WRONG_STATUS');
@@ -133,6 +135,8 @@ export async function approveOrder(orderId: string) {
   const order = await repository.findWithPublisher(orderId);
   if (!order) throw new Error('ORDER_NOT_FOUND');
   if (order.status !== 'PENDING_APPROVAL') throw new Error('WRONG_STATUS');
+  // Order fraud screening: the sign-off records the agent's commission — money — so a held order waits.
+  await assertOrderNotHeld(orderId);
 
   const updated = await repository.update(orderId, {
     status: 'COMPLETED',

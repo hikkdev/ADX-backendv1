@@ -168,6 +168,27 @@ describe('the daily run', () => {
       'accrual:spt_1:2026-09-11'
     );
   });
+
+  // Order fraud screening (2 Oct 2026): a held order's spot earns nothing while
+  // held, and the wallet is not frozen for it — only this step waits. Released,
+  // the next run catches up every elapsed day, because nothing was written.
+  it('skips a spot whose order is held for review, and catches the days up once it is released', async () => {
+    repository.findAccruableSpots.mockResolvedValue([spot({ order: { heldAt: new Date('2026-09-11T08:00:00Z') } }), spot({ id: 'spt_2', orderId: 'ord_2', order: { heldAt: null } })]);
+    const held = await runDailyAccrual(NOW);
+    expect(held.skipped).toBe(1);
+    expect(wallets.move.mock.calls.map((call) => (call[0] as { idempotencyKey: string }).idempotencyKey)).toEqual(['accrual:spt_2:2026-09-10', 'accrual:spt_2:2026-09-11']);
+    expect(repository.createAccrual.mock.calls.every((call) => (call[0] as { campaignSpotId: string }).campaignSpotId === 'spt_2')).toBe(true);
+
+    vi.clearAllMocks();
+    repository.findAccruedDates.mockResolvedValue([]);
+    repository.createAccrual.mockResolvedValue({ id: 'acr_2' });
+    wallets.ensureWallet.mockResolvedValue({ id: 'wal_1' });
+    wallets.move.mockResolvedValue({ entry: { id: 'ent_2' }, ledgerTransactionId: 'ltx_2', created: true });
+    repository.findAccruableSpots.mockResolvedValue([spot({ order: { heldAt: null } })]);
+    const released = await runDailyAccrual(NOW);
+    expect(released.daysCredited).toBe(2);
+    expect(wallets.move.mock.calls.map((call) => (call[0] as { idempotencyKey: string }).idempotencyKey)).toEqual(['accrual:spt_1:2026-09-10', 'accrual:spt_1:2026-09-11']);
+  });
 });
 
 describe('the quantity backfill (Q135)', () => {

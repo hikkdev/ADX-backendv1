@@ -112,5 +112,30 @@ export type { SlotCandidate } from './scheduling/slot-candidates';
  */
 export { updateAgentLocation } from './tracking/tracking.service';
 
+/**
+ * Order fraud screening (the owner, 2 Oct 2026). The order owns its risk and
+ * hold columns and what a hold stops; `fraud` scores orders and runs the
+ * review desk through these. The placement hook is a port bootstrap fills
+ * with `fraud`'s background screening (unregistered, the nightly re-screen
+ * still reaches every open order).
+ */
+export {
+  getOrderRiskState,
+  getOrderRiskView,
+  recordOrderRisk,
+  holdOrder,
+  releaseOrderHold,
+  listRiskReview,
+  openOrderIdsForScreening,
+} from './risk/order-risk.service';
+export type { OrderRiskView, RiskPerson } from './risk/order-risk.service';
+export { ORDER_REVIEW_NOTICE, isOrderHeld, isClosedOrder, CLOSED_ORDER_STATUSES } from './risk/order-hold';
+export type { OrderRiskState, OrderRiskPatch } from './orders.repository';
+export { riskReviewQuerySchema, RISK_REVIEW_STATUSES } from './orders.schema';
+export type { RiskReviewQuery, RiskReviewStatusFilter } from './orders.schema';
+/** Used by `campaigns`: the money behind these orders was taken (paid at authorisation, or the hold captured at launch). */
+export { registerOrderScreeningPort, resetOrderScreeningPort, announceOrdersPaid } from './screening.port';
+export type { OrderScreeningPort } from './screening.port';
+
 // Lot G (answer 144): the module's feature declarations, loaded with the module so the registry sees them at boot.
 import './features';

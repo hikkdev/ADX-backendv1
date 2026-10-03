@@ -21,6 +21,8 @@ export { printPartnerRouter, printJobRouter, printQuoteRequestsRouter } from './
 export { printPartnerKycRouter } from './kyc/print-partner-kyc.routes';
 /** Lot N, for bootstrap: claims a Digio webhook whose request id is a print partner's (registered on `publishers`' unmatched-webhook list). */
 export { handlePrintPartnerDigioWebhook } from './kyc/print-partner-digio.service';
+/** Cashfree Phase 1, used by bootstrap: the partner's case for the desk's "Resend on backup". */
+export { printPartnerBackupCase } from './kyc/print-partner-digio.service';
 /** Lot N, for `jobs/kyc-purge.job.ts`: the Digio-path partner images, thirty days after verification. */
 export { purgeVerifiedPrintPartnerImages } from './kyc/print-partner-kyc.service';
 

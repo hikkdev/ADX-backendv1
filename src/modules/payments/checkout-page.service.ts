@@ -154,7 +154,8 @@ export type CheckoutPageData = {
   currency: string;
   /** The rupee figure the page prints. */
   amountLabel: string;
-  prefill: { name: string; email: string; contact: string };
+  /** UP-1: `vpa` when the payer typed a UPI id on the intent. */
+  prefill: { name: string; email: string; contact: string; vpa?: string };
   theme: { color: string };
   testMode: boolean;
   confirmUrl: string;
@@ -274,7 +275,15 @@ function paidPage(payment: PaymentView, detailed = true): RenderedPage {
       tone: 'ok',
       reference: detailed ? `${payment.reference} · ₹${money(payment.amount)}` : null,
       body: `Return to the ADX app — ${
-        payment.campaignId ? 'your campaign is being booked' : payment.subscriptionOrderId ? 'your subscription is being activated' : 'your plan is being activated'
+        payment.campaignId
+          ? 'your campaign is being booked'
+          : payment.subscriptionOrderId
+            ? 'your subscription is being activated'
+            : payment.adBookingId
+              ? 'your ad goes to ADX for review'
+              : payment.listingBoostId
+                ? 'your listing is being sponsored'
+                : 'your plan is being activated'
       }.`,
     }),
   };
@@ -313,14 +322,19 @@ async function pageLinesFor(payment: PaymentView): Promise<{ description: string
       payment.subscriptionOrderId ? findSubscriptionOrder(payment.subscriptionOrderId) : null,
     ]);
     return {
-      description: order ? `${order.planName} plan — ${order.reference}` : 'Subscription payment',
+      description: order ? `${order.planName} plan — ${order.reference}` : payment.listingBoostId ? 'Sponsored listing' : 'Subscription payment',
       prefill: { name: publisher?.name ?? '', email: publisher?.email ?? '', contact: publisher?.mobile ?? '' },
     };
   }
   const advertiser = await getAdvertiser(payer.id);
   return {
-    description: payment.campaignId ? 'Campaign booking' : 'Plan payment',
-    prefill: { name: advertiser.companyName ?? advertiser.name ?? '', email: advertiser.email ?? '', contact: advertiser.mobile ?? '' },
+    description: payment.campaignId ? (payment.purpose === 'RESERVATION_FEE' ? 'Reservation fee' : 'Campaign booking') : payment.adBookingId ? 'Display ad' : 'Plan payment',
+    prefill: {
+      name: advertiser.companyName ?? advertiser.name ?? '',
+      email: advertiser.email ?? '',
+      contact: advertiser.mobile ?? '',
+      ...(payment.payerUpiId ? { vpa: payment.payerUpiId } : {}),
+    },
   };
 }
 

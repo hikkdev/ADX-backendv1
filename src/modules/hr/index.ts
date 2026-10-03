@@ -17,6 +17,13 @@ export type { PersonKind } from './hr.schema';
 
 /** Bootstrap: seed the year's list once, idempotently, beside `ensureSystemRoles`. */
 export { ensureHolidays } from './holidays.service';
+/**
+ * HC-1: the public holiday calendar. Bootstrap calls `ensureHolidayCalendar`
+ * (the old seed while the calendar is off; one sync when next year is empty
+ * while it is on); the weekly job calls `runScheduledHolidaySync`.
+ */
+export { ensureHolidayCalendar, runScheduledHolidaySync } from './holiday-calendar.service';
+export type { HolidaySyncResult } from './holiday-calendar.service';
 
 /** Lot G (Q122): departments — the free strings on Employee rows become records at boot, once. */
 export { ensureDepartments } from './departments/departments.service';

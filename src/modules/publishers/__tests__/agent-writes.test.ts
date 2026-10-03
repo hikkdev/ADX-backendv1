@@ -49,8 +49,11 @@ describe('reading', () => {
   it('needs only attribution', async () => {
     // E6: the read adds `user` and `openOrders` on the way out, so it is the row plus those;
     // N3-B: and `kyc` is the party's KYC summary — AWAITING_DOCUMENTS with no record.
+    // Phase D: and the legal form — none stored, none derivable from this row.
     await expect(getOwnedPublisher('pub_1', 'usr_agent')).resolves.toEqual({
       ...publisher,
+      entityType: null,
+      entityTypeStored: false,
       user: null,
       openOrders: 0,
       kyc: { state: 'AWAITING_DOCUMENTS', kycId: null, status: null, submittedAt: null, requestedAt: null, requestedChannel: null, method: null },

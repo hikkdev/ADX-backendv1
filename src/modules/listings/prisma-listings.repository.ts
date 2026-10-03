@@ -1,5 +1,5 @@
 import { Prisma, prisma } from '../../shared/database';
-import type { Listing, ListingStatus } from '../../shared/database';
+import type { AppTransactionClient, Listing, ListingStatus } from '../../shared/database';
 import { countsFrom, listArgs } from '../../shared/pagination';
 import type {
   BrowseFilter,
@@ -8,38 +8,74 @@ import type {
   ListingPatch,
   ListingsRepository,
   NewListing,
-  SendBackStatus,
-} from './listings.repository';
+  SendBackStatus, SimilarTo } from './listings.repository';
 import { LISTING_STATUSES, type AdminListingsQuery, type ReviewQueueQuery } from './listings.schema';
-import { liveReservationsWhere, slotHoldingOrdersWhere, sumSlotHolds, type SlotHoldOptions, type SlotWindow } from './slot-holds';
+import { datedHolds, liveReservationsWhere, peakSlotHolds, slotHoldingOrdersWhere, type DatedHold, type SlotHoldOptions, type SlotWindow, blockedDatesWhere } from './slot-holds';
 
 const D = Prisma.Decimal;
 
+/** SIM-1: "similar to this listing" — its category, its city, ±30% of its monthly price, live, rights in force, never itself. */
+export function similarWhere(anchor: SimilarTo): Prisma.ListingWhereInput {
+  return {
+    id: { not: anchor.excludeId },
+    // Lot X-L: the key is the identity when the listing carries one; the string as before when it does not.
+    ...(anchor.cityId ? { cityId: anchor.cityId } : { city: anchor.city ?? undefined }),
+    category: anchor.category,
+    status: 'ACTIVE',
+    // QR-24: a spot whose rights have lapsed takes no booking, so it is not offered.
+    rightsLapsedAt: null,
+    monthlyPrice: { gte: anchor.monthlyPrice * 0.7, lte: anchor.monthlyPrice * 1.3 },
+  };
+}
+
+export const similarAnchor = (listing: { id: string; cityId: string | null; city: string | null; category: SimilarTo['category']; monthlyPrice: number }): SimilarTo => ({
+  excludeId: listing.id,
+  cityId: listing.cityId,
+  city: listing.city,
+  category: listing.category,
+  monthlyPrice: Number(listing.monthlyPrice),
+});
+
 /** The two tables the slot count reads — the client itself, or a transaction inside one. */
-export type SlotCountClient = Pick<Prisma.TransactionClient, 'order' | 'campaignSpot'>;
+export type SlotCountClient = Pick<AppTransactionClient, 'order' | 'campaignSpot' | 'listingBlockedDate'>;
 
 /**
  * Lot G (Q116/136) / G10: how many slots each listing has held over the
  * window, on whatever client is handed in. The listings repository counts
  * on the client for browse; the orders and campaigns repositories count on
  * a transaction that holds the listing's advisory lock, so the count and
- * the insert it guards are one act. Quantities are summed (`sumSlotHolds`):
- * a campaign spot of three holds three.
+ * the insert it guards are one act. A campaign spot of three holds three,
+ * and (AV-1) the answer is the busiest day of the window: two bookings
+ * that never run on the same day never add up.
  */
 export async function slotsHeldWith(db: SlotCountClient, listingIds: string[], window: SlotWindow, options: SlotHoldOptions = {}): Promise<Map<string, number>> {
-  if (listingIds.length === 0) return new Map<string, number>();
-  const [orders, reservations] = await Promise.all([
+  // AV-1: the busiest single day of the window, not every hold summed.
+  return peakSlotHolds(await datedHoldsWith(db, listingIds, window, options), window);
+}
+
+/**
+ * AV-1: every hold on these listings that touches the window, with the days
+ * it covers — orders, live reservations and the publisher's blocks — for
+ * the per-day counts (`slot-holds.dailyHolds`).
+ */
+export async function datedHoldsWith(db: SlotCountClient, listingIds: string[], window: SlotWindow, options: SlotHoldOptions = {}): Promise<DatedHold[]> {
+  if (listingIds.length === 0) return [];
+  const [orders, reservations, blocks] = await Promise.all([
     db.order.findMany({
       where: { listingId: { in: listingIds }, ...slotHoldingOrdersWhere(window) },
-      select: { listingId: true, campaignSpot: { select: { quantity: true } } },
+      select: { listingId: true, startDate: true, endDate: true, campaignSpot: { select: { quantity: true } } },
     }),
-    db.campaignSpot.groupBy({
-      by: ['listingId'],
+    db.campaignSpot.findMany({
       where: { listingId: { in: listingIds }, ...liveReservationsWhere(window, options) },
-      _sum: { quantity: true },
+      select: { listingId: true, quantity: true, startDate: true, endDate: true },
+    }),
+    // BD-1: the publisher's own blocks — each takes the whole loop.
+    db.listingBlockedDate.findMany({
+      where: { listingId: { in: listingIds }, ...blockedDatesWhere(window) },
+      select: { listingId: true, from: true, to: true, listing: { select: { slotsTotal: true } } },
     }),
   ]);
-  return sumSlotHolds({ orders, reservations });
+  return datedHolds({ orders, reservations, blocks });
 }
 
 /**
@@ -142,9 +178,18 @@ function browsePlaceClauses(place: BrowsePlace): Prisma.ListingWhereInput[] {
   return clauses;
 }
 
+
+/** WG-1: a JSON column clears with Prisma's JsonNull, never a bare null — the schemas hand a null through. */
+type WithJsonNull<T, K extends keyof T> = Omit<T, K> & { [P in K]?: Exclude<T[P], null> | typeof Prisma.JsonNull };
+function jsonNulls<T extends Record<string, unknown>, K extends keyof T & string>(data: T, keys: readonly K[]): WithJsonNull<T, K> {
+  const out: Record<string, unknown> = { ...data };
+  for (const key of keys) if (out[key] === null) out[key] = Prisma.JsonNull;
+  return out as WithJsonNull<T, K>;
+}
+
 export const prismaListingsRepository: ListingsRepository = {
   create(data: NewListing) {
-    const { photos, ratePerDay, monthlyPrice, ...rest } = data;
+    const { photos, ratePerDay, monthlyPrice, ...rest } = jsonNulls(data, ['audienceDemographics', 'extraAnswers', 'documentWaivers']);
     const rate = new D(ratePerDay);
     // Measurements and the publisher's own figure arrive as decimal strings and
     // land in Decimal columns; Prisma would take the strings, but converting
@@ -230,12 +275,22 @@ export const prismaListingsRepository: ListingsRepository = {
         where,
         orderBy,
         ...listArgs(query),
-        include: { publisher: true, agent: true, photos: true },
+        // 3 Oct 2026: the photographs in the order they were filed, so the grid's cover is the same one the page leads with.
+        include: { publisher: true, agent: true, photos: { orderBy: { createdAt: 'asc' } } },
       }),
       prisma.listing.count({ where }),
       prisma.listing.groupBy({ by: ['status'], where: base, _count: { _all: true } }),
     ]);
-    return { items, total, counts: countsFrom(groups, LISTING_STATUSES) };
+    // The grid card's "12 bookings": one groupBy over the page's ids, never a count per row.
+    const bookings = items.length
+      ? await prisma.order.groupBy({
+          by: ['listingId'],
+          where: { listingId: { in: items.map((item) => item.id) }, status: { not: 'DRAFT' } },
+          _count: { _all: true },
+        })
+      : [];
+    const bookingCounts = Object.fromEntries(bookings.map((group) => [group.listingId, group._count._all]));
+    return { items, total, counts: countsFrom(groups, LISTING_STATUSES), bookingCounts };
   },
 
   findById(listingId: string) {
@@ -259,7 +314,7 @@ export const prismaListingsRepository: ListingsRepository = {
   },
 
   update(listingId: string, data: ListingPatch) {
-    const { ratePerDay, monthlyPrice, ...rest } = data;
+    const { ratePerDay, monthlyPrice, ...rest } = jsonNulls(data, ['audienceDemographics', 'extraAnswers', 'documentWaivers']);
     const measured = decimals(rest);
     // A price change re-dates the listing as a comparable and re-records how
     // long surge keeps it out of everyone else's pool.
@@ -341,6 +396,7 @@ export const prismaListingsRepository: ListingsRepository = {
   findReviewCase(listingId: string) {
     return prisma.listing.findUnique({
       where: { id: listingId },
+      omit: { vehicleRcPayload: false },
       include: {
         ...reviewJoins,
         mediaType: { select: { id: true, name: true } },
@@ -368,26 +424,49 @@ export const prismaListingsRepository: ListingsRepository = {
     });
   },
 
-  findSimilar(listing: Listing) {
+  findSimilar(listing: Listing, take = 5) {
     return prisma.listing.findMany({
-      where: {
-        id: { not: listing.id },
-        // Lot X-L: the key is the identity when the listing carries one; the string as before when it does not.
-        ...(listing.cityId ? { cityId: listing.cityId } : { city: listing.city ?? undefined }),
-        category: listing.category,
-        status: 'ACTIVE',
-        monthlyPrice: { gte: listing.monthlyPrice * 0.7, lte: listing.monthlyPrice * 1.3 },
-      },
+      where: similarWhere(similarAnchor(listing as never)),
       orderBy: { monthlyPrice: 'asc' },
-      take: 5,
+      take,
+      // 26 Sep 2026: answered as browse cards, so what a card draws comes with the row.
+      include: browseInclude,
     });
   },
 
   findWithPublisher(listingId: string) {
     return prisma.listing.findUnique({
       where: { id: listingId },
-      include: { publisher: { include: { user: true } } },
+      // 2 Oct 2026: the publisher row alone — no caller reads the login behind it.
+      include: { publisher: true },
     }) as never;
+  },
+
+  /* WG-1: photographs on a live listing. */
+  addPhoto(listingId, data) {
+    return prisma.listingPhoto.create({
+      data: { listingId, ...data },
+      select: { id: true, url: true, type: true, uploadedFileId: true, takenAt: true, createdAt: true },
+    });
+  },
+
+  async uploadedPhotoFacts(urls) {
+    const unique = [...new Set(urls.filter(Boolean))];
+    if (unique.length === 0) return [];
+    return prisma.uploadedFile.findMany({ where: { url: { in: unique } }, select: { id: true, url: true, takenAt: true }, orderBy: { createdAt: 'asc' } });
+  },
+
+  findPhoto(photoId: string) {
+    return prisma.listingPhoto.findUnique({ where: { id: photoId } });
+  },
+
+  deletePhoto(photoId: string) {
+    return prisma.listingPhoto.deleteMany({ where: { id: photoId } });
+  },
+
+  async adminUserIds() {
+    const rows = await prisma.user.findMany({ where: { isActive: true, closedAt: null, roles: { some: { role: 'ADMIN' } } }, select: { id: true } });
+    return rows.map((row) => row.id);
   },
 
   // ── DR 01 browse ────────────────────────────────────────────────────
@@ -396,20 +475,24 @@ export const prismaListingsRepository: ListingsRepository = {
     // The clauses that each need their own OR go in one AND list: `q` owns
     // the top-level OR, and a second one would overwrite the first.
     const clauses: Prisma.ListingWhereInput[] = browsePlaceClauses(filter);
+    // SIM-1: the spaces like one listing — the same rule the listing page's row reads.
+    if (filter.similar) clauses.push(similarWhere(filter.similar));
     // Available from the campaign's start (or by its end when only that is
     // given), or with no date set — a spot that never said when it opens is
     // not hidden for it.
     const availableBy = filter.from ?? filter.to;
     if (availableBy) clauses.push({ OR: [{ availableFrom: null }, { availableFrom: { lte: availableBy } }] });
-    // E7-2: with an end to the window, a spot booked over any of it is out —
-    // the clash rule checkout applies (BOOKED / LIVE, or a live RESERVED
-    // hold), a flight that starts before the window ends and ends after it
-    // starts. `listings` cannot import `campaigns`, so the rule is repeated
-    // here rather than read through it.
+    // E7-2 / AV-1 (the owner, 27 Sep 2026): with an end to the window, a
+    // static spot is hidden only when ONE booking covers the whole window —
+    // then no day of it can be free. A spot booked over part of the window
+    // stays in the results: its card says "Partly booked · n of m days
+    // free" (`freeDays`), and the listing's calendar shows which. The clash
+    // rule is checkout's (BOOKED / LIVE, or a live RESERVED hold);
+    // `listings` cannot import `campaigns`, so it is repeated here.
     // Lot G (Q116/136): a spot with a loop is never hidden for one booking —
-    // its card says how many slots are left, which may be none. SQL cannot
-    // count the loop against its holds here; the card can, and does.
+    // its card says how many slots are left, which may be none.
     if (filter.to) {
+      const windowStart = filter.from ?? new Date();
       clauses.push({
         OR: [
           { slotsTotal: { gt: 1 } },
@@ -419,14 +502,31 @@ export const prismaListingsRepository: ListingsRepository = {
                 some: {
                   OR: [{ status: { in: ['BOOKED', 'LIVE'] } }, { status: 'RESERVED', reservedUntil: { gt: new Date() } }],
                   AND: [
-                    { OR: [{ startDate: null }, { startDate: { lte: filter.to } }] },
-                    ...(filter.from ? [{ OR: [{ endDate: null }, { endDate: { gte: filter.from } }] }] : []),
+                    { OR: [{ startDate: null }, { startDate: { lte: windowStart } }] },
+                    { OR: [{ endDate: null }, { endDate: { gte: filter.to } }] },
                   ],
                 },
               },
             },
           },
         ],
+      });
+    }
+    // 26 Sep 2026: how the face is lit. The listing flow stores the option's
+    // title ("Front-lit"), the seed the upper-case word ("FRONTLIT"); a spot
+    // with nothing recorded counts as NONE. In the AND list: `q` owns OR.
+    if (filter.illumination?.length) {
+      const SPELLINGS: Record<string, string[]> = {
+        FRONTLIT: ['FRONTLIT', 'Front-lit', 'Front lit', 'FRONT_LIT'],
+        BACKLIT: ['BACKLIT', 'Back-lit', 'Back lit', 'BACK_LIT'],
+        DIGITAL: ['DIGITAL'],
+        NONE: ['NONE', 'Non-lit', 'Non lit', 'NON_LIT', 'Unlit'],
+      };
+      clauses.push({
+        OR: filter.illumination.flatMap((kind): Prisma.ListingWhereInput[] => [
+          ...(SPELLINGS[kind] ?? [kind]).map((word) => ({ illumination: { equals: word, mode: 'insensitive' as const } })),
+          ...(kind === 'NONE' ? [{ illumination: null }] : []),
+        ]),
       });
     }
     if (filter.illuminated === false) {
@@ -441,6 +541,8 @@ export const prismaListingsRepository: ListingsRepository = {
       ...(filter.venueTypeId ? { venueTypeId: filter.venueTypeId } : {}),
       // QR-27: one publisher's spaces.
       ...(filter.publisherId ? { publisherId: filter.publisherId } : {}),
+      // LM-1: which of the sponsored listings are in the filtered set.
+      ...(filter.onlyIds ? { id: { in: [...filter.onlyIds] } } : {}),
       ...(filter.display === 'DIGITAL'
         ? { subType: { contains: 'digital', mode: 'insensitive' } }
         : filter.display === 'STATIC'
@@ -591,6 +693,28 @@ export const prismaListingsRepository: ListingsRepository = {
 
   slotsHeld(listingIds: string[], window: SlotWindow, options: SlotHoldOptions = {}) {
     return slotsHeldWith(prisma, listingIds, window, options);
+  },
+
+  /* AV-1: the holds with their days, for the per-day availability. */
+  datedHolds(listingIds: string[], window: SlotWindow) {
+    return datedHoldsWith(prisma, listingIds, window);
+  },
+
+  /* BD-1: the publisher's blocked dates. */
+  findBlockedDates(listingId: string) {
+    return prisma.listingBlockedDate.findMany({ where: { listingId }, orderBy: { from: 'asc' } });
+  },
+
+  findBlockedDate(id: string) {
+    return prisma.listingBlockedDate.findUnique({ where: { id } });
+  },
+
+  createBlockedDate(data: { listingId: string; from: Date; to: Date; reason: string | null; createdById: string }) {
+    return prisma.listingBlockedDate.create({ data });
+  },
+
+  deleteBlockedDate(id: string) {
+    return prisma.listingBlockedDate.deleteMany({ where: { id } });
   },
 
   findActiveById(listingId: string) {

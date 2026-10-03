@@ -127,6 +127,22 @@ export function createCashfreeAdapter(
       });
       if (result.status < 200 || result.status >= 300) throw gatewayError('Cashfree', result, 'Could not create the order');
       const order = result.json as { cf_order_id: string | number; order_id: string; payment_session_id: string };
+      // UP-1: a UPI id typed on the checkout becomes a collect request on
+      // the session — the payer approves it in their UPI app. A refusal
+      // does not fail the intent: the session still opens the ordinary way.
+      let upiCollect: Record<string, unknown> | undefined;
+      if (input.upiId) {
+        const collect = await gatewayFetch(fetchImpl, 'Cashfree', `${host(cfg)}/pg/orders/sessions`, {
+          method: 'POST',
+          headers: headers(cfg),
+          body: JSON.stringify({ payment_session_id: order.payment_session_id, payment_method: { upi: { channel: 'collect', upi_id: input.upiId } } }),
+        });
+        const body = collect.json as { cf_payment_id?: string | number; payment_method?: unknown; channel?: string; message?: string } | null;
+        upiCollect =
+          collect.status >= 200 && collect.status < 300
+            ? { requested: true, upiId: input.upiId, cfPaymentId: body?.cf_payment_id !== undefined ? String(body.cf_payment_id) : null }
+            : { requested: false, upiId: input.upiId, error: body?.message ?? `Cashfree answered ${collect.status}` };
+      }
       return {
         gatewayOrderId: order.order_id ?? input.paymentId,
         checkout: {
@@ -134,6 +150,7 @@ export function createCashfreeAdapter(
           orderId: order.order_id ?? input.paymentId,
           cfOrderId: String(order.cf_order_id),
           environment: (cfg.testMode ?? true) ? 'sandbox' : 'production',
+          ...(upiCollect ? { upiCollect } : {}),
         },
       };
     },

@@ -44,10 +44,12 @@ beforeEach(() => {
 describe('which purposes are private', () => {
   it('is the identity documents, the money proofs, the dispute evidence and the invoice', () => {
     expect([...PRIVATE_PURPOSES].sort()).toEqual(
-      ['ADVERTISER_KYC', 'AGENT_KYC', 'BOOKING_REPORT', 'CALL_RECORDING', 'DATA_EXPORT', 'DISPUTE_EVIDENCE', 'EMPLOYEE_KYC', 'INVOICE', 'KYC', 'LEAD_CAPTURE', 'PARTNER_INVOICE', 'PARTNER_RATE_CARD', 'PRINT_PARTNER_KYC', 'REPORT', 'SIGNED_AGREEMENT', 'SUPPORT_ATTACHMENT', 'TOPUP_PROOF', 'USER_KYC', 'VISIT_PROOF'].sort(),
+      ['ADVERTISER_KYC', 'AGENT_KYC', 'BOOKING_REPORT', 'CALL_RECORDING', 'COMPETITOR_CAPTURE', 'DATA_EXPORT', 'DISPUTE_EVIDENCE', 'EMPLOYEE_KYC', 'FORM_UPLOAD', 'INVOICE', 'KYC', 'LEAD_CAPTURE', 'LISTING_DOCUMENT', 'PARTNER_INVOICE', 'PARTNER_RATE_CARD', 'PRINT_PARTNER_KYC', 'REPORT', 'SIGNED_AGREEMENT', 'SUPPORT_ATTACHMENT', 'TOPUP_PROOF', 'USER_KYC', 'VISIT_PROOF'].sort(),
     );
     expect(isPrivatePurpose('LISTING_PHOTO')).toBe(false);
     expect(isPrivatePurpose('AVATAR')).toBe(false);
+    // ST-2: a listing's papers are private; VERIFICATION also carries proof photos advertisers see, and stays public.
+    expect(isPrivatePurpose('VERIFICATION')).toBe(false);
   });
 });
 

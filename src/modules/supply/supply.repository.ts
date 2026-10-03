@@ -5,7 +5,7 @@ import type {
   ComplianceCase,
   ComplianceCaseStatus,
   ContactAttemptChannel,
-  Listing,
+  ListingRead as Listing,
   ListingAttempt,
   ListingAttemptOrigin,
   ListingAttemptStatus,
@@ -19,6 +19,7 @@ import type {
   VerificationStatus,
   VerificationType,
   RightsBasis,
+  SuspensionScope,
 } from '../../shared/database';
 import type { Page, PageQuery } from '../../shared/pagination';
 
@@ -147,6 +148,8 @@ export type VerificationWithPhotos = ListingVerification & {
 export type RightsDueRow = {
   id: string;
   title: string;
+  /** 3 Oct 2026: the LST- reference, for the renewals desk's table. */
+  displayId: string | null;
   publisherId: string | null;
   publisherName: string | null;
   status: Listing['status'];
@@ -155,6 +158,8 @@ export type RightsDueRow = {
   rightsValidUntil: Date | null;
   rightsLapsedAt: Date | null;
   rightsRemindedAt: Date | null;
+  /** Account lifecycle (2 Oct 2026): the publisher is a working account — a suspended, deactivated or closed one gets no reminder. */
+  publisherWorking: boolean;
 };
 
 export type VerificationDueRow = {
@@ -166,7 +171,29 @@ export type VerificationDueRow = {
   verifiedAt: Date | null;
   verificationExpiresAt: Date | null;
   status: Listing['status'];
+  /* 3 Oct 2026 — the verification queue's actions: the LST- reference, where the spot is (for "Send an agent"), and the desk's suspension sections in force. */
+  displayId: string | null;
+  city: string | null;
+  cityId: string | null;
+  suspensionScopes: SuspensionScope[];
 };
+
+/**
+ * One compliance case as the queue lists it — 3 Oct 2026: the case with the
+ * listing's title and reference, the publisher's name and how many contact
+ * attempts it has, which the console's table always drew and the bare row
+ * never carried.
+ */
+export type ComplianceCaseRow = ComplianceCase & {
+  listingTitle: string;
+  listingDisplayId: string | null;
+  publisherName: string | null;
+  attemptCount: number;
+  lastAttemptAt: Date | null;
+};
+
+/** The publisher behind a listing, as the reminder needs them: the login to tell and whether the account works. */
+export type PublisherContact = { name: string; userId: string | null; working: boolean };
 
 /* ------------------------------------------------------------------ */
 /* Repository                                                          */
@@ -225,6 +252,13 @@ export interface SupplyRepository {
   listDocuments(listingId: string): Promise<ListingDocument[]>;
   /** True when the listing has at least one document and none are outstanding. */
   documentsCleared(listingId: string): Promise<boolean>;
+  /**
+   * ST-2 (28 Sep 2026): the listings whose documents name a stored file,
+   * matched on how their URLs END (a `/files/:id`, or the object's own name
+   * for a URL recorded before the file went private; hosts differ between a
+   * phone and a desk), with each listing's publisher login.
+   */
+  listingsNamingFile(urlSuffixes: readonly string[]): Promise<{ listingId: string; publisherUserId: string | null }[]>;
 
   /* Verification */
   createVerification(data: NewVerification): Promise<ListingVerification>;
@@ -258,6 +292,10 @@ export interface SupplyRepository {
     data: { verifiedAt: Date; verificationExpiresAt: Date },
   ): Promise<Listing>;
   markDocumentsCleared(listingId: string, at: Date | null): Promise<Listing>;
+  /** 3 Oct 2026 ("Give more time"): moves the re-verification due date and nothing else — `verifiedAt` stays the last real check. */
+  setVerificationExpiry(listingId: string, at: Date): Promise<Listing>;
+  /** 3 Oct 2026 ("Remind publisher"): the publisher's name, login and whether the account works; null for no such row. */
+  publisherContact(publisherId: string): Promise<PublisherContact | null>;
 
   /* Claims */
   createClaim(data: {
@@ -282,7 +320,7 @@ export interface SupplyRepository {
   }): Promise<ComplianceCase>;
   findOpenCaseForListing(listingId: string): Promise<ComplianceCase | null>;
   findCase(caseId: string): Promise<ComplianceCase | null>;
-  listCases(status?: ComplianceCaseStatus, page?: PageQuery): Promise<Page<ComplianceCase>>;
+  listCases(status?: ComplianceCaseStatus, page?: PageQuery): Promise<Page<ComplianceCaseRow>>;
   addContactAttempt(data: {
     caseId: string;
     channel: ContactAttemptChannel;

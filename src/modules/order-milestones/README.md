@@ -180,3 +180,14 @@ what it is for. Every other milestone freezes as before.
 
 `findMilestoneStatuses(ids)` is the narrow read `disputes` uses to say
 "re-install pending" until the visit is COMPLETED or SKIPPED.
+
+## The agent sent to a listing (ST-2, 28 Sep 2026)
+
+`agentSentToListing(agentId, listingId, now?)` (exported) answers the
+private-file door for a listing's papers (`LISTING_DOCUMENT`, composed in
+bootstrap): the rule the verification drawer's own read applies — the
+milestone is assigned to this agent — widened to the listing. True for a
+visit of theirs on one of the listing's orders that is DISPATCHED or
+IN_PROGRESS, or COMPLETED within `LISTING_VISIT_WINDOW_DAYS` (30); or when
+they are the order's own agent (`Order.agentId`) while it is live, or within
+the same window after. Tests: `__tests__/st2-agent-sent.test.ts`.

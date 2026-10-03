@@ -518,6 +518,19 @@ export const DEFAULT_TEMPLATES: readonly TemplateSeed[] = [
     pushTitle: 'ADX has closed in {{city}}',
     pushBody: '{{detail}}',
   },
+  // 3 Oct 2026 (the verification queue's "Remind publisher"): ADX asks the
+  // publisher for a fresh photo of a spot whose re-verification is due or has
+  // lapsed. Push only — the in-app row names the listing (relatedType
+  // LISTING), so a tap on either opens the listing where the "Is the spot
+  // still standing?" card is. No SMS: there is no DLT-registered kind for it.
+  // Transactional: about the publisher's own listing and earnings.
+  {
+    key: 'listing-reverification-reminder',
+    event: 'LISTING_REVERIFICATION_DUE',
+    channels: ['PUSH'],
+    pushTitle: 'Is your spot still standing?',
+    pushBody: '{{detail}}',
+  },
   // Lot AA: the work desk's six notices, push only — the in-app row is the
   // record and the phone is how a person learns of it; ops can add email.
   // Transactional: each is about the person's own task.
@@ -555,8 +568,67 @@ export const DEFAULT_TEMPLATES: readonly TemplateSeed[] = [
   { key: 'lead-proposal-accepted', event: 'LEAD_PROPOSAL_ACCEPTED', channels: ['PUSH'], pushTitle: '{{businessName}} accepted', pushBody: '{{proposal}} — time to close it.' },
   // LH10: the clawback — the catch that did not last. Worded as what happened, with the reason.
   { key: 'incentive-reversed', event: 'INCENTIVE_REVERSED', channels: ['PUSH'], pushTitle: 'A reward came back', pushBody: '₹{{amount}} for {{businessName}} was reversed — {{reason}}.' },
+  // WS-1 (DR 12): the Monday digest of an advertiser's campaigns — non-transactional, so the quiet hours and the weekly cap govern it.
+  {
+    key: 'weekly-campaign-summary',
+    event: 'WEEKLY_CAMPAIGN_SUMMARY',
+    channels: ['EMAIL', 'PUSH'],
+    transactional: false,
+    subject: 'Your ADX week, {{weekLabel}}: {{live}} live, {{reach}} reach',
+    emailBody:
+      '<p>Hi {{name}},</p><p>Here is how your campaigns did in the week of {{weekLabel}}.</p><table cellpadding="6" style="border-collapse:collapse"><tr><td>Campaigns</td><td><strong>{{campaigns}}</strong> ({{live}} live)</td></tr><tr><td>Estimated reach</td><td><strong>{{reach}}</strong></td></tr><tr><td>QR scans</td><td><strong>{{scans}}</strong></td></tr><tr><td>Clicks</td><td><strong>{{clicks}}</strong></td></tr><tr><td>Spend</td><td><strong>INR {{spend}}</strong></td></tr></table><p>Best performer: <strong>{{topCampaign}}</strong>.</p><p><a href="{{link}}">Open your campaigns</a></p><p>You get this every Monday. Turn it off under Notification preferences.</p>',
+    pushTitle: 'Your ADX week',
+    pushBody: '{{live}} live, {{reach}} reach, {{scans}} scans — {{topCampaign}} led.',
+  },
+  // LM-1: paid placements — the buyer of a display ad (an advertiser) or of a
+  // sponsored listing (a publisher) hears when ADX decides, when it goes
+  // live, when it ends, and when it is stopped. Push and email; the in-app row
+  // rides beside it. `what` is the placement in words ("Listing page sidebar
+  // ad \"Diwali sale\""), `dates` the run ("12 Oct – 18 Oct 2026").
+  {
+    key: 'promotion-approved',
+    event: 'PROMOTION_APPROVED',
+    channels: ['PUSH', 'EMAIL'],
+    subject: 'Your ad is approved · {{reference}}',
+    emailBody: '<p>Good news — {{what}} is approved and runs {{dates}}.</p><p>You can follow its views and taps in the ADX app.</p>',
+    pushTitle: 'Your ad is approved',
+    pushBody: '{{what}} runs {{dates}}.',
+  },
+  {
+    key: 'promotion-rejected',
+    event: 'PROMOTION_REJECTED',
+    channels: ['PUSH', 'EMAIL'],
+    subject: 'Your ad was not approved · {{reference}}',
+    emailBody: '<p>{{what}} was not approved: {{reason}}</p><p>₹{{amount}} is back in your ADX wallet. Fix the ad and submit it again.</p>',
+    pushTitle: 'Your ad was not approved',
+    pushBody: '{{reason}} ₹{{amount}} is back in your wallet.',
+  },
+  {
+    key: 'promotion-live',
+    event: 'PROMOTION_LIVE',
+    channels: ['PUSH'],
+    pushTitle: 'Live now · {{reference}}',
+    pushBody: '{{what}} is showing now, {{dates}}.',
+  },
+  {
+    key: 'promotion-ended',
+    event: 'PROMOTION_ENDED',
+    channels: ['PUSH', 'EMAIL'],
+    subject: 'Finished · {{reference}}',
+    emailBody: '<p>{{what}} has finished ({{dates}}).</p><p>Its views and taps stay in the ADX app.</p>',
+    pushTitle: 'Finished · {{reference}}',
+    pushBody: '{{what}} has finished. See how it did in the ADX app.',
+  },
+  {
+    key: 'promotion-cancelled',
+    event: 'PROMOTION_CANCELLED',
+    channels: ['PUSH', 'EMAIL'],
+    subject: 'Stopped · {{reference}}',
+    emailBody: '<p>{{what}} ({{dates}}) was stopped: {{reason}}</p>',
+    pushTitle: 'Stopped · {{reference}}',
+    pushBody: '{{what}}: {{reason}}',
+  },
 ];
-
 /* ── the events catalogue (E10-2) ────────────────────────────────── */
 
 /**
@@ -631,6 +703,7 @@ export const EVENT_REGISTRY: readonly EventRegistryEntry[] = [
   { event: 'SUBSCRIPTION_RENEWED', variables: ['planName', 'startsAt', 'endsAt', 'total', 'reference'], raisedBy: ['revenue', 'packages'], via: 'notify', note: "Lot J2: the daily sweep bought the next term from the party's wallet — a publisher plan (revenue) or an advertiser package (packages)." },
   { event: 'SUBSCRIPTION_RENEWAL_FAILED', variables: ['planName', 'total', 'shortfall', 'reason', 'endedAt'], raisedBy: ['revenue', 'packages'], via: 'notify', note: 'Lot J2: the wallet was short of the renewal (or another gate was shut); once per term, the flag stays on, the term lapses into grace.' },
   // Lot V: the city wind-down.
+  { event: 'LISTING_REVERIFICATION_DUE', variables: ['listing', 'due', 'detail'], raisedBy: ['supply'], via: 'notify', note: "3 Oct 2026: the verification queue's Remind publisher — a fresh photo of the spot is due or overdue; at most once a day per listing. `detail` is the sentence the desk's reminder writes." },
   { event: 'CITY_WITHDRAWN', variables: ['city', 'detail'], raisedBy: ['geo'], via: 'notify', note: "Lot V: ops set a city WITHDRAWN; the hourly wind-down tells each publisher whose live listings it took down and each agent in the city, once. `detail` is that person's sentence." },
   // Lot AA: the work desk. `task` is "TSK-… · title", `due` the deadline's day or "no deadline".
   { event: 'WORK_ASSIGNED', variables: ['task', 'due', 'by'], raisedBy: ['work'], via: 'notify', note: 'Lot AA: to each person put on a task — at create, on a change of assignees, and on a recurrence spawn.' },
@@ -650,8 +723,15 @@ export const EVENT_REGISTRY: readonly EventRegistryEntry[] = [
   { event: 'LEAD_CALLBACK_REQUESTED', variables: ['businessName', 'when', 'deepLink'], raisedBy: ['leads'], via: 'notify', note: 'LH6: a callback asked for by a missed call, the IVR or a reply — to the agent the task landed on.' },
   { event: 'LEAD_PROPOSAL_ACCEPTED', variables: ['businessName', 'proposal', 'deepLink'], raisedBy: ['leads'], via: 'notify', note: 'LH7: the person tapped Accept on a proposal on the invite landing — to the holder.' },
   { event: 'INCENTIVE_REVERSED', variables: ['businessName', 'amount', 'reason'], raisedBy: ['leads'], via: 'notify', note: 'LH10: the activation reward clawed back — the account closed or its business came down inside thirty days.' },
+  // WS-1 (DR 12): the weekly campaign summary.
+  { event: 'WEEKLY_CAMPAIGN_SUMMARY', variables: ['name', 'weekLabel', 'campaigns', 'live', 'reach', 'scans', 'clicks', 'spend', 'topCampaign', 'link'], raisedBy: ['campaigns'], via: 'notify', note: 'WS-1: Monday 09:00 IST, to every advertiser with a campaign that ran in the last seven days — the portfolio analytics of that window, once per advertiser per week.' },
+  // LM-1: paid placements — the buyer's notices (`reference` ADB-…/BST-…, `what` the placement in words, `dates` the run).
+  { event: 'PROMOTION_APPROVED', variables: ['reference', 'what', 'dates', 'reason', 'amount'], raisedBy: ['promotions'], via: 'notify', note: 'LM-1: ADX approved an ad\'s artwork; it is SCHEDULED (or LIVE on its first day).' },
+  { event: 'PROMOTION_REJECTED', variables: ['reference', 'what', 'dates', 'reason', 'amount'], raisedBy: ['promotions'], via: 'notify', note: 'LM-1: ADX rejected an ad; `amount` went back to the wallet in full.' },
+  { event: 'PROMOTION_LIVE', variables: ['reference', 'what', 'dates', 'reason', 'amount'], raisedBy: ['promotions'], via: 'notify', note: 'LM-1: an ad or a sponsored listing started running.' },
+  { event: 'PROMOTION_ENDED', variables: ['reference', 'what', 'dates', 'reason', 'amount'], raisedBy: ['promotions'], via: 'notify', note: 'LM-1: an ad or a sponsored listing ran its last day.' },
+  { event: 'PROMOTION_CANCELLED', variables: ['reference', 'what', 'dates', 'reason', 'amount'], raisedBy: ['promotions'], via: 'notify', note: 'LM-1: ADX stopped a sponsored listing, or an ad was never reviewed before its dates ran out (refunded).' },
 ];
-
 export const isRegisteredEvent = (event: string): boolean => EVENT_REGISTRY.some((entry) => entry.event === event);
 
 /** Every variable the templates above name, for the editor's hints. */

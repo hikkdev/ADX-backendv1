@@ -125,8 +125,8 @@ prefix is already reserved in `identifiers.service`.
 effectively bearer links once handed out. Masking, not omitting — the response
 carries `documentsMasked: true` and `documentsOnFile: [...]`, the names of the
 fields that do have a value, so the console can still draw "on file" against
-"missing" for everybody; only opening one is privileged. One exception: the
-launch rule stands — an ADMIN with no role config holds every permission. The
+"missing" for everybody; only opening one is privileged. An ADMIN with no
+role config holds nothing (RP-1), so their read is masked like anyone's. The
 old "the person sees their own" exception went with the self-service route
 (Q143).
 

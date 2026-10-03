@@ -85,6 +85,9 @@ export type PayoutHandle = {
   accountHolder: string | null;
   /** The penny-drop name match, when the rail stored one. */
   nameMatchPct: number | null;
+  /** The bank as typed and its IFSC — only the short name reaches the linked graph's caption (`shared-attributes.ts`). */
+  bankName?: string | null;
+  ifscCode?: string | null;
 };
 
 export type ProofPhoto = {

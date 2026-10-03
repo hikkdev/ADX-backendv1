@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PublisherPlansRepository } from '../publisher-plans.repository';
 
+/* AGE-1: the order gate, passing unless a test says otherwise (its own tests: shared/age-gate). */
+const ageGate = vi.hoisted(() => ({ assertPartyAdultForOrders: vi.fn(), assertAdultForOrders: vi.fn() }));
+vi.mock('../../../shared/age-gate', async (importOriginal) => ({ ...(await importOriginal<object>()), ...ageGate }));
+
 /**
  * Lot J (B1) — publisher subscription plans and self-service orders;
  * Lot J2 — the purchase rules as configuration.
@@ -80,6 +84,7 @@ vi.mock('../../../shared/audit', async (importOriginal) => ({
 }));
 
 import { DEFAULT_PLATFORM_SETTINGS, type SubscriptionPolicy } from '../../app-config';
+import { ageRequiredError } from '../../../shared/age-gate';
 import { Decimal } from '../../../shared/money';
 import {
   ACTIVATED_TITLE,
@@ -819,6 +824,44 @@ describe('the auto-renew switch', () => {
 
     revenue.findRunningSubscription.mockResolvedValue(null);
     await expect(setMySubscriptionAutoRenew('pub_1', false, NOW)).rejects.toMatchObject({ statusCode: 404 });
+  });
+});
+
+/* ── AGE-1: a plan is an order ───────────────────────────────────── */
+
+describe('AGE-1 — a publisher plan is an order', () => {
+  it("creating the order asks the publisher's account holder, and a refusal writes no order", async () => {
+    ageGate.assertPartyAdultForOrders.mockRejectedValueOnce(ageRequiredError('MISSING'));
+    await expect(createSubscriptionOrder({ publisherId: 'pub_1', userId: 'usr_pub', tier: 'PLUS', cycle: 'MONTHLY', now: NOW })).rejects.toMatchObject({ statusCode: 403, code: 'AGE_REQUIRED', details: { reason: 'MISSING' } });
+    expect(ageGate.assertPartyAdultForOrders).toHaveBeenCalledWith({ kind: 'PUBLISHER', id: 'pub_1' }, { actorUserId: 'usr_pub', now: NOW });
+    expect(repository.createOrder).not.toHaveBeenCalled();
+  });
+
+  it('paying from the wallet is refused before any money moves', async () => {
+    ageGate.assertPartyAdultForOrders.mockRejectedValueOnce(ageRequiredError('UNDER_18'));
+    await expect(paySubscriptionOrderFromWallet('ord_1', OWNER, NOW)).rejects.toMatchObject({ code: 'AGE_REQUIRED', details: { reason: 'UNDER_18' } });
+    expect(wallets.move).not.toHaveBeenCalled();
+    expect(repository.activateOrder).not.toHaveBeenCalled();
+  });
+
+  it("the desk's record-payment asks the publisher's person, not the admin's", async () => {
+    ageGate.assertPartyAdultForOrders.mockRejectedValueOnce(ageRequiredError('MISSING', false));
+    await expect(recordSubscriptionOrderPayment('ord_1', { reference: 'UTR123', method: 'NEFT' }, { userId: 'usr_admin' }, NOW)).rejects.toMatchObject({ code: 'AGE_REQUIRED', details: { self: false } });
+    expect(ageGate.assertPartyAdultForOrders).toHaveBeenCalledWith({ kind: 'PUBLISHER', id: 'pub_1' }, { actorUserId: 'usr_admin', now: NOW });
+    expect(repository.activateOrder).not.toHaveBeenCalled();
+  });
+
+  it('switching auto-renew on buys the next term; switching it off asks nothing', async () => {
+    settings.getSubscriptionPolicy.mockResolvedValue(policy({ autoRenew: { allowed: true, chargeFromWallet: true } }));
+    revenue.findRunningSubscription.mockResolvedValue(subscription());
+    ageGate.assertPartyAdultForOrders.mockRejectedValueOnce(ageRequiredError('MISSING'));
+    await expect(setMySubscriptionAutoRenew('pub_1', true, NOW)).rejects.toMatchObject({ code: 'AGE_REQUIRED' });
+    expect(repository.setSubscriptionAutoRenew).not.toHaveBeenCalled();
+
+    ageGate.assertPartyAdultForOrders.mockClear();
+    revenue.findRunningSubscription.mockResolvedValue(subscription({ autoRenew: true }));
+    expect(await setMySubscriptionAutoRenew('pub_1', false, NOW)).toMatchObject({ autoRenew: false });
+    expect(ageGate.assertPartyAdultForOrders).not.toHaveBeenCalled();
   });
 });
 

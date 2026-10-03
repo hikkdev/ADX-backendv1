@@ -1,3 +1,4 @@
+import type { AccountState } from '../../../shared/party-status';
 import type { Advertiser, AdvertiserKyc, KycStatus } from '../../../shared/database';
 import type { KycQueueState } from '../../../shared/kyc-state';
 import type { AdvertiserKycColumns, NewAdvertiserKycColumns } from './advertiser-kyc.schema';
@@ -20,6 +21,11 @@ export type AdvertiserKycFilter = {
   advertiserId?: string;
   /** N3-B: the party's name, company, display id, email or mobile contains. */
   q?: string;
+  /**
+   * Account lifecycle (2 Oct 2026): working accounts only unless true
+   * (`?include=inactive`). One advertiser asked for by id is always found.
+   */
+  includeInactive?: boolean;
 };
 
 /**
@@ -62,6 +68,8 @@ export type AdvertiserKycQueueRow = { [K in keyof AdvertiserKyc]: AdvertiserKyc[
   id: string;
   kycId: string | null;
   state: KycQueueState;
+  /** Account lifecycle: ACTIVE, SUSPENDED, DEACTIVATED or CLOSED (`shared/party-status`). */
+  accountState: AccountState;
   party: AdvertiserPartySlice;
   advertiser: AdvertiserPartySlice;
 };
@@ -126,12 +134,25 @@ export interface AdvertiserKycRepository {
 
   // U7, demand side: the Digio request on the advertiser's own row.
   upsertDigio(key: AdvertiserKycKey, fields: AdvertiserDigioFields): Promise<AdvertiserKyc>;
+  /**
+   * Phase D, the upgrade: the record back to PENDING on a fresh Digio request
+   * for the business, the individual's decision cleared off the row (the
+   * audit keeps it). The mirror moves through `applyKycDecision`.
+   */
+  reopenDigioForUpgrade(key: AdvertiserKycKey, fields: AdvertiserDigioFields): Promise<AdvertiserKyc>;
+  /**
+   * Cashfree Phase 1: Digio could not be asked and the desk may send the
+   * backup — the record says PROVIDER_FAILED on its raw provider status
+   * (made if there is none). Nothing else on the record moves.
+   */
+  markProviderFailed(key: AdvertiserKycKey): Promise<AdvertiserKyc>;
   findByDigioRequestId(kycId: string): Promise<AdvertiserKyc | null>;
   applyDigioWebhook(id: string, update: AdvertiserDigioUpdate): Promise<AdvertiserKyc>;
 }
 
 export type AdvertiserDigioFields = {
-  method: 'DIGIO';
+  /** Cashfree Phase 1: CASHFREE when the start was handed a Cashfree session — the request id is then `cf_<sessionId>`. */
+  method: 'DIGIO' | 'CASHFREE';
   digioRequestId: string;
   digioReferenceId: string;
   digioStatus: string;
@@ -146,6 +167,8 @@ export type AdvertiserDigioFields = {
  * purge finds it).
  */
 export type AdvertiserDigioUpdate = {
+  /** Cashfree Phase 1: who answered — stamped on `recordedVia`, and on `method` when the answer verifies. DIGIO when absent. */
+  via?: 'DIGIO' | 'CASHFREE' | undefined;
   digioStatus: string;
   digioPayload: unknown;
   digioVerifiedAt?: Date | undefined;

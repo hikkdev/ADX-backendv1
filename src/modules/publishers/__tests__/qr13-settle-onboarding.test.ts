@@ -76,13 +76,18 @@ describe('settleOnboardingIfReady', () => {
 
   it.each([
     ['a basic missing', pending({ address: null })],
-    ['no date of birth', pending({ user: { dateOfBirth: null } })],
     ['already complete', pending({ onboardingStatus: 'ONBOARDING_COMPLETE' })],
     ['an agent walking them through', pending({ onboardingStatus: 'IN_ONBOARDING' })],
   ])('leaves the row alone with %s', async (_label, row) => {
     repository.findByIdWithUser.mockResolvedValue(row);
     expect(await settleOnboardingIfReady('pub_1')).toBe(false);
     expect(repository.completeOnboarding).not.toHaveBeenCalled();
+  });
+
+  it('AGE-1: settles a row with no date of birth — the date is not a basic', async () => {
+    repository.findByIdWithUser.mockResolvedValue(pending({ user: { dateOfBirth: null } }));
+    expect(await settleOnboardingIfReady('pub_1')).toBe(true);
+    expect(repository.completeOnboarding).toHaveBeenCalledWith('pub_1');
   });
 
   it('runs off the publisher\'s own profile edit', async () => {

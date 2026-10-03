@@ -57,11 +57,11 @@ function signIdToken(overrides: Claims = {}, options: jwt.SignOptions = {}): str
     iss: 'https://accounts.google.com',
     aud: CLIENT_ID,
     sub: '110000000000000000001',
-    email: 'ada@adx.co',
+    email: 'ada@adx.in',
     email_verified: true,
     name: 'Ada Lovelace',
     picture: 'https://lh3.googleusercontent.com/a/ada',
-    hd: 'adx.co',
+    hd: 'adx.in',
     ...overrides,
   };
 
@@ -101,11 +101,11 @@ describe('verifyGoogleIdToken — accepts a genuine token', () => {
 
     expect(identity).toEqual({
       sub: '110000000000000000001',
-      email: 'ada@adx.co',
+      email: 'ada@adx.in',
       emailVerified: true,
       name: 'Ada Lovelace',
       picture: 'https://lh3.googleusercontent.com/a/ada',
-      hostedDomain: 'adx.co',
+      hostedDomain: 'adx.in',
     });
   });
 
@@ -115,8 +115,8 @@ describe('verifyGoogleIdToken — accepts a genuine token', () => {
   });
 
   it('lower-cases the email, so the account lookup is not case-dependent', async () => {
-    const identity = await verifyGoogleIdToken(signIdToken({ email: 'Ada.Lovelace@ADX.co' }));
-    expect(identity.email).toBe('ada.lovelace@adx.co');
+    const identity = await verifyGoogleIdToken(signIdToken({ email: 'Ada.Lovelace@ADX.in' }));
+    expect(identity.email).toBe('ada.lovelace@adx.in');
   });
 
   it('accepts email_verified sent as the string "true"', async () => {
@@ -152,7 +152,7 @@ describe('verifyGoogleIdToken — rejects forged and misdirected tokens', () => 
         iss: 'https://accounts.google.com',
         aud: CLIENT_ID,
         sub: '1',
-        email: 'ada@adx.co',
+        email: 'ada@adx.in',
         email_verified: true,
       },
       otherKeypair.privateKey,
@@ -175,7 +175,7 @@ describe('verifyGoogleIdToken — rejects forged and misdirected tokens', () => 
         iss: 'https://accounts.google.com',
         aud: CLIENT_ID,
         sub: '1',
-        email: 'ada@adx.co',
+        email: 'ada@adx.in',
         email_verified: true,
       },
       CLIENT_ID,
@@ -190,7 +190,7 @@ describe('verifyGoogleIdToken — rejects forged and misdirected tokens', () => 
       iss: 'https://accounts.google.com',
       aud: CLIENT_ID,
       sub: '1',
-      email: 'ada@adx.co',
+      email: 'ada@adx.in',
       email_verified: true,
       exp: Math.floor(Date.now() / 1000) + 300,
     })}.`;
@@ -233,19 +233,19 @@ describe('verifyGoogleIdToken — rejects forged and misdirected tokens', () => 
 
 describe('verifyGoogleIdToken — Workspace domain allowlist', () => {
   it('accepts an account in an allowed domain', async () => {
-    env.GOOGLE_ALLOWED_DOMAINS = 'adx.co';
+    env.GOOGLE_ALLOWED_DOMAINS = 'adx.in';
     const identity = await verifyGoogleIdToken(signIdToken());
-    expect(identity.hostedDomain).toBe('adx.co');
+    expect(identity.hostedDomain).toBe('adx.in');
   });
 
   it('accepts any domain in a comma-separated list, ignoring spacing and case', async () => {
-    env.GOOGLE_ALLOWED_DOMAINS = ' Example.com , ADX.co ';
-    const identity = await verifyGoogleIdToken(signIdToken({ hd: 'adx.co' }));
-    expect(identity.hostedDomain).toBe('adx.co');
+    env.GOOGLE_ALLOWED_DOMAINS = ' Example.com , ADX.in ';
+    const identity = await verifyGoogleIdToken(signIdToken({ hd: 'adx.in' }));
+    expect(identity.hostedDomain).toBe('adx.in');
   });
 
   it('rejects a personal gmail account (no hd claim) with 403', async () => {
-    env.GOOGLE_ALLOWED_DOMAINS = 'adx.co';
+    env.GOOGLE_ALLOWED_DOMAINS = 'adx.in';
     const token = signIdToken({ hd: undefined, email: 'ada@gmail.com' });
     const error = await expectApiError(verifyGoogleIdToken(token), 403);
     // Actionable on purpose: the user picked the wrong account in the popup.
@@ -253,15 +253,15 @@ describe('verifyGoogleIdToken — Workspace domain allowlist', () => {
   });
 
   it('rejects a Workspace account from an unlisted domain with 403', async () => {
-    env.GOOGLE_ALLOWED_DOMAINS = 'adx.co';
+    env.GOOGLE_ALLOWED_DOMAINS = 'adx.in';
     const token = signIdToken({ hd: 'competitor.example', email: 'ada@competitor.example' });
     await expectApiError(verifyGoogleIdToken(token), 403);
   });
 
   it('checks the domain against the signed hd claim, never the email suffix', async () => {
     // An account at some other Workspace whose alias merely looks like ours.
-    env.GOOGLE_ALLOWED_DOMAINS = 'adx.co';
-    const token = signIdToken({ hd: 'attacker.example', email: 'ceo@adx.co' });
+    env.GOOGLE_ALLOWED_DOMAINS = 'adx.in';
+    const token = signIdToken({ hd: 'attacker.example', email: 'ceo@adx.in' });
     await expectApiError(verifyGoogleIdToken(token), 403);
   });
 });
@@ -364,7 +364,7 @@ describe('JWKS handling', () => {
     await verifyGoogleIdToken(signIdToken());
     const identity = await verifyGoogleIdToken(signIdToken({}, { keyid: rotated }));
 
-    expect(identity.email).toBe('ada@adx.co');
+    expect(identity.email).toBe('ada@adx.in');
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -374,7 +374,7 @@ describe('JWKS handling', () => {
 
     // The signing key is still found...
     const identity = await verifyGoogleIdToken(signIdToken());
-    expect(identity.email).toBe('ada@adx.co');
+    expect(identity.email).toBe('ada@adx.in');
 
     // ...but a token naming the encryption key is not verifiable against it.
     await expectApiError(verifyGoogleIdToken(signIdToken({}, { keyid: 'enc-key' })), 401);
@@ -386,7 +386,7 @@ describe('JWKS handling', () => {
       jwkFor(publicKey, KID),
     ]);
     const identity = await verifyGoogleIdToken(signIdToken());
-    expect(identity.email).toBe('ada@adx.co');
+    expect(identity.email).toBe('ada@adx.in');
   });
 
   it('answers 503 when Google is unreachable', async () => {

@@ -4,7 +4,7 @@
  *
  * The owner's rule, in three lines: a publisher who signs up on their own
  * has an account at once; they may not START listing a spot until ADX has
- * their basics — a name, an email, an address and (QR-5) a date of birth;
+ * their basics — a name, an email and an address;
  * and with the basics in they list and go live UNVERIFIED — marked so, and
  * ranked below the verified when an advertiser browses — until their
  * identity check moves them up. The home shows one figure and one checklist
@@ -15,6 +15,11 @@
  * the owner's rule since 17 Sep 2026: "they should be able to continue
  * using their account unverified and be allowed to list after name,
  * address, dob and other details have been collected".)
+ *
+ * AGE-1 (the owner, 29 Sep 2026): the date of birth left the basics. "You
+ * don't need to be over 18 to use ADX, but you do need to be over 18 to
+ * place orders" — listing a space is using ADX, so it asks no age; the
+ * date is asked where an order is placed (`shared/age-gate`).
  *
  * Lives beside the KYC state because it is the same question asked one
  * step earlier — "is this party ready" — and because `listings` (the door)
@@ -27,7 +32,7 @@
  * a name.
  */
 
-export const PROFILE_BASICS = ['name', 'email', 'address', 'dateOfBirth'] as const;
+export const PROFILE_BASICS = ['name', 'email', 'address'] as const;
 export type ProfileBasic = (typeof PROFILE_BASICS)[number];
 
 export type ProfileBasicsRow = {
@@ -35,7 +40,7 @@ export type ProfileBasicsRow = {
   mobile: string;
   email: string | null;
   address: string | null;
-  /** QR-5: the person's, off the User row the publisher hangs on. */
+  /** QR-5: the person's, off the User row the publisher hangs on. AGE-1: carried, no longer counted. */
   dateOfBirth?: Date | string | null;
 };
 
@@ -47,7 +52,6 @@ export function profileBasicsMissing(row: ProfileBasicsRow): ProfileBasic[] {
   if (!present(row.name) || row.name!.trim() === row.mobile.trim()) missing.push('name');
   if (!present(row.email)) missing.push('email');
   if (!present(row.address)) missing.push('address');
-  if (row.dateOfBirth === null || row.dateOfBirth === undefined || row.dateOfBirth === '') missing.push('dateOfBirth');
   return missing;
 }
 
@@ -56,7 +60,6 @@ export const PROFILE_BASIC_LABEL: Record<ProfileBasic, string> = {
   name: 'your name',
   email: 'an email address',
   address: 'your address',
-  dateOfBirth: 'your date of birth',
 };
 
 export type PublisherReadiness = {

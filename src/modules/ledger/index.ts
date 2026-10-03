@@ -25,11 +25,21 @@ export {
   balanceOf,
   walletBalance,
   listTransactions,
+  pageTransactions,
+  countLegs,
   getTransaction,
   listAccounts,
   verifyLedger,
   resetAccountCache,
 } from './ledger.service';
+export type { LedgerFacets, TransactionPage } from './ledger.service';
+export {
+  LEDGER_CSV_COLUMNS,
+  LEDGER_EXPORT_LEG_CAP,
+  assertLedgerExportable,
+  iterateLedgerCsv,
+  ledgerCsvHeader,
+} from './ledger-export.service';
 
 /**
  * For a caller that must move a wallet and its legs as one act — the wallet

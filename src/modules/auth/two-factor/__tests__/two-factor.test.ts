@@ -22,7 +22,7 @@ const { repository, otp, otpSecurity, notifications, audit } = vi.hoisted(() => 
     countEmailFallback: vi.fn(),
     resetEmailFallback: vi.fn(),
   },
-  otp: { sendOtp: vi.fn(), verifyOtp: vi.fn(), normalizeMobile: vi.fn((m: string) => m) },
+  otp: { stampProvenEmail: vi.fn(), sendOtp: vi.fn(), verifyOtp: vi.fn(), normalizeMobile: vi.fn((m: string) => m) },
   otpSecurity: {
     reserveOtpSend: vi.fn(),
     OtpError: class OtpError extends Error {
@@ -59,7 +59,7 @@ import {
 const admin = (over: Record<string, unknown> = {}) => ({
   id: 'adm_1',
   mobile: '+919845012210',
-  email: 'asha.rao@adx.co',
+  email: 'asha.rao@adx.in',
   isActive: true,
   emailOtpFallbackCount: 0,
   emailOtpFallbackResetAt: null,
@@ -84,17 +84,17 @@ beforeEach(() => {
 
 describe('the challenge', () => {
   it('names the account, masks both channels and stamps that 2FA is on', async () => {
-    const challenge = await issueChallenge({ id: 'adm_1', mobile: '+919845012210', email: 'asha.rao@adx.co' });
+    const challenge = await issueChallenge({ id: 'adm_1', mobile: '+919845012210', email: 'asha.rao@adx.in' });
     expect(repository.stampTwoFactorRequired).toHaveBeenCalledWith('adm_1');
     expect(challenge.methods).toEqual(['SMS', 'EMAIL']);
     expect(challenge.maskedMobile).toBe('+91 ***** 2210');
-    expect(challenge.maskedEmail).toBe('a******o@adx.co');
+    expect(challenge.maskedEmail).toBe('a******o@adx.in');
     expect(readChallenge(challenge.challengeToken)).toBe('adm_1');
   });
 
   it('offers only SMS once the email backup is spent, so no button answers 403', async () => {
     repository.findUser.mockResolvedValue(admin({ emailOtpFallbackCount: 3, emailOtpFallbackResetAt: new Date() }));
-    const challenge = await issueChallenge({ id: 'adm_1', mobile: '+919845012210', email: 'asha.rao@adx.co' });
+    const challenge = await issueChallenge({ id: 'adm_1', mobile: '+919845012210', email: 'asha.rao@adx.in' });
     expect(challenge.methods).toEqual(['SMS']);
   });
 
@@ -111,7 +111,7 @@ describe('the challenge', () => {
 
   it('masks sensibly at the edges', () => {
     expect(maskMobile(null)).toBeNull();
-    expect(maskEmail('ab@adx.co')).toBe('a***@adx.co');
+    expect(maskEmail('ab@adx.in')).toBe('a***@adx.in');
     expect(maskEmail(null)).toBeNull();
   });
 
@@ -122,7 +122,7 @@ describe('the challenge', () => {
 });
 
 describe('sending the code', () => {
-  const challengeFor = async () => (await issueChallenge({ id: 'adm_1', mobile: '+919845012210', email: 'asha.rao@adx.co' })).challengeToken;
+  const challengeFor = async () => (await issueChallenge({ id: 'adm_1', mobile: '+919845012210', email: 'asha.rao@adx.in' })).challengeToken;
 
   it('sends SMS through the ordinary OTP path, so the budget and lockout apply', async () => {
     const result = await sendTwoFactorCode(await challengeFor(), 'SMS');
@@ -133,7 +133,7 @@ describe('sending the code', () => {
 
   it('sends a ten-character email code from the unambiguous alphabet, counted against the backup', async () => {
     const result = await sendTwoFactorCode(await challengeFor(), 'EMAIL');
-    expect(otpSecurity.reserveOtpSend).toHaveBeenCalledWith('asha.rao@adx.co');
+    expect(otpSecurity.reserveOtpSend).toHaveBeenCalledWith('asha.rao@adx.in');
     expect(repository.countEmailFallback).toHaveBeenCalled();
     expect(repository.createEmailCode).toHaveBeenCalled();
     // Lot E (Q147): through the dispatcher, sent in the request, to the address on file.
@@ -141,7 +141,7 @@ describe('sending the code', () => {
       'TWO_FACTOR_EMAIL',
       'adm_1',
       expect.objectContaining({ code: result.devCode, minutes: expect.any(Number) }),
-      expect.objectContaining({ type: 'SYSTEM', recipient: { email: 'asha.rao@adx.co' }, immediate: true }),
+      expect.objectContaining({ type: 'SYSTEM', recipient: { email: 'asha.rao@adx.in' }, immediate: true }),
     );
     expect(result.method).toBe('EMAIL');
     expect(result.devCode).toMatch(new RegExp(`^[${EMAIL_CODE_ALPHABET}]{${EMAIL_CODE_LENGTH}}$`));
@@ -173,6 +173,9 @@ describe('sending the code', () => {
     await expect(sendTwoFactorCode(token, 'SMS')).rejects.toMatchObject({ statusCode: 401 });
     repository.findUser.mockResolvedValue(admin({ roles: [{ role: 'PUBLISHER' }] }));
     await expect(sendTwoFactorCode(token, 'SMS')).rejects.toMatchObject({ statusCode: 401 });
+    // Account lifecycle (2 Oct 2026): a closed account is refused the same way.
+    repository.findUser.mockResolvedValue(admin({ isActive: true, closedAt: new Date() }));
+    await expect(sendTwoFactorCode(token, 'SMS')).rejects.toMatchObject({ statusCode: 401 });
   });
 
   it('generates codes with no 0, O, 1 or I', () => {
@@ -181,7 +184,7 @@ describe('sending the code', () => {
 });
 
 describe('verifying the code', () => {
-  const challengeFor = async () => (await issueChallenge({ id: 'adm_1', mobile: '+919845012210', email: 'asha.rao@adx.co' })).challengeToken;
+  const challengeFor = async () => (await issueChallenge({ id: 'adm_1', mobile: '+919845012210', email: 'asha.rao@adx.in' })).challengeToken;
 
   it('takes an SMS code through the OTP service and earns the email backup back', async () => {
     repository.findLatestTwoFactorOtp.mockResolvedValue({ id: 'otp_1', purpose: 'TWO_FACTOR', attempts: 0, codeHash: 'x' });

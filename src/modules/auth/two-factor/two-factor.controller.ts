@@ -1,3 +1,4 @@
+import { isWorkingUser } from '../../../shared/party-status';
 import type { Request, Response } from 'express';
 import { ApiError } from '../../../shared/errors';
 import { auditDiff, logActivity } from '../../../shared/audit';
@@ -65,7 +66,7 @@ export async function verifyTwoFactorHandler(req: Request, res: Response): Promi
   const { userId, roles, method, recoveryCodesLeft, warning } = verified;
 
   const user = await repository.findLoginUserById(userId);
-  if (!user || !user.isActive) throw new ApiError(401, 'UNAUTHORIZED', 'Account not active');
+  if (!user || !isWorkingUser(user)) throw new ApiError(401, 'UNAUTHORIZED', 'Account not active');
 
   const mustEnrol = await mustEnrolAuthenticator(user, roles.includes('ADMIN'));
   const { accessToken, refreshToken } = await startSession(userId, roles, sessionMeta(req), { mustEnrolAuthenticator: mustEnrol });

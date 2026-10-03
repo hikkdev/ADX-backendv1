@@ -4,6 +4,7 @@ import { ApiError } from '../../../shared/errors';
 import { env } from '../../../config';
 import { logger } from '../../../shared/logging';
 import { signatureFailureMessage, verifyHmacSignature } from '../../../shared/security';
+import { kycStartBodySchema, type KycStartBody } from '../../../shared/kyc-state';
 import { assertOwnedPublisher } from '../publishers.service';
 import {
   getDigioKycStatus,
@@ -12,19 +13,22 @@ import {
   type DigioWebhookPayload,
 } from './digio.service';
 
-// POST /publishers/:publisherId/kyc/digio/initiate
+// POST /publishers/:publisherId/kyc/digio/initiate — body `{ entityType? }` (Phase D)
 export async function initiateDigioKycHandler(req: Request, res: Response): Promise<void> {
   const publisherId = req.params['publisherId'] as string;
+  const body = parseKycStartBody(req.body);
   const publisher = await assertOwnedPublisher(publisherId, req.user!.sub);
 
-  const result = await initiateDigioKyc(
-    publisherId,
-    publisher.name,
-    publisher.email ?? '',
-    publisher.mobile,
-  );
+  const result = await initiateDigioKyc(publisher, { byUserId: req.user!.sub, entityType: body.entityType, req });
 
   res.json({ success: true, data: result });
+}
+
+/** Phase D: `{ entityType? }` on a Digio start — an unknown value is 400 before anything is looked up. */
+export function parseKycStartBody(body: unknown): KycStartBody {
+  const parsed = kycStartBodySchema.safeParse(body ?? {});
+  if (!parsed.success) throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid request', parsed.error.flatten());
+  return parsed.data;
 }
 
 // GET /publishers/:publisherId/kyc/digio/status
@@ -37,16 +41,25 @@ export async function getDigioKycStatusHandler(req: Request, res: Response): Pro
   res.json({ success: true, data: status });
 }
 
+/**
+ * Phase D (1 Oct 2026): the statuses are taken as Digio sends them — a
+ * workflow may answer `approval_pending` or `requested` where the first
+ * request only ever said approved / rejected / pending / cancelled. Kept raw
+ * on `digioStatus`; `digioDecisionOf` reads anything but approved and
+ * rejected as PENDING. Dropping them as unparseable lost the callback.
+ */
+const DIGIO_STATUS = z.string().trim().min(1).max(64);
+
 const webhookSchema = z.object({
   id: z.string(),
   customer_identifier: z.string().optional(),
-  status: z.enum(['approved', 'rejected', 'pending', 'cancelled']),
+  status: DIGIO_STATUS,
   message: z.string().optional(),
   kyc_documents: z
     .array(
       z.object({
         type: z.string(),
-        status: z.enum(['approved', 'rejected', 'pending', 'cancelled']),
+        status: DIGIO_STATUS,
         name: z.string().optional(),
         dob: z.string().optional(),
         id_number: z.string().optional(),

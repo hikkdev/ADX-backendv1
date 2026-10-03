@@ -70,8 +70,8 @@ convenience — deleting one (once nobody holds it) is a legitimate thing to do.
 
 K-B1 pins two rules on `assignRoleConfig` (`PUT /users/:id/role-config`, and
 the `roleConfigId` on `POST /users`): the system role is **granted only by a
-super admin** — a member of it, or an admin with no role config at all (the
-launch rule, which is how the first super admin is ever made) — 403
+super admin** — a member of it, and nothing else since RP-1 (the first super
+admin is seated at boot; see the role rule below) — 403
 `SUPER_ADMIN_ONLY` otherwise; and its **last member is never moved off it**,
 neither cleared nor moved to another role — 409 `LAST_SUPER_ADMIN`.
 
@@ -120,7 +120,7 @@ its holders (`SUPER_ADMIN_ONLY`).
 | --- | --- |
 | `rolesConfigRouter` | bootstrap |
 | `assignRoleConfig`, `getRoleConfigForUser`, `assignRoleConfigSchema` | `users` |
-| `consoleStandingFor(userId, roles)` | M-B: `users` (`GET /users/me`) and, registered on `auth`'s `registerConsoleStandingResolver` **at this module's load**, `GET /auth/2fa/status` — `{ roleConfig: { id, name, isSystem } \| null, isSuperAdmin }`, the one predicate (`isSuperAdminMembership`) the `SUPER_ADMIN_ONLY` guard applies: a member of the system role, or an ADMIN with no role config; a non-admin is null / false with no read |
+| `consoleStandingFor(userId, roles)` | M-B: `users` (`GET /users/me`) and, registered on `auth`'s `registerConsoleStandingResolver` **at this module's load**, `GET /auth/2fa/status` — `{ roleConfig: { id, name, isSystem } \| null, isSuperAdmin }`, the one predicate (`isSuperAdminMembership`) the `SUPER_ADMIN_ONLY` guard applies: a member of the system role and nothing else (RP-1); a non-admin is null / false with no read |
 | `permissionsFor` | bootstrap — registered as `auth`'s `PermissionResolver` |
 | `ensureSystemRoles` | bootstrap — the seeded roles, at startup |
 | `findRoleMemberUserIds(roleName)` | `kyc` (Lot G, Q127/142) — the Compliance pool for a KYC escalation: the open-account members (isActive, not closed) of the role named Compliance, else KYC reviewer, else Super admin; an unknown role is an empty list |
@@ -156,10 +156,66 @@ answer never depends on a second wiring step; bootstrap may take it over.
   second role moves the membership rather than adding to it.
 - **Only an ADMIN may hold a console role** (409 otherwise), and the **last
   member of the system role cannot be moved off it** (409).
-- **The launch rule.** An ADMIN with no `UserRoleConfig` holds *every*
-  permission; one with a role holds exactly that role's list; everyone else
-  holds none. ADX ships with one admin and no roles configured, and an admin
-  who can see nothing is a platform nobody can operate.
+- **The role rule (RP-1, 24 Sep 2026).** Only Super admin holds every
+  permission. An ADMIN with a role holds exactly that role's list; an ADMIN
+  with no `UserRoleConfig` holds *none* and is refused **403 ROLE_REQUIRED**
+  on every `requireRole('ADMIN')` route until a super admin assigns one;
+  everyone else holds none. The launch rule that gave a role-less admin
+  everything is gone, so the chair is seated deterministically instead: at
+  boot, when no open account holds the system role, `ensureSuperAdminHolder`
+  seats the account `BOOTSTRAP_SUPER_ADMIN` names (mobile or email), else the
+  oldest open ADMIN; on a fresh platform with no member at all, the first
+  ADMIN to sign in is seated by `permissionsFor`. Every seating is audited
+  `SUPER_ADMIN_SEATED`.
+- **Every admin route asks for a permission (RP-2, 24 Sep 2026).** A route
+  an ADMIN can reach carries `requirePermission(<id>)` behind its
+  `requireRole`, so a role's list means the same thing on every desk. The id
+  is the desk's group and the verb's tier: a read asks for `<group>.view`, a
+  write for `<group>.edit`, a decision (review, decide, approve, reject,
+  resolve, publish, a payout's submit or cancel) for `<group>.approve` where
+  the group has one; the named capabilities guard what they name — the role
+  builder and role assignment `system.roles`, the audit export
+  `system.audit.export`, erasure `dpo.erasure`, flow templates `flows.edit`.
+  Only the routes an operator uses about themselves stay role-only — their
+  own second factor (`/auth/2fa/*`), their own tasks (`/work/me/*`), their
+  own flag view (`/flags/me`) — and
+  `tests/contract/admin-routes-need-permission.test.ts` lists those twelve
+  by name and refuses any other admin route without a guard. On a route a
+  party may also call (a publisher accepting an agreement, an agent filing a
+  claim), the permission is what an ADMIN needs: `requireRole` stamps which
+  role admitted the token on `res.locals.matchedRoles`, and
+  `requirePermission` passes an account admitted as a party. The desks map
+  onto the groups so: **marketplace** — dashboard and analytics, orders and
+  milestones, party imports, QR codes, reports, visits, competitor sightings,
+  geography reads; **supply** (Publishers & listings) — publishers, listings,
+  the supply desk, listing imports; **pricing** — rate cards, pricing, the
+  price model, rate-card and market-data imports; **print** — print partners,
+  quotes, print jobs on an order; **agents** — agents and their applications,
+  live locations, training, reviews; **demand** — advertisers and campaigns;
+  **kyc** — every verification queue, fraud cases, document reading;
+  **finance** — the finance desk, wallets and refunds, revenue and plans,
+  agent compensation, print-partner invoices; **content** — pages, legal
+  documents, agreements and signing, creatives; **comms**, **support**
+  (tickets, disputes, safety), **growth** (leads), **hr** (employees,
+  departments, holidays, schedule), **work**, **settings** (platform
+  settings, config, integrations, branding, identifiers, the app status,
+  geography writes), **system** (users and admin accounts, flags, audit),
+  **flows**, **dpo**.
+- **The finer grain (RP-3, 24 Sep 2026).** Pricing, Print partners and Agents
+  are groups of their own (they shared Supply and Marketplace), and the
+  actions an Edit tier must not carry are named powers: `<group>.suspend`
+  (suspend, reinstate, deactivate, exit — supply, demand, agents, print),
+  `finance.issue` (top-up, goodwill, expiring credit), `system.jobs` (every
+  sweep, run, seed and backfill triggered by hand), `<group>.import`
+  (committing a bulk import — marketplace, supply, pricing), `<group>.delete`
+  (every DELETE route — marketplace, pricing, kyc, content, support, hr,
+  system), `system.accounts` (deleting, resetting or closing another
+  account, ending an impersonation) and `<group>.export` (records as CSV —
+  marketplace, finance; the audit trail keeps `system.audit.export`). The
+  seeded roles hold the powers their description implies — Ops manager
+  suspends, imports and deletes on its desks, Finance issues credit and
+  exports — and no seeded role but Super admin runs jobs or touches accounts.
+  Sixty-six ids in eighteen groups.
 - `name` is unique; a duplicate answers **409 CONFLICT**, not a second row.
 - `PUT` validates the body **before** checking the row exists, so a malformed
   body against an unknown id answers **400**, not 404 — the opposite ordering

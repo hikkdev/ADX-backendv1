@@ -39,7 +39,7 @@ import {
  *   - the committed docs/feature-registry.json is behind the declarations
  *     and the manifests (run `npm run features:sync`).
  *
- * The console's and the apps' manifests are checked by their own
+ * The console's, the apps' and the website's manifests are checked by their own
  * `scripts/check-features.mjs`; here they are only parsed and folded.
  */
 
@@ -129,7 +129,7 @@ describe('the feature registry', () => {
     for (const canonical of Object.values(aliases)) expect(declared.has(canonical)).toBe(true);
   });
 
-  it('folds the three package manifests without a surface or key conflict', () => {
+  it('folds the four package manifests without a surface or key conflict', () => {
     for (const manifest of collected.manifests) {
       for (const key of Object.keys(manifest.features)) expect(key).toMatch(FEATURE_KEY);
     }

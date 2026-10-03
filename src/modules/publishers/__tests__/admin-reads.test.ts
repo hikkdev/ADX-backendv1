@@ -84,7 +84,7 @@ describe('getOwnedPublisher', () => {
     repository.findById.mockResolvedValue({
       id: 'pub_1',
       agentId: 'agt_1',
-      kyc: { id: 'kyc_1', status: 'NEEDS_INFO', govIdFrontUrl: 'https://adx.local/api/v1/files/f1' },
+      kyc: { id: 'kyc_1', status: 'NEEDS_INFO', govIdFrontUrl: 'https://adx.in/api/v1/files/f1' },
       listings: [],
       user: null,
     });
@@ -96,7 +96,7 @@ describe('getOwnedPublisher', () => {
     expect(kyc.listDocumentReviews).toHaveBeenCalledWith('PUBLISHER', 'kyc_1');
     expect(view.kyc).toMatchObject({
       status: 'NEEDS_INFO',
-      govIdFrontUrl: 'https://adx.local/api/v1/files/f1',
+      govIdFrontUrl: 'https://adx.in/api/v1/files/f1',
       flagged: [{ field: 'govIdFrontUrl', note: 'Blurred' }],
       documentReviews: [
         { field: 'govIdFrontUrl', decision: 'FLAGGED', note: 'Blurred' },

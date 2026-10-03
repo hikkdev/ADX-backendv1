@@ -100,7 +100,7 @@ beforeEach(() => {
   pricing.citySupport.mockResolvedValue({ support: 'ACTIVE', resolved: true, stage: 'LAUNCHED', switches: OPEN, city: { slug: 'pune', name: 'Pune' } });
   rateCards.floorFor.mockResolvedValue(null);
   listings.assertCanCreateForPublisher.mockResolvedValue(undefined);
-  integrations.getEffectiveMapsConfig.mockResolvedValue({ provider: 'OSM', osm: resolveOsmConfig({ contactEmail: 'maps@adx.example' }) });
+  integrations.getEffectiveMapsConfig.mockResolvedValue({ provider: 'OSM', osm: resolveOsmConfig({ contactEmail: 'maps@adx.in' }) });
 });
 
 afterEach(() => {
@@ -138,9 +138,9 @@ describe('Z-B: the listing importer with OpenStreetMap selected', () => {
     expect(url.searchParams.get('q')).toBe('44, FC Road, Pune');
     expect(url.searchParams.get('countrycodes')).toBe('in');
     expect(url.searchParams.get('limit')).toBe('1');
-    expect(url.searchParams.get('email')).toBe('maps@adx.example');
+    expect(url.searchParams.get('email')).toBe('maps@adx.in');
     const headers = (fetchMock.mock.calls[0]![1] as RequestInit).headers as Record<string, string>;
-    expect(headers['User-Agent']).toBe('ADX/1.0.0 (maps@adx.example)');
+    expect(headers['User-Agent']).toBe('ADX/1.0.0 (maps@adx.in)');
     expect(byRow[2]).toMatchObject({ outcome: 'CREATED' });
     expect(byRow[2]!.data).toMatchObject({ latitude: '18.5236', longitude: '73.841', geocoded: true });
 
@@ -157,7 +157,7 @@ describe('Z-B: the listing importer with OpenStreetMap selected', () => {
   });
 
   it('on a Nominatim of ops’ own the bucket is not asked and every row is geocoded', async () => {
-    integrations.getEffectiveMapsConfig.mockResolvedValue({ provider: 'OSM', osm: resolveOsmConfig({ contactEmail: 'maps@adx.example', nominatimBaseUrl: 'https://nominatim.adx.internal' }) });
+    integrations.getEffectiveMapsConfig.mockResolvedValue({ provider: 'OSM', osm: resolveOsmConfig({ contactEmail: 'maps@adx.in', nominatimBaseUrl: 'https://nominatim.adx.internal' }) });
     const fetchMock = vi.fn<AnyFn>(async () => ({ ok: true, status: 200, json: async () => NOMINATIM_FC_ROAD }));
     vi.stubGlobal('fetch', fetchMock);
     await validateListingImport(
